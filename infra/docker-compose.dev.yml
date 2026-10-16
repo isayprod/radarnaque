@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: radarnaque
       POSTGRES_DB: radarnaque
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
@@ -15,6 +15,18 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Origine unique http://localhost:8080 : /auth/* → auth (hôte:3000), /api/* → api
+  # (hôte:8000), le reste → apps/site/dist. Voir Caddyfile.dev.
+  caddy:
+    image: caddy:2
+    ports:
+      - "127.0.0.1:8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro
+      - ../apps/site/dist:/srv/site:ro
 
 volumes:
   postgres-data:

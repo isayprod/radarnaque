@@ -1,0 +1,31 @@
+# Caddy de développement : une seule origine http://localhost:8080.
+# auth (port 3000) et api (port 8000) tournent sur l'hôte ; le site est servi depuis
+# apps/site/dist (monté en lecture seule dans /srv/site).
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	# Page de retour du lien magique : chemins EXACTS, déclarés avant /auth/*.
+	# Jamais de joker : Better Auth possède /auth/callback/:provider.
+	@callback path /auth/callback /auth/callback/
+	handle @callback {
+		root * /srv/site
+		rewrite * /auth/callback/index.html
+		file_server
+	}
+
+	handle /auth/* {
+		reverse_proxy host.docker.internal:3000
+	}
+
+	handle /api/* {
+		reverse_proxy host.docker.internal:8000
+	}
+
+	handle {
+		root * /srv/site
+		file_server
+	}
+}
