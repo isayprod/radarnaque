@@ -1,6 +1,7 @@
 {
 	"name": "radarnaque",
 	"private": true,
+	"type": "module",
 	"packageManager": "pnpm@10.26.1",
 	"engines": {
 		"node": ">=24"
@@ -10,9 +11,19 @@
 		"gen:api": "bash scripts/gen-api.sh",
 		"check:api": "bash scripts/gen-api.sh --check",
 		"test": "pnpm -r test",
-		"db:up": "docker compose -f infra/docker-compose.dev.yml up -d postgres"
+		"db:up": "docker compose -f infra/docker-compose.dev.yml up -d postgres",
+		"dev:keys": "node scripts/dev-keys.mjs",
+		"dev:auth": "cd services/auth && NODE_ENV=development AUTH_MIGRATE_ON_START=1 tsx watch --env-file=../../infra/.env src/server.ts",
+		"dev:api": "cd services/api && uv run --env-file ../../infra/.env alembic upgrade head && uv run --env-file ../../infra/.env uvicorn --reload --port 8000 --factory radarnaque_api.main:create_app",
+		"dev:site": "cd apps/site && node --env-file=../../infra/.env node_modules/vite/bin/vite.js build --watch",
+		"dev:ext": "pnpm --filter extension dev",
+		"e2e:login": "tsx scripts/e2e-login.ts",
+		"typecheck:scripts": "tsc -p scripts"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.5.15"
+		"@biomejs/biome": "^2.5.15",
+		"@types/node": "^24.19.2",
+		"tsx": "^4.23.15",
+		"typescript": "~6.0.3"
 	}
 }
