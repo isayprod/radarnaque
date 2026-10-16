@@ -109,13 +109,86 @@ async def test_unknown_kid_refetches_once_per_interval():
     assert fetcher.calls == 4
 
 
-async def test_fetch_failure_is_401():
+async def assert_unavailable(v: JwtVerifier, token: str) -> None:
+    with pytest.raises(ApiError) as exc:
+        await v.verify(token)
+    assert exc.value.status == 503
+    assert exc.value.code == "auth_unavailable"
+
+
+class FlakyFetcher(Fetcher):
+    """Échoue (exception ou réponse mal formée) tant que `failure` n'est pas None."""
+
+    def __init__(self, *pairs: KeyPair) -> None:
+        super().__init__(*pairs)
+        self.failure: Exception | object | None = None
+
+    async def __call__(self) -> dict:
+        self.calls += 1
+        if isinstance(self.failure, Exception):
+            raise self.failure
+        if self.failure is not None:
+            return self.failure  # type: ignore[return-value]
+        return self.jwks
+
+
+async def test_fetch_failure_is_503_then_recovers_immediately():
     k1 = KeyPair.generate("k1")
+    fetcher, clock = FlakyFetcher(k1), Clock()
+    fetcher.failure = RuntimeError("jwks indisponible")
+    v = verifier(fetcher, clock)
+    token = sign(k1, "u", ISS, AUD)
 
-    async def boom() -> dict:
-        raise RuntimeError("jwks indisponible")
+    await assert_unavailable(v, token)
+    assert fetcher.calls == 1
 
-    await assert_unauthenticated(JwtVerifier(boom, ISS, AUD), sign(k1, "u", ISS, AUD))
+    # L'auth revient : pas de blocage de 60 s, la requête suivante réussit.
+    fetcher.failure = None
+    clock.now = 1
+    assert await v.verify(token) == "u"
+    assert fetcher.calls == 2
+
+
+@pytest.mark.parametrize("bad", [[], ["x"], {}, {"keys": None}, {"keys": {"a": 1}}, "nope"])
+async def test_malformed_jwks_is_503_and_not_cached(bad):
+    k1 = KeyPair.generate("k1")
+    fetcher, clock = FlakyFetcher(k1), Clock()
+    fetcher.failure = bad
+    v = verifier(fetcher, clock)
+    token = sign(k1, "u", ISS, AUD)
+
+    await assert_unavailable(v, token)
+    fetcher.failure = None
+    assert await v.verify(token) == "u"
+
+
+async def test_failed_rotation_refetch_is_503_but_known_kid_still_works():
+    k1, k2 = KeyPair.generate("k1"), KeyPair.generate("k2")
+    fetcher, clock = FlakyFetcher(k1), Clock()
+    v = verifier(fetcher, clock)
+    assert await v.verify(sign(k1, "u", ISS, AUD)) == "u"
+
+    fetcher.failure = RuntimeError("down")
+    clock.now = 100
+    await assert_unavailable(v, sign(k2, "u", ISS, AUD))
+    # Un kid en cache n'a pas besoin du réseau ; un jeton forgé reste 401.
+    assert await v.verify(sign(k1, "u", ISS, AUD)) == "u"
+    await assert_unauthenticated(v, sign(k1, "u", ISS, AUD, alg="HS256"))
+
+    fetcher.failure = None
+    fetcher.jwks = make_jwks(k1, k2)
+    clock.now = 101
+    assert await v.verify(sign(k2, "u", ISS, AUD)) == "u"
+
+
+async def test_bad_token_stays_401_when_jwks_down():
+    k1 = KeyPair.generate("k1")
+    fetcher = FlakyFetcher(k1)
+    fetcher.failure = RuntimeError("down")
+    v = verifier(fetcher)
+    await assert_unauthenticated(v, "not-a-jwt")
+    await assert_unauthenticated(v, sign(k1, "u", ISS, AUD, alg="none"))
+    assert fetcher.calls == 0
 
 
 @pytest.fixture
@@ -153,9 +226,11 @@ async def test_require_internal_secret(app, client: httpx.AsyncClient):
     async def _internal() -> dict:
         return {"ok": True}
 
-    ok = await client.get("/_test/internal", headers={"X-Internal-Secret": "test-internal-secret"})
+    ok = await client.get(
+        "/_test/internal", headers={"X-Internal-Secret": "test-internal-secret-0123456789abcdef"}
+    )
     assert ok.status_code == 200
-    for headers in ({"X-Internal-Secret": "wrong"}, {}):
+    for headers in ({"X-Internal-Secret": "wrong"}, {"X-Internal-Secret": ""}, {}):
         r = await client.get("/_test/internal", headers=headers)
         assert r.status_code == 403
         assert r.json()["error"]["code"] == "forbidden"

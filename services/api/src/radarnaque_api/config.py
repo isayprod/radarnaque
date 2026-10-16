@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+MIN_INTERNAL_SECRET_LENGTH = 32
 _DRIVER = "postgresql+psycopg://"
 _ACCEPTED_PREFIXES = ("postgres://", "postgresql://", _DRIVER)
 
@@ -28,6 +29,15 @@ class Settings(BaseSettings):
     jwt_audience: str
     internal_api_secret: SecretStr
     env: Literal["development", "test", "production"] = "development"
+
+    @field_validator("internal_api_secret")
+    @classmethod
+    def _check_internal_secret(cls, value: SecretStr) -> SecretStr:
+        if len(value.get_secret_value()) < MIN_INTERNAL_SECRET_LENGTH:
+            raise ValueError(
+                f"INTERNAL_API_SECRET : au moins {MIN_INTERNAL_SECRET_LENGTH} caractères requis"
+            )
+        return value
 
     @field_validator("database_url")
     @classmethod
