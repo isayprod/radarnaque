@@ -2,10 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Locale } from "@radarnaque/shared";
 import type { Auth } from "./auth";
 import type { Mailer } from "./mail/mailer";
-import {
-	renderSignInEmail,
-	renderStandaloneSignInEmail,
-} from "./mail/templates";
+import { renderSignInEmail } from "./mail/templates";
 
 export interface SignInBagValue {
 	url?: string;
@@ -18,32 +15,29 @@ export interface SignInBagValue {
  */
 export const signInBag = new AsyncLocalStorage<SignInBagValue>();
 
-/** Callback `sendMagicLink` de Better Auth. */
-export async function onMagicLink(
-	url: string,
-	email: string,
-	mailer: Mailer,
-): Promise<void> {
-	const bag = signInBag.getStore();
-	if (bag) {
-		bag.url = url;
-		return;
-	}
-	await mailer.send({ to: email, ...renderStandaloneSignInEmail({ url }) });
+/**
+ * Hors de `startSignIn`, aucun email n'est envoyé : `/auth/start` est la seule route HTTP
+ * qui en envoie (limites par IP et par email). Les routes d'envoi de Better Auth sont
+ * désactivées (`disabledPaths`) ; ce refus couvre tout autre chemin oublié.
+ */
+function refuse(kind: string): never {
+	const message = `[auth] envoi d'un ${kind} refusé : hors de startSignIn, aucun email n'est envoyé`;
+	console.error(message);
+	throw new Error(message);
 }
 
-/** Callback `sendVerificationOTP` de Better Auth. */
-export async function onOtp(
-	otp: string,
-	email: string,
-	mailer: Mailer,
-): Promise<void> {
+/** Callback `sendMagicLink` de Better Auth : dépose le lien dans le `signInBag` courant. */
+export async function onMagicLink(url: string, _email: string): Promise<void> {
 	const bag = signInBag.getStore();
-	if (bag) {
-		bag.otp = otp;
-		return;
-	}
-	await mailer.send({ to: email, ...renderStandaloneSignInEmail({ otp }) });
+	if (!bag) refuse("lien magique");
+	bag.url = url;
+}
+
+/** Callback `sendVerificationOTP` de Better Auth : dépose le code dans le `signInBag` courant. */
+export async function onOtp(otp: string, _email: string): Promise<void> {
+	const bag = signInBag.getStore();
+	if (!bag) refuse("code OTP");
+	bag.otp = otp;
 }
 
 /**

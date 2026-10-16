@@ -2,7 +2,6 @@ import { betterAuth } from "better-auth";
 import { admin, bearer, emailOTP, jwt, magicLink } from "better-auth/plugins";
 import type { Pool } from "pg";
 import type { Env } from "./env";
-import type { Mailer } from "./mail/mailer";
 import { onMagicLink, onOtp } from "./sign-in";
 
 /** Durée de validité commune du lien magique et du code OTP (secondes). */
@@ -16,20 +15,27 @@ export function trustedOrigins(
 	return [env.PUBLIC_URL, `chrome-extension://${env.EXTENSION_ID}`];
 }
 
+/**
+ * Routes HTTP de Better Auth qui enverraient un email. `/auth/start` est la seule route
+ * d'envoi (lien + code en un email, limitée par IP et par email). `disabledPaths` n'agit
+ * que sur `auth.handler` : `startSignIn` appelle toujours ces endpoints via `auth.api`.
+ */
+export const DISABLED_EMAIL_PATHS = [
+	"/sign-in/magic-link",
+	"/email-otp/send-verification-otp",
+	"/email-otp/request-password-reset",
+	"/forget-password/email-otp",
+	"/email-otp/request-email-change",
+];
+
 export interface CreateAuthOptions {
 	pool: Pool;
 	env: Env;
-	mailer: Mailer;
 	/** Appelé après la création d'un utilisateur (bootstrap côté API). Ses erreurs sont journalisées, jamais propagées. */
 	onUserCreated: (userId: string) => Promise<void>;
 }
 
-export function createAuth({
-	pool,
-	env,
-	mailer,
-	onUserCreated,
-}: CreateAuthOptions) {
+export function createAuth({ pool, env, onUserCreated }: CreateAuthOptions) {
 	return betterAuth({
 		appName: "Radarnaque",
 		basePath: "/auth",
@@ -37,6 +43,7 @@ export function createAuth({
 		secret: env.BETTER_AUTH_SECRET,
 		database: pool,
 		trustedOrigins: trustedOrigins(env),
+		disabledPaths: DISABLED_EMAIL_PATHS,
 		rateLimit: { enabled: true },
 		advanced: {
 			// Derrière Caddy : l'IP du client (rate limiting, sessions) vient de X-Forwarded-For.
@@ -63,15 +70,15 @@ export function createAuth({
 		},
 		plugins: [
 			// Les deux callbacks passent par sign-in.ts : dans `/auth/start`, ils alimentent un
-			// email unique (lien + code) ; ailleurs, chacun envoie un email autonome.
+			// email unique (lien + code) ; ailleurs, ils refusent d'envoyer.
 			magicLink({
 				expiresIn: SIGN_IN_TTL_SECONDS,
-				sendMagicLink: ({ email, url }) => onMagicLink(url, email, mailer),
+				sendMagicLink: ({ email, url }) => onMagicLink(url, email),
 			}),
 			emailOTP({
 				otpLength: OTP_LENGTH,
 				expiresIn: SIGN_IN_TTL_SECONDS,
-				sendVerificationOTP: ({ email, otp }) => onOtp(otp, email, mailer),
+				sendVerificationOTP: ({ email, otp }) => onOtp(otp, email),
 			}),
 			bearer(),
 			jwt({

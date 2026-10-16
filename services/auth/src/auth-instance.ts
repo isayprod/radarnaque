@@ -40,7 +40,6 @@ export const mailer = makeMailer();
 export const auth = createAuth({
 	pool,
 	env,
-	mailer,
 	onUserCreated: makeBootstrapClient(
 		env.API_INTERNAL_URL,
 		env.INTERNAL_API_SECRET,
