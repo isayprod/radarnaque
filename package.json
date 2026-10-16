@@ -11,6 +11,8 @@
 		"gen:api": "bash scripts/gen-api.sh",
 		"check:api": "bash scripts/gen-api.sh --check",
 		"test": "pnpm -r test",
+		"test:api": "cd services/api && uv run pytest",
+		"test:all": "pnpm test && pnpm test:api",
 		"db:up": "docker compose -f infra/docker-compose.dev.yml up -d postgres",
 		"dev:keys": "node scripts/dev-keys.mjs",
 		"dev:auth": "cd services/auth && NODE_ENV=development AUTH_MIGRATE_ON_START=1 tsx watch --env-file=../../infra/.env src/server.ts",
