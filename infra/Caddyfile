@@ -17,6 +17,10 @@
 		Referrer-Policy no-referrer
 	}
 
+	# HSTS uniquement sur une connexion TLS : absent en http://localhost (essai local).
+	@secure protocol https
+	header @secure Strict-Transport-Security "max-age=31536000"
+
 	# Page de retour du lien magique : chemins EXACTS, déclarés avant /auth/*.
 	# Jamais de joker : Better Auth possède /auth/callback/:provider.
 	@callback path /auth/callback /auth/callback/
