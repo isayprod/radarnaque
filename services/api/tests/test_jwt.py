@@ -181,6 +181,42 @@ async def test_failed_rotation_refetch_is_503_but_known_kid_still_works():
     assert await v.verify(sign(k2, "u", ISS, AUD)) == "u"
 
 
+@pytest.mark.parametrize(
+    "unusable",
+    [{"keys": []}, {"keys": [{"kid": "k2", "kty": "nope"}, {"kty": "OKP"}, "x"]}],
+)
+async def test_jwks_without_readable_key_keeps_cache_and_is_503(unusable):
+    k1, k2 = KeyPair.generate("k1"), KeyPair.generate("k2")
+    fetcher, clock = FlakyFetcher(k1), Clock()
+    v = verifier(fetcher, clock)
+    assert await v.verify(sign(k1, "u", ISS, AUD)) == "u"
+    assert fetcher.calls == 1
+
+    # Réponse 200 sans aucune clé utilisable : échec de chargement, pas un JWKS vide.
+    fetcher.failure = unusable
+    clock.now = 100
+    await assert_unavailable(v, sign(k2, "u", ISS, AUD))
+    assert fetcher.calls == 2
+    # Le cache précédent est conservé : k1 marche sans réseau.
+    assert await v.verify(sign(k1, "u", ISS, AUD)) == "u"
+    assert fetcher.calls == 2
+
+    # L'échéance n'est pas consommée : la requête suivante réessaie aussitôt.
+    fetcher.failure = None
+    fetcher.jwks = make_jwks(k1, k2)
+    clock.now = 101
+    assert await v.verify(sign(k2, "u", ISS, AUD)) == "u"
+    assert fetcher.calls == 3
+
+
+async def test_first_jwks_without_readable_key_is_503():
+    k1 = KeyPair.generate("k1")
+    fetcher = FlakyFetcher(k1)
+    fetcher.failure = {"keys": []}
+    v = verifier(fetcher, Clock())
+    await assert_unavailable(v, sign(k1, "u", ISS, AUD))
+
+
 async def test_bad_token_stays_401_when_jwks_down():
     k1 = KeyPair.generate("k1")
     fetcher = FlakyFetcher(k1)
