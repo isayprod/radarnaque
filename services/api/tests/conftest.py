@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 from alembic.config import Config
 from fastapi import FastAPI
+from jwt_helpers import KeyPair, make_jwks, sign
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from testcontainers.community.postgres import PostgresContainer
@@ -82,9 +83,20 @@ def settings(pg_url: str) -> Settings:
     )
 
 
+@pytest.fixture(scope="session")
+def test_key_pair() -> KeyPair:
+    """Paire de clés Ed25519 dont la partie publique est servie par le JWKS de test."""
+    return KeyPair.generate("test-key")
+
+
 @pytest_asyncio.fixture
-async def app(settings: Settings) -> AsyncIterator[FastAPI]:
-    application = create_app(settings)
+async def app(settings: Settings, test_key_pair: KeyPair) -> AsyncIterator[FastAPI]:
+    jwks = make_jwks(test_key_pair)
+
+    async def jwks_fetcher() -> dict:
+        return jwks
+
+    application = create_app(settings, jwks_fetcher=jwks_fetcher)
     # ASGITransport n'exécute pas le lifespan : on le fait ici (engine dans app.state).
     async with application.router.lifespan_context(application):
         yield application
@@ -118,3 +130,14 @@ async def make_user(db: AsyncSession) -> Callable[..., Awaitable[str]]:
         return uid
 
     return _make
+
+
+@pytest.fixture
+def bearer(settings: Settings, test_key_pair: KeyPair) -> Callable[[str], dict[str, str]]:
+    """Renvoie `bearer(uid)` -> en-tête Authorization avec un JWT valide signé pour `uid`."""
+
+    def _bearer(uid: str) -> dict[str, str]:
+        token = sign(test_key_pair, uid, settings.jwt_issuer, settings.jwt_audience)
+        return {"Authorization": f"Bearer {token}"}
+
+    return _bearer
