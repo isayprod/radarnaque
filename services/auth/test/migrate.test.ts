@@ -4,7 +4,13 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { createAuth } from "../src/auth";
 import { MemoryMailer } from "../src/mail/mailer";
 import { runAuthMigrations } from "../src/migrate";
-import { authPool, type StartedPg, startPg, testEnv } from "./helpers";
+import {
+	authPool,
+	migrateFresh,
+	type StartedPg,
+	startPg,
+	testEnv,
+} from "./helpers";
 
 let db: StartedPg;
 let pool: pg.Pool;
@@ -34,7 +40,7 @@ describe("auth migrations", () => {
 			mailer: new MemoryMailer(),
 			onUserCreated: async () => {},
 		});
-		await runAuthMigrations(auth);
+		await migrateFresh(auth);
 		// Idempotent : un second passage ne doit rien casser.
 		await runAuthMigrations(auth);
 

@@ -3,11 +3,18 @@ import { admin, bearer, emailOTP, jwt, magicLink } from "better-auth/plugins";
 import type { Pool } from "pg";
 import type { Env } from "./env";
 import type { Mailer } from "./mail/mailer";
-import { escapeHtml } from "./mail/templates";
+import { onMagicLink, onOtp } from "./sign-in";
 
 /** Durée de validité commune du lien magique et du code OTP (secondes). */
 export const SIGN_IN_TTL_SECONDS = 600;
 export const OTP_LENGTH = 6;
+
+/** Origines autorisées : le site (origine unique) et l'extension. */
+export function trustedOrigins(
+	env: Pick<Env, "PUBLIC_URL" | "EXTENSION_ID">,
+): string[] {
+	return [env.PUBLIC_URL, `chrome-extension://${env.EXTENSION_ID}`];
+}
 
 export interface CreateAuthOptions {
 	pool: Pool;
@@ -29,8 +36,15 @@ export function createAuth({
 		baseURL: env.PUBLIC_URL,
 		secret: env.BETTER_AUTH_SECRET,
 		database: pool,
-		trustedOrigins: [env.PUBLIC_URL, `chrome-extension://${env.EXTENSION_ID}`],
+		trustedOrigins: trustedOrigins(env),
 		rateLimit: { enabled: true },
+		advanced: {
+			// Derrière Caddy : l'IP du client (rate limiting, sessions) vient de X-Forwarded-For.
+			ipAddress: { ipAddressHeaders: ["x-forwarded-for"] },
+			// Better Auth désactive ce contrôle quand NODE_ENV=test : on le force pour que
+			// les tests vérifient le comportement de production.
+			disableOriginCheck: false,
+		},
 		databaseHooks: {
 			user: {
 				create: {
@@ -48,29 +62,16 @@ export function createAuth({
 			},
 		},
 		plugins: [
-			// TODO(tâche 8) : déléguer à sign-in.ts (email combiné lien + code, FR/NL).
+			// Les deux callbacks passent par sign-in.ts : dans `/auth/start`, ils alimentent un
+			// email unique (lien + code) ; ailleurs, chacun envoie un email autonome.
 			magicLink({
 				expiresIn: SIGN_IN_TTL_SECONDS,
-				sendMagicLink: async ({ email, url }) => {
-					await mailer.send({
-						to: email,
-						subject: "Radarnaque",
-						html: `<p><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>`,
-						text: url,
-					});
-				},
+				sendMagicLink: ({ email, url }) => onMagicLink(url, email, mailer),
 			}),
 			emailOTP({
 				otpLength: OTP_LENGTH,
 				expiresIn: SIGN_IN_TTL_SECONDS,
-				sendVerificationOTP: async ({ email, otp }) => {
-					await mailer.send({
-						to: email,
-						subject: "Radarnaque",
-						html: `<p>${escapeHtml(otp)}</p>`,
-						text: otp,
-					});
-				},
+				sendVerificationOTP: ({ email, otp }) => onOtp(otp, email, mailer),
 			}),
 			bearer(),
 			jwt({

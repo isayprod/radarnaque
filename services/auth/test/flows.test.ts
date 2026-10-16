@@ -1,0 +1,428 @@
+import { randomUUID } from "node:crypto";
+import { createLocalJWKSet, type JSONWebKeySet, jwtVerify } from "jose";
+import type pg from "pg";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import { createApp } from "../src/app";
+import { createAuth } from "../src/auth";
+import type { Env } from "../src/env";
+import { type MailMessage, MemoryMailer } from "../src/mail/mailer";
+import {
+	authPool,
+	migrateFresh,
+	type StartedPg,
+	startPg,
+	testEnv,
+} from "./helpers";
+
+let db: StartedPg;
+let pool: pg.Pool;
+
+beforeAll(async () => {
+	db = await startPg();
+	pool = authPool(db.connectionString);
+	await migrateFresh(
+		createAuth({
+			pool,
+			env: testEnv({ DATABASE_URL: db.connectionString }),
+			mailer: new MemoryMailer(),
+			onUserCreated: async () => {},
+		}),
+	);
+}, 120_000);
+
+afterAll(async () => {
+	await pool?.end();
+	await db?.stop();
+});
+
+interface Harness {
+	app: ReturnType<typeof createApp>;
+	mailer: MemoryMailer;
+	env: Env;
+}
+
+function setup({
+	onUserCreated = async () => {},
+	env: overrides = {},
+	dev = false,
+}: {
+	onUserCreated?: (id: string) => Promise<void>;
+	env?: Partial<Env>;
+	dev?: boolean;
+} = {}): Harness {
+	const env = testEnv({ DATABASE_URL: db.connectionString, ...overrides });
+	const mailer = new MemoryMailer();
+	const auth = createAuth({ pool, env, mailer, onUserCreated });
+	const app = createApp({
+		auth,
+		mailer,
+		env,
+		devMailer: dev ? mailer : undefined,
+	});
+	return { app, mailer, env };
+}
+
+/**
+ * Le rate limiting de Better Auth est en mémoire, partagé par tout le processus et
+ * indexé par IP : chaque requête reçoit sa propre IP (X-Forwarded-For, comme derrière Caddy).
+ */
+let ipCounter = 0;
+function call(
+	h: Harness,
+	path: string,
+	init: {
+		method?: string;
+		json?: unknown;
+		headers?: Record<string, string>;
+	} = {},
+): Promise<Response> {
+	ipCounter++;
+	const headers = new Headers(init.headers);
+	headers.set(
+		"x-forwarded-for",
+		`10.${(ipCounter >> 16) & 255}.${(ipCounter >> 8) & 255}.${ipCounter & 255}`,
+	);
+	if (init.json !== undefined) headers.set("content-type", "application/json");
+	return Promise.resolve(
+		h.app.request(path, {
+			method: init.method ?? (init.json !== undefined ? "POST" : "GET"),
+			headers,
+			body: init.json !== undefined ? JSON.stringify(init.json) : undefined,
+			redirect: "manual",
+		}),
+	);
+}
+
+/** Corps JSON des réponses de ces routes (champs selon la route). */
+interface Body {
+	ok?: boolean;
+	status?: string;
+	token?: string;
+	url?: string;
+	otp?: string;
+	user?: { id: string };
+	error?: { code: string; message: string };
+}
+
+const json = (res: Response) => res.json() as Promise<Body>;
+
+const extensionOrigin = (h: Harness) =>
+	`chrome-extension://${h.env.EXTENSION_ID}`;
+
+function uniqueEmail(prefix: string): string {
+	return `${prefix}-${randomUUID().slice(0, 8)}@test.be`;
+}
+
+function parseSignIn(msg: MailMessage | undefined): {
+	url: string;
+	otp: string;
+} {
+	const text = msg?.text ?? "";
+	const url = text.match(/https?:\/\/\S+\/auth\/magic-link\/verify\?\S+/)?.[0];
+	const otp = text.replace(url ?? "", "").match(/\b(\d{6})\b/)?.[1];
+	if (!url || !otp) throw new Error(`no link/code in email: ${text}`);
+	return { url, otp };
+}
+
+async function start(
+	h: Harness,
+	email: string,
+	locale = "fr",
+): Promise<{ url: string; otp: string }> {
+	const res = await call(h, "/auth/start", { json: { email, locale } });
+	expect(res.status).toBe(200);
+	return parseSignIn(h.mailer.last(email));
+}
+
+async function otpSignIn(h: Harness, email: string): Promise<Response> {
+	const { otp } = await start(h, email);
+	return call(h, "/auth/sign-in/email-otp", {
+		json: { email, otp },
+		headers: { origin: extensionOrigin(h) },
+	});
+}
+
+describe("POST /auth/start", () => {
+	test("start sends exactly one email with link and 6-digit code", async () => {
+		const h = setup();
+		const res = await call(h, "/auth/start", {
+			json: { email: " Alice@Test.BE ", locale: "nl" },
+			headers: { origin: extensionOrigin(h) },
+		});
+		expect(res.status).toBe(200);
+		expect(await json(res)).toEqual({ ok: true });
+		expect(h.mailer.messages).toHaveLength(1);
+		const [msg] = h.mailer.messages;
+		expect(msg.to).toBe("alice@test.be");
+		expect(msg.subject).toBe("Uw aanmelding bij Radarnaque");
+		const { url, otp } = parseSignIn(msg);
+		expect(url).toContain(`${h.env.PUBLIC_URL}/auth/magic-link/verify?token=`);
+		expect(new URL(url).searchParams.get("callbackURL")).toBe("/auth/callback");
+		expect(otp).toMatch(/^\d{6}$/);
+	});
+
+	test("magic-link and OTP verification rows expire 600 s after creation", async () => {
+		const h = setup();
+		const email = uniqueEmail("ttl");
+		const before = Date.now();
+		await start(h, email);
+		const after = Date.now();
+		const rows = await pool.query<{ identifier: string; expiresAt: Date }>(
+			`SELECT identifier, "expiresAt" FROM verification WHERE identifier = $1 OR value LIKE $2`,
+			[`sign-in-otp-${email}`, `%"email":"${email}"%`],
+		);
+		expect(rows.rowCount).toBe(2);
+		for (const row of rows.rows) {
+			const expires = row.expiresAt.getTime();
+			expect(expires).toBeGreaterThanOrEqual(before + 600_000 - 2_000);
+			expect(expires).toBeLessThanOrEqual(after + 600_000 + 2_000);
+		}
+	});
+
+	test("unknown or known email both return 200 {ok:true}", async () => {
+		const h = setup();
+		const known = uniqueEmail("known");
+		expect((await otpSignIn(h, known)).status).toBe(200);
+		const unknown = uniqueEmail("unknown");
+		for (const email of [known, unknown]) {
+			const res = await call(h, "/auth/start", {
+				json: { email, locale: "fr" },
+			});
+			expect(res.status).toBe(200);
+			expect(await json(res)).toEqual({ ok: true });
+			expect(parseSignIn(h.mailer.last(email)).otp).toMatch(/^\d{6}$/);
+		}
+	});
+
+	test("invalid email → 400 invalid_email, nothing sent", async () => {
+		const h = setup();
+		for (const email of ["", "   ", "not-an-email", "a@b", 42]) {
+			const res = await call(h, "/auth/start", {
+				json: { email, locale: "fr" },
+			});
+			expect(res.status).toBe(400);
+			expect((await json(res)).error?.code).toBe("invalid_email");
+		}
+		expect(h.mailer.messages).toHaveLength(0);
+	});
+
+	test("6th start within 15 min for same email → 429", async () => {
+		const h = setup();
+		const email = uniqueEmail("limit");
+		for (let i = 0; i < 5; i++) {
+			// Variations de casse/espaces : même compteur après normalisation.
+			const res = await call(h, "/auth/start", {
+				json: {
+					email: i % 2 ? ` ${email.toUpperCase()} ` : email,
+					locale: "fr",
+				},
+			});
+			expect(res.status).toBe(200);
+		}
+		const res = await call(h, "/auth/start", { json: { email, locale: "fr" } });
+		expect(res.status).toBe(429);
+		expect((await json(res)).error?.code).toBe("rate_limited");
+		expect(h.mailer.messages).toHaveLength(5);
+		// Les autres adresses ne sont pas affectées.
+		expect(
+			(
+				await call(h, "/auth/start", {
+					json: { email: uniqueEmail("other"), locale: "fr" },
+				})
+			).status,
+		).toBe(200);
+	});
+});
+
+describe("untrusted origins", () => {
+	test("request from untrusted Origin is rejected", async () => {
+		const h = setup();
+		const email = uniqueEmail("evil");
+		const res = await call(h, "/auth/start", {
+			json: { email, locale: "fr" },
+			headers: { origin: "https://evil.example" },
+		});
+		expect(res.status).toBe(403);
+		expect(h.mailer.messages).toHaveLength(0);
+
+		// Même règle pour les routes Better Auth (ici, la connexion par code).
+		const { otp } = await start(h, email);
+		const signIn = await call(h, "/auth/sign-in/email-otp", {
+			json: { email, otp },
+			headers: { origin: "https://evil.example" },
+		});
+		expect(signIn.status).toBe(403);
+		expect(signIn.headers.get("set-auth-token")).toBeNull();
+	});
+});
+
+describe("OTP sign-in", () => {
+	test("OTP sign-in returns set-auth-token, usable to get a JWT", async () => {
+		const h = setup();
+		const email = uniqueEmail("otp");
+		const res = await otpSignIn(h, email);
+		expect(res.status).toBe(200);
+		const body = await json(res);
+		const token = res.headers.get("set-auth-token");
+		expect(token).toBeTruthy();
+
+		const tokenRes = await call(h, "/auth/token", {
+			headers: { authorization: `Bearer ${token}` },
+		});
+		expect(tokenRes.status).toBe(200);
+		const { token: jwt } = await json(tokenRes);
+		const jwks = (await (await call(h, "/auth/jwks")).json()) as JSONWebKeySet;
+		const { payload, protectedHeader } = await jwtVerify(
+			String(jwt),
+			createLocalJWKSet(jwks),
+			{
+				issuer: h.env.PUBLIC_URL,
+				audience: h.env.PUBLIC_URL,
+			},
+		);
+		expect(payload.sub).toBe(body.user?.id);
+		expect((payload.exp ?? 0) - (payload.iat ?? 0)).toBe(900);
+		expect(protectedHeader.alg).toBe("EdDSA");
+	});
+
+	test("wrong OTP → non-2xx and no set-auth-token header", async () => {
+		const h = setup();
+		const email = uniqueEmail("wrong");
+		const { otp } = await start(h, email);
+		const wrong = otp === "000000" ? "111111" : "000000";
+		const res = await call(h, "/auth/sign-in/email-otp", {
+			json: { email, otp: wrong },
+			headers: { origin: extensionOrigin(h) },
+		});
+		expect(res.ok).toBe(false);
+		expect(res.headers.get("set-auth-token")).toBeNull();
+	});
+});
+
+describe("GET /auth/extension/session-token", () => {
+	test("magic link verify then /auth/extension/session-token returns bearer token", async () => {
+		const h = setup();
+		const email = uniqueEmail("link");
+		const { url } = await start(h, email);
+		const verifyUrl = new URL(url);
+		const verify = await call(h, verifyUrl.pathname + verifyUrl.search);
+		expect(verify.status).toBe(302);
+		expect(verify.headers.get("location")).toBe(
+			`${h.env.PUBLIC_URL}/auth/callback`,
+		);
+		const cookie = verify.headers
+			.getSetCookie()
+			.map((c) => c.split(";")[0])
+			.join("; ");
+		expect(cookie).toContain("session_token=");
+
+		const res = await call(h, "/auth/extension/session-token", {
+			headers: { cookie },
+		});
+		expect(res.status).toBe(200);
+		expect(res.headers.get("cache-control")).toBe("no-store");
+		const { token } = await json(res);
+		expect(typeof token).toBe("string");
+
+		const jwtRes = await call(h, "/auth/token", {
+			headers: { authorization: `Bearer ${token}` },
+		});
+		expect(jwtRes.status).toBe(200);
+		expect((await json(jwtRes)).token).toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/);
+	});
+
+	test("session-token without session → 401", async () => {
+		const h = setup();
+		const res = await call(h, "/auth/extension/session-token");
+		expect(res.status).toBe(401);
+		expect(res.headers.get("cache-control")).toBe("no-store");
+		expect((await json(res)).error?.code).toBe("unauthenticated");
+	});
+});
+
+describe("user creation hook", () => {
+	test("new user triggers onUserCreated exactly once; failing hook does not break sign-in", async () => {
+		const created: string[] = [];
+		const h = setup({
+			onUserCreated: async (id) => {
+				created.push(id);
+			},
+		});
+		const email = uniqueEmail("hook");
+		const first = await otpSignIn(h, email);
+		expect(first.status).toBe(200);
+		const userId = (await json(first)).user?.id;
+		expect((await otpSignIn(h, email)).status).toBe(200);
+		expect(created).toEqual([userId]);
+
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const failing = setup({
+				onUserCreated: async () => {
+					throw new Error("api down");
+				},
+			});
+			const res = await otpSignIn(failing, uniqueEmail("hook-fail"));
+			expect(res.status).toBe(200);
+			expect(res.headers.get("set-auth-token")).toBeTruthy();
+			expect(errors).toHaveBeenCalled();
+		} finally {
+			errors.mockRestore();
+		}
+	});
+});
+
+describe("misc routes", () => {
+	test("health", async () => {
+		const res = await call(setup(), "/auth/health");
+		expect(res.status).toBe(200);
+		expect(await json(res)).toEqual({ status: "ok" });
+	});
+
+	test("dev last-email route returns link and code in development", async () => {
+		const h = setup({ env: { NODE_ENV: "development" }, dev: true });
+		const email = uniqueEmail("dev");
+		const sent = await start(h, email);
+		const res = await call(
+			h,
+			`/auth/dev/last-email?to=${encodeURIComponent(email)}`,
+		);
+		expect(res.status).toBe(200);
+		expect(await json(res)).toEqual(sent);
+		expect(
+			(
+				await call(
+					h,
+					`/auth/dev/last-email?to=${encodeURIComponent(uniqueEmail("none"))}`,
+				)
+			).status,
+		).toBe(404);
+	});
+
+	test("dev last-email route is 404 when NODE_ENV=production", async () => {
+		for (const NODE_ENV of ["production", "test"] as const) {
+			const h = setup({ env: { NODE_ENV }, dev: true });
+			const email = uniqueEmail("prod");
+			await start(h, email);
+			const res = await call(
+				h,
+				`/auth/dev/last-email?to=${encodeURIComponent(email)}`,
+			);
+			expect(res.status).toBe(404);
+		}
+	});
+
+	test("direct Better Auth magic-link endpoint still sends a standalone email", async () => {
+		const h = setup();
+		const email = uniqueEmail("direct");
+		const res = await call(h, "/auth/sign-in/magic-link", {
+			json: { email, callbackURL: "/auth/callback" },
+			headers: { origin: h.env.PUBLIC_URL },
+		});
+		expect(res.status).toBe(200);
+		expect(h.mailer.messages).toHaveLength(1);
+		expect(h.mailer.last(email)?.text).toContain(
+			"/auth/magic-link/verify?token=",
+		);
+	});
+});
