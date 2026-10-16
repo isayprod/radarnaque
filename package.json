@@ -7,6 +7,8 @@
 	},
 	"scripts": {
 		"lint": "biome check .",
+		"gen:api": "bash scripts/gen-api.sh",
+		"check:api": "bash scripts/gen-api.sh --check",
 		"test": "pnpm -r test",
 		"db:up": "docker compose -f infra/docker-compose.dev.yml up -d postgres"
 	},
