@@ -81,3 +81,95 @@ et enchaîne `POST /auth/start` → `GET /auth/dev/last-email` (code) →
 `GET /api/me` (essai, 3 scans restants). Il affiche `E2E LOGIN OK` ; sinon il nomme
 l'étape en échec avec le statut HTTP et le corps de la réponse, et sort avec le code 1.
 Vérification de types : `pnpm typecheck:scripts`.
+
+## Déployer
+
+Production : un serveur (Allemagne) avec Docker et Docker Compose, un enregistrement DNS
+`radarnaque.mostconsult.be` qui pointe vers lui, et les ports 80 et 443 ouverts (Let's
+Encrypt valide le certificat par le port 80). Caddy est le seul service qui publie des
+ports ; postgres, auth (3000) et api (8000) restent sur le réseau interne de la
+composition. Les routes sont celles du dev : `/auth/*` → auth, `/api/*` → api, le reste →
+le site compilé (`apps/site`), construit dans l'image Caddy.
+
+### 1. Configuration
+
+```sh
+git clone <dépôt> radarnaque && cd radarnaque
+cp infra/.env.example infra/.env
+```
+
+Dans `infra/.env`, définir au minimum :
+
+- `PUBLIC_URL=https://radarnaque.mostconsult.be` et `SITE_ADDRESS=radarnaque.mostconsult.be` ;
+- `POSTGRES_PASSWORD` (`openssl rand -hex 24`), `BETTER_AUTH_SECRET` et
+  `INTERNAL_API_SECRET` (`openssl rand -base64 32`) ;
+- `EXTENSION_ID` et `VITE_EXTENSION_ID` : identifiant de l'extension publiée ;
+- `RESEND_API_KEY` et `MAIL_FROM` (domaine vérifié chez Resend) ; `OPENROUTER_API_KEY` ;
+- les variables de sauvegarde (voir plus bas).
+
+La composition fixe elle-même `NODE_ENV=production`, `ENV=production`, `DATABASE_URL`
+(`postgres:5432`), `API_INTERNAL_URL=http://api:8000` et
+`JWKS_URL=http://auth:3000/auth/jwks` : les valeurs de dev de ces variables sont ignorées.
+
+### 2. Lancer
+
+```sh
+docker compose -f infra/docker-compose.yml --env-file infra/.env config -q   # valide la configuration
+docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --build
+```
+
+L'ordre est garanti : postgres sain → `migrate` (migrations Better Auth, schéma `auth`) →
+`migrate-api` (`alembic upgrade head`, schéma `app`) → `auth` et `api` → `caddy`. Les deux
+services `migrate*` s'arrêtent après leur travail (`restart: "no"`). Pour mettre à jour :
+`git pull`, puis la même commande `up -d --build`. Suivi : `docker compose -f infra/docker-compose.yml ps`
+et `logs -f <service>`. Les données vivent dans les volumes `radarnaque_postgres-data`
+(base), `radarnaque_caddy-data` (certificats) et `radarnaque_backups` (sauvegardes locales).
+
+La route `/auth/dev/last-email` n'existe qu'avec `NODE_ENV=development` : en production
+elle renvoie 404, ce que l'on vérifie après chaque déploiement :
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' 'https://radarnaque.mostconsult.be/auth/dev/last-email?to=x'   # 404
+```
+
+### 3. Sauvegardes
+
+Le service `backup` fait, au démarrage puis toutes les 24 h :
+`pg_dump | gzip | age -r $BACKUP_AGE_RECIPIENT > /backups/radarnaque-<date>.sql.gz.age`,
+copie le fichier avec `rclone copy` vers `BACKUP_RCLONE_REMOTE`, puis supprime les
+sauvegardes locales de plus de 14 jours. Une erreur (par exemple `pg_dump` en échec) est
+écrite sur stderr et visible dans `docker compose logs backup`. La rétention côté distant
+est à régler chez le fournisseur.
+
+1. Générer la clé : `age-keygen -o backup.key`. Mettre la clé **publique** (`age1...`)
+   dans `BACKUP_AGE_RECIPIENT` ; conserver `backup.key` hors du serveur.
+2. Créer `infra/backup/rclone/rclone.conf` (jamais versionné) avec le remote voulu
+   (`rclone config` ou à la main), puis `BACKUP_RCLONE_REMOTE=<remote>:<chemin>`.
+3. Essai à blanc : `docker compose -f infra/docker-compose.yml --env-file infra/.env run --rm -e BACKUP_RUN_ONCE=1 backup`.
+
+Restaurer :
+
+```sh
+age -d -i backup.key radarnaque-<date>.sql.gz.age | gunzip | psql "$DATABASE_URL"
+```
+
+### 4. Essayer la composition de production en local
+
+Même composition, sans TLS : dans un fichier d'environnement (par exemple
+`/tmp/prod-local.env`, copie de `infra/.env.example`), définir `SITE_ADDRESS=http://localhost`
+et `PUBLIC_URL=http://localhost` (si le port 80 est occupé : `CADDY_HTTP_PORT=8081`, et
+`PUBLIC_URL=http://localhost:8081`). Utiliser un nom de projet à part (`-p`) pour ne pas
+toucher aux volumes de la production ou du dev, et activer la route de dev uniquement le
+temps du test :
+
+```sh
+printf 'services:\n  auth:\n    environment:\n      NODE_ENV: development\n' > /tmp/auth-dev.yml
+DC="docker compose -p radarnaque-test -f infra/docker-compose.yml --env-file /tmp/prod-local.env"
+$DC -f /tmp/auth-dev.yml up -d --build
+E2E_ENV_FILE=/tmp/prod-local.env pnpm e2e:login          # E2E LOGIN OK
+$DC up -d --force-recreate auth                           # retour en NODE_ENV=production
+curl -s -o /dev/null -w '%{http_code}\n' 'http://localhost/auth/dev/last-email?to=x'   # 404
+$DC down -v                                               # supprime les volumes de ce projet de test
+```
+
+`E2E_ENV_FILE` (facultatif) indique à `pnpm e2e:login` un autre fichier que `infra/.env`.

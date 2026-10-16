@@ -1,0 +1,15 @@
+# Contexte de build à la racine du dépôt (services/auth et site) : rien de local ni de secret.
+**/node_modules
+**/dist
+**/.output
+**/.wxt
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.env
+**/*.pem
+**/*.swp
+.git
+.DS_Store
+.superpowers
+video
