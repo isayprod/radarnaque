@@ -12,11 +12,13 @@ import { browser } from "wxt/browser";
 import { isValidEmail, normalizeEmail } from "../../lib/email";
 import { detectLocale, errorMessage, type MessageKey, t } from "../../lib/i18n";
 import { type AuthState, sendToBackground } from "../../lib/messages";
-import { localePref, sessionToken } from "../../lib/storage";
+import { localePref, pendingSignIn, sessionToken } from "../../lib/storage";
 
 type View = "loading" | "unavailable" | "signedOut" | "codeSent" | "signedIn";
 
 const OTP_LENGTH = 6;
+/** Durée de validité du lien et du code (600 s). */
+const PENDING_TTL_MS = 10 * 60_000;
 const LOCALES: readonly Locale[] = ["fr", "nl"];
 
 function browserLocale(): Locale {
@@ -48,6 +50,8 @@ export default function App() {
 	const codeRef = useRef<HTMLInputElement>(null);
 	// Seule la dernière demande d'état compte (le watch du stockage en lance aussi).
 	const latestState = useRef(0);
+	// Garde synchrone : deux changements d'état avant le rendu ne doivent pas envoyer deux fois.
+	const verifying = useRef(false);
 
 	const refresh = useCallback(async () => {
 		const id = ++latestState.current;
@@ -60,6 +64,7 @@ export default function App() {
 		}
 		setErrorCode(null);
 		if (response.data.status === "signedIn") {
+			void pendingSignIn.setValue(null);
 			setMe(response.data.me);
 			setView("signedIn");
 		} else {
@@ -74,6 +79,16 @@ export default function App() {
 			const preferred = await localePref.getValue();
 			if (!active) return;
 			if (preferred) setLocale(preferred);
+			const pending = await pendingSignIn.getValue();
+			if (!active) return;
+			if (pending && Date.now() - pending.sentAt < PENDING_TTL_MS) {
+				// Popup rouverte après être allé lire l'email : on reprend à l'étape du code.
+				setEmail(pending.email);
+				setSentTo(pending.email);
+				setView("codeSent");
+			} else if (pending) {
+				void pendingSignIn.setValue(null);
+			}
 			await refresh();
 		})();
 		// La page de retour du lien magique enregistre le jeton pendant que la popup est ouverte.
@@ -100,6 +115,7 @@ export default function App() {
 	function fail(code: string) {
 		setErrorCode(code);
 		if (code === "session_expired") {
+			void pendingSignIn.setValue(null);
 			setMe(null);
 			setCode("");
 			setView("signedOut");
@@ -118,6 +134,7 @@ export default function App() {
 			fail(response.error.code);
 			return false;
 		}
+		await pendingSignIn.setValue({ email: address, sentAt: Date.now() });
 		return true;
 	}
 
@@ -147,6 +164,7 @@ export default function App() {
 	}
 
 	function onChangeAddress() {
+		void pendingSignIn.setValue(null);
 		setErrorCode(null);
 		setResent(false);
 		setCode("");
@@ -155,6 +173,8 @@ export default function App() {
 	}
 
 	async function verify(otp: string) {
+		if (verifying.current) return;
+		verifying.current = true;
 		setBusy(true);
 		setErrorCode(null);
 		setResent(false);
@@ -164,6 +184,7 @@ export default function App() {
 			otp,
 		});
 		if (!response.ok) {
+			verifying.current = false;
 			setBusy(false);
 			setCode("");
 			fail(response.error.code);
@@ -172,11 +193,12 @@ export default function App() {
 		}
 		// Le service worker a enregistré le jeton : on lit le compte.
 		await refresh();
+		verifying.current = false;
 		setBusy(false);
 	}
 
 	function onChangeCode(event: ChangeEvent<HTMLInputElement>) {
-		if (busy) return;
+		if (busy || verifying.current) return;
 		const digits = event.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH);
 		setCode(digits);
 		if (digits.length === OTP_LENGTH) void verify(digits);
@@ -193,6 +215,7 @@ export default function App() {
 			return;
 		}
 		latestState.current++;
+		void pendingSignIn.setValue(null);
 		setMe(null);
 		setEmail("");
 		setView("signedOut");
@@ -278,7 +301,6 @@ export default function App() {
 							inputMode="numeric"
 							autoComplete="one-time-code"
 							pattern="[0-9]*"
-							maxLength={OTP_LENGTH}
 							readOnly={busy}
 							className={`${inputClass} text-center font-mono text-lg tracking-[0.5em]`}
 							value={code}
