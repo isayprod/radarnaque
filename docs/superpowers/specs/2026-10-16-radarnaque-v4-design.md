@@ -259,15 +259,16 @@ Les poids initiaux sont fixés à l'implémentation, puis ajustés en testant su
   - `jwt` : JWT EdDSA de 15 minutes, et JWKS publié sur `/auth/jwks` ;
   - `admin` : rôle `user` ou `admin`.
 - **Emails** envoyés via Resend, depuis `radarnaque.mostconsult.be` (enregistrements DNS SPF et DKIM à ajouter). Les modèles d'email existent en FR et en NL. En développement, ils sont affichés dans la console.
-- Un **hook à la création d'un utilisateur** demande à l'API de créer l'abonnement `trial`. Cet appel passe par une route interne `POST /api/internal/users/{id}/bootstrap`, protégée par un secret partagé et accessible seulement depuis le réseau Docker. L'API reste ainsi seule propriétaire du schéma `app`. Cette opération est idempotente : si l'appel échoue (API indisponible), `GET /api/me` crée l'abonnement d'essai manquant au premier appel.
+- Un **hook à la création d'un utilisateur** demande à l'API de créer l'abonnement `trial`. Cet appel passe par une route interne `POST /api/internal/users/{id}/bootstrap`, protégée par un secret partagé et accessible seulement depuis le réseau Docker (Caddy répond 404 sur `/api/internal/*`). L'API reste ainsi seule propriétaire du schéma `app`. Cette opération est idempotente : si l'appel échoue (API indisponible), `GET /api/me` crée l'abonnement d'essai manquant au premier appel.
 - `trustedOrigins` contient l'origine `chrome-extension://<ID>` et `https://radarnaque.mostconsult.be`.
 - Le service n'expose aucune logique métier.
 
 ### 5.2 Flux de connexion dans l'extension
 
 ```
-1. Popup : saisie de l'email → service worker → POST /auth/sign-in/magic-link
-   (callbackURL = /auth/callback, langue = langue active)
+1. Popup : saisie de l'email → service worker → POST /auth/start
+   (route du service auth, langue = langue active ; les routes d'envoi propres à
+   Better Auth sont désactivées) : un seul email, avec lien (callbackURL = /auth/callback) et code
 2. Email : lien magique + code à 6 chiffres
 3a. Lien cliqué dans le même navigateur :
     /auth/magic-link/verify → session (cookie) → /auth/callback

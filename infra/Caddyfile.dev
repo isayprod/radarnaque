@@ -20,6 +20,13 @@
 		reverse_proxy host.docker.internal:3000
 	}
 
+	# Routes internes (/api/internal/*, ex. bootstrap appelé par auth via http://api:8000) :
+	# jamais exposées par Caddy, même protégées par X-Internal-Secret (spec §5.1).
+	@internal path /api/internal /api/internal/*
+	handle @internal {
+		respond 404
+	}
+
 	handle /api/* {
 		reverse_proxy host.docker.internal:8000
 	}

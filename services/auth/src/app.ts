@@ -39,6 +39,11 @@ export function normalizeEmail(value: unknown): string | null {
 /**
  * IP du client : premier élément de X-Forwarded-For (posé par Caddy), sinon l'adresse
  * de la socket ; `"unknown"` hors de @hono/node-server (tests via `app.request`).
+ *
+ * Sûr uniquement parce que Caddy REMPLACE X-Forwarded-For par l'IP réelle du client
+ * (pas de `trusted_proxies` dans infra/Caddyfile) et que le port 3000 n'est joignable
+ * que par Caddy : un en-tête fourni par le client ne peut pas usurper l'IP du limiteur.
+ * Ajouter un proxy devant Caddy imposerait de revoir cette lecture.
  */
 function clientIp(c: Context): string {
 	const forwarded = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();

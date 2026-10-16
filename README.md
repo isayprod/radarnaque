@@ -33,7 +33,7 @@ utilisé partout :
   `WXT_PUBLIC_URL`, égal au `PUBLIC_URL` de `infra/.env`.
 
 Dans `infra/.env`, remplacer aussi `BETTER_AUTH_SECRET` et `INTERNAL_API_SECRET` par des
-valeurs aléatoires (`openssl rand -base64 32`). Si un autre Postgres occupe déjà le port
+valeurs aléatoires (`openssl rand -hex 32`). Si un autre Postgres occupe déjà le port
 5432 de la machine, choisir un autre `POSTGRES_PORT` (lu par docker compose dans
 `infra/.env`) et reporter ce port dans `DATABASE_URL`.
 
@@ -82,6 +82,14 @@ et enchaîne `POST /auth/start` → `GET /auth/dev/last-email` (code) →
 l'étape en échec avec le statut HTTP et le corps de la réponse, et sort avec le code 1.
 Vérification de types : `pnpm typecheck:scripts`.
 
+### 5. Tests
+
+```sh
+pnpm test        # tests JS de tous les paquets (pnpm -r test)
+pnpm test:api    # tests de l'API (cd services/api && uv run pytest ; Docker requis)
+pnpm test:all    # les deux
+```
+
 ## Déployer
 
 Production : un serveur (Allemagne) avec Docker et Docker Compose, un enregistrement DNS
@@ -106,7 +114,10 @@ Dans `infra/.env`, définir au minimum :
   n'est lue qu'à la **création** du volume Postgres : la modifier ensuite dans `.env` ne
   change pas le mot de passe de la base existante (il faudrait `ALTER USER`) et casse la
   connexion de auth, api et backup ;
-- `BETTER_AUTH_SECRET` et `INTERNAL_API_SECRET` (`openssl rand -base64 32`) ;
+- `BETTER_AUTH_SECRET` et `INTERNAL_API_SECRET` : générer chaque secret avec
+  `openssl rand -hex 32`. Les valeurs d'exemple commencent par `change-me` : auth et api
+  refusent de démarrer en production avec un secret (ou un mot de passe Postgres dans
+  `DATABASE_URL`) qui commence par `change-me` ;
 - `EXTENSION_ID` : identifiant de l'extension publiée. C'est la seule variable utilisée en
   production pour cela : la composition la passe aussi à l'image Caddy comme argument de build
   (le site compile l'identifiant dans `/auth/callback`). `VITE_EXTENSION_ID` ne sert qu'en dev
@@ -160,10 +171,14 @@ et `logs -f <service>`. Les données vivent dans les volumes `radarnaque_postgre
 (base), `radarnaque_caddy-data` (certificats) et `radarnaque_backups` (sauvegardes locales).
 
 La route `/auth/dev/last-email` n'existe qu'avec `NODE_ENV=development` : en production
-elle renvoie 404, ce que l'on vérifie après chaque déploiement :
+elle renvoie 404. Les routes internes de l'API (`/api/internal/*`, appelées par auth via
+`http://api:8000`) ne sont jamais servies par Caddy : 404 elles aussi. À vérifier après
+chaque déploiement :
 
 ```sh
-curl -s -o /dev/null -w '%{http_code}\n' 'https://radarnaque.mostconsult.be/auth/dev/last-email?to=x'   # 404
+curl -s -o /dev/null -w '%{http_code}\n' 'https://radarnaque.mostconsult.be/auth/dev/last-email?to=x'          # 404
+curl -s -o /dev/null -w '%{http_code}\n' 'https://radarnaque.mostconsult.be/api/internal/users/x/bootstrap'   # 404
+curl -s -o /dev/null -w '%{http_code}\n' 'https://radarnaque.mostconsult.be/auth/callback'                     # 200
 ```
 
 ### 3. Sauvegardes
@@ -225,7 +240,9 @@ Ne pas lancer `dc up -d` entre (c) et (d) : `migrate` échoue si le schéma `aut
 
 Même composition, sans TLS : dans un fichier d'environnement hors du dépôt (par exemple
 `/tmp/prod-local.env`, copie de `infra/.env.example` avec des valeurs jetables, dont un
-`RESEND_API_KEY` factice), définir `SITE_ADDRESS=http://localhost` et
+`RESEND_API_KEY` factice), remplacer `BETTER_AUTH_SECRET`, `INTERNAL_API_SECRET` et
+`POSTGRES_PASSWORD` par des valeurs qui ne commencent pas par `change-me` (sinon auth et
+api refusent de démarrer : `openssl rand -hex 32`), définir `SITE_ADDRESS=http://localhost` et
 `PUBLIC_URL=http://localhost` (si le port 80 est occupé : `CADDY_HTTP_PORT=8081` et
 `PUBLIC_URL=http://localhost:8081`). Utiliser un nom de projet à part (`-p`) pour ne pas
 toucher aux volumes de la production ni du dev, et n'activer la route de dev
@@ -238,6 +255,7 @@ dc -f /tmp/auth-dev.yml up -d --build
 E2E_ENV_FILE=/tmp/prod-local.env pnpm e2e:login          # E2E LOGIN OK
 dc up -d --force-recreate auth                            # retour en NODE_ENV=production
 curl -s -o /dev/null -w '%{http_code}\n' 'http://localhost/auth/dev/last-email?to=x'   # 404
+curl -s -o /dev/null -w '%{http_code}\n' 'http://localhost/api/internal/users/x/bootstrap'   # 404
 dc down -v                                                # supprime les volumes de ce projet de test
 ```
 

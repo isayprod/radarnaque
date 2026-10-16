@@ -2,7 +2,8 @@
 # Sauvegarde chiffrée de Postgres, toutes les 24 h.
 #
 #   pg_dump | gzip | age -r $BACKUP_AGE_RECIPIENT > /backups/radarnaque-<date>.sql.gz.age
-#   rclone copy vers $BACKUP_RCLONE_REMOTE, puis suppression des sauvegardes locales de plus de 14 jours.
+#   rclone copy vers $BACKUP_RCLONE_REMOTE, puis suppression des sauvegardes locales de plus de 14 jours
+#   (et des fichiers .partial orphelins de plus d'1 jour).
 #
 # Sans argument : boucle infinie (une sauvegarde au démarrage, puis toutes les 24 h ; une
 # erreur est journalisée sur stderr et la boucle continue). `--once` : une seule sauvegarde,
@@ -42,4 +43,7 @@ rclone copy "$file" "$BACKUP_RCLONE_REMOTE"
 echo "[backup] copie vers $BACKUP_RCLONE_REMOTE terminée"
 
 find "$BACKUP_DIR" -name 'radarnaque-*.sql.gz.age' -type f -mtime +"$RETENTION_DAYS" -delete
-echo "[backup] sauvegardes locales de plus de $RETENTION_DAYS jours supprimées"
+# Fichiers .partial orphelins (conteneur tué en pleine sauvegarde, sans passer par le trap EXIT) :
+# supprimés après 1 jour, jamais celui d'une sauvegarde en cours.
+find "$BACKUP_DIR" -name 'radarnaque-*.sql.gz.age.partial' -type f -mmin +1440 -delete
+echo "[backup] sauvegardes locales de plus de $RETENTION_DAYS jours et .partial de plus d'1 jour supprimés"

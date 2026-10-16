@@ -85,6 +85,10 @@ services:
     restart: unless-stopped
     environment:
       ENV: production
+      # uvicorn --proxy-headers ne lit X-Forwarded-For / -Proto que des IP listées ici
+      # (127.0.0.1 par défaut, jamais Caddy). `*` est sûr : api:8000 n'est pas publié, seul
+      # Caddy (réseau interne) le joint, et Caddy remplace X-Forwarded-For.
+      FORWARDED_ALLOW_IPS: "*"
       DATABASE_URL: postgres://radarnaque:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquante}@postgres:5432/radarnaque
       JWKS_URL: http://auth:3000/auth/jwks
       JWT_ISSUER: ${PUBLIC_URL:?PUBLIC_URL manquante}
@@ -138,6 +142,9 @@ services:
       context: ./backup
     image: radarnaque-backup
     restart: unless-stopped
+    # PID 1 = tini : backup.sh (sh) n'est plus PID 1 et SIGTERM l'arrête (docker compose stop
+    # n'attend plus les 10 s avant SIGKILL), sleep compris.
+    init: true
     environment:
       PGHOST: postgres
       PGUSER: radarnaque
