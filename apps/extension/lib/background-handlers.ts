@@ -128,6 +128,47 @@ export function createHandlers(
 	};
 }
 
+/** Identité de l'extension courante : `browser.runtime.id` et `browser.runtime.getURL("/")`. */
+export interface ExtensionSelf {
+	id: string;
+	baseUrl: string;
+}
+
+/** Champs de `runtime.MessageSender` utiles au contrôle de l'émetteur. */
+export interface InternalSender {
+	id?: string;
+	url?: string;
+	tab?: unknown;
+}
+
+/**
+ * Un message interne n'est accepté que d'une page de cette extension (popup) : même
+ * identifiant, URL sous `chrome-extension://<id>/`, et aucun onglet. Un émetteur avec
+ * `tab` est un script de contenu ou un contexte web : refusé (`forbidden_sender`).
+ */
+export function isOwnExtensionPage(
+	sender: InternalSender,
+	self: ExtensionSelf,
+): boolean {
+	return (
+		sender.id === self.id &&
+		!sender.tab &&
+		typeof sender.url === "string" &&
+		sender.url.startsWith(self.baseUrl)
+	);
+}
+
+/** Enveloppe le handler interne : tout émetteur qui n'est pas une page de l'extension est refusé. */
+export function guardInternalSender(
+	handle: (req: BgRequest) => Promise<BgResponse<unknown>>,
+	self: ExtensionSelf,
+): (req: BgRequest, sender: InternalSender) => Promise<BgResponse<unknown>> {
+	return async (req, sender) =>
+		isOwnExtensionPage(sender ?? {}, self)
+			? handle(req)
+			: fail("forbidden_sender");
+}
+
 /**
  * Message de la page de retour du lien magique (`/auth/callback`). Accepté uniquement
  * depuis l'origine de PUBLIC_URL et sous la forme `{ type: "radarnaque/session", token }`.
