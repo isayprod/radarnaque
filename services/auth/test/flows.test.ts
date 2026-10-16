@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { APIError } from "better-auth/api";
 import { createLocalJWKSet, type JSONWebKeySet, jwtVerify } from "jose";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
@@ -24,7 +25,6 @@ beforeAll(async () => {
 		createAuth({
 			pool,
 			env: testEnv({ DATABASE_URL: db.connectionString }),
-			mailer: new MemoryMailer(),
 			onUserCreated: async () => {},
 		}),
 	);
@@ -52,7 +52,7 @@ function setup({
 } = {}): Harness {
 	const env = testEnv({ DATABASE_URL: db.connectionString, ...overrides });
 	const mailer = new MemoryMailer();
-	const auth = createAuth({ pool, env, mailer, onUserCreated });
+	const auth = createAuth({ pool, env, onUserCreated });
 	const app = createApp({
 		auth,
 		mailer,
@@ -67,6 +67,11 @@ function setup({
  * indexé par IP : chaque requête reçoit sa propre IP (X-Forwarded-For, comme derrière Caddy).
  */
 let ipCounter = 0;
+function nextIp(): string {
+	ipCounter++;
+	return `10.${(ipCounter >> 16) & 255}.${(ipCounter >> 8) & 255}.${ipCounter & 255}`;
+}
+
 function call(
 	h: Harness,
 	path: string,
@@ -76,12 +81,8 @@ function call(
 		headers?: Record<string, string>;
 	} = {},
 ): Promise<Response> {
-	ipCounter++;
 	const headers = new Headers(init.headers);
-	headers.set(
-		"x-forwarded-for",
-		`10.${(ipCounter >> 16) & 255}.${(ipCounter >> 8) & 255}.${ipCounter & 255}`,
-	);
+	if (!headers.has("x-forwarded-for")) headers.set("x-forwarded-for", nextIp());
 	if (init.json !== undefined) headers.set("content-type", "application/json");
 	return Promise.resolve(
 		h.app.request(path, {
@@ -196,7 +197,16 @@ describe("POST /auth/start", () => {
 
 	test("invalid email → 400 invalid_email, nothing sent", async () => {
 		const h = setup();
-		for (const email of ["", "   ", "not-an-email", "a@b", 42]) {
+		for (const email of [
+			"",
+			"   ",
+			"not-an-email",
+			"a@b",
+			42,
+			// Acceptées par une regex naïve, refusées par z.email() de Better Auth.
+			"a<b>@c.de",
+			"a,b@c.de",
+		]) {
 			const res = await call(h, "/auth/start", {
 				json: { email, locale: "fr" },
 			});
@@ -231,6 +241,65 @@ describe("POST /auth/start", () => {
 				})
 			).status,
 		).toBe(200);
+	});
+});
+
+describe("POST /auth/start per-IP limit", () => {
+	test("21st start from the same IP (distinct emails) → 429", async () => {
+		const h = setup();
+		const ip = nextIp();
+		for (let i = 0; i < 20; i++) {
+			const res = await call(h, "/auth/start", {
+				json: { email: uniqueEmail(`ip${i}`), locale: "fr" },
+				headers: { "x-forwarded-for": ip },
+			});
+			expect(res.status).toBe(200);
+		}
+		const res = await call(h, "/auth/start", {
+			json: { email: uniqueEmail("ip20"), locale: "fr" },
+			headers: { "x-forwarded-for": ip },
+		});
+		expect(res.status).toBe(429);
+		expect((await json(res)).error?.code).toBe("rate_limited");
+		expect(h.mailer.messages).toHaveLength(20);
+		// La première IP de X-Forwarded-For sert de clé ; une autre IP n'est pas affectée.
+		const other = await call(h, "/auth/start", {
+			json: { email: uniqueEmail("ip-other"), locale: "fr" },
+			headers: { "x-forwarded-for": `${nextIp()}, ${ip}` },
+		});
+		expect(other.status).toBe(200);
+	});
+
+	test("requests refused by the IP limit do not consume the email's quota", async () => {
+		const h = setup();
+		const attacker = nextIp();
+		for (let i = 0; i < 20; i++) {
+			await call(h, "/auth/start", {
+				json: { email: uniqueEmail(`flood${i}`), locale: "fr" },
+				headers: { "x-forwarded-for": attacker },
+			});
+		}
+		const victim = uniqueEmail("victim");
+		for (let i = 0; i < 10; i++) {
+			const res = await call(h, "/auth/start", {
+				json: { email: victim, locale: "fr" },
+				headers: { "x-forwarded-for": attacker },
+			});
+			expect(res.status).toBe(429);
+		}
+		for (let i = 0; i < 5; i++) {
+			expect(
+				(
+					await call(h, "/auth/start", {
+						json: { email: victim, locale: "fr" },
+					})
+				).status,
+			).toBe(200);
+		}
+		expect(
+			(await call(h, "/auth/start", { json: { email: victim, locale: "fr" } }))
+				.status,
+		).toBe(429);
 	});
 });
 
@@ -412,17 +481,56 @@ describe("misc routes", () => {
 		}
 	});
 
-	test("direct Better Auth magic-link endpoint still sends a standalone email", async () => {
+	test("Better Auth's own email-sending endpoints are disabled (404, no email)", async () => {
 		const h = setup();
 		const email = uniqueEmail("direct");
-		const res = await call(h, "/auth/sign-in/magic-link", {
-			json: { email, callbackURL: "/auth/callback" },
+		const attempts: [string, Record<string, unknown>][] = [
+			["/auth/sign-in/magic-link", { email, callbackURL: "/auth/callback" }],
+			["/auth/email-otp/send-verification-otp", { email, type: "sign-in" }],
+			[
+				"/auth/email-otp/send-verification-otp",
+				{ email, type: "email-verification" },
+			],
+			["/auth/email-otp/request-password-reset", { email }],
+			["/auth/forget-password/email-otp", { email }],
+			["/auth/email-otp/request-email-change", { newEmail: email }],
+		];
+		for (const [path, body] of attempts) {
+			const res = await call(h, path, {
+				json: body,
+				headers: { origin: h.env.PUBLIC_URL },
+			});
+			expect(res.status, path).toBe(404);
+		}
+		expect(h.mailer.messages).toHaveLength(0);
+		// Les routes de vérification restent ouvertes.
+		const { otp } = await start(h, email);
+		const signIn = await call(h, "/auth/sign-in/email-otp", {
+			json: { email, otp },
 			headers: { origin: h.env.PUBLIC_URL },
 		});
-		expect(res.status).toBe(200);
-		expect(h.mailer.messages).toHaveLength(1);
-		expect(h.mailer.last(email)?.text).toContain(
-			"/auth/magic-link/verify?token=",
-		);
+		expect(signIn.status).toBe(200);
+	});
+
+	test("a Better Auth APIError keeps its own status instead of 500", async () => {
+		const env = testEnv({ DATABASE_URL: db.connectionString });
+		const mailer = new MemoryMailer();
+		const auth = createAuth({ pool, env, onUserCreated: async () => {} });
+		const throwing = {
+			...auth,
+			api: {
+				...auth.api,
+				getSession: async () => {
+					throw new APIError("BAD_REQUEST", {
+						code: "INVALID_EMAIL",
+						message: "Invalid email",
+					});
+				},
+			},
+		} as unknown as typeof auth;
+		const app = createApp({ auth: throwing, mailer, env });
+		const res = await app.request("/auth/extension/session-token");
+		expect(res.status).toBe(400);
+		expect((await json(res)).error?.code).toBe("invalid_email");
 	});
 });

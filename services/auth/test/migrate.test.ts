@@ -1,11 +1,12 @@
 import { decodeJwt, decodeProtectedHeader } from "jose";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import type { Auth } from "../src/auth";
 import { createAuth } from "../src/auth";
-import { MemoryMailer } from "../src/mail/mailer";
 import { runAuthMigrations } from "../src/migrate";
 import {
 	authPool,
+	captureSignIn,
 	migrateFresh,
 	type StartedPg,
 	startPg,
@@ -25,11 +26,14 @@ afterAll(async () => {
 	await db?.stop();
 });
 
-function otpFrom(mailer: MemoryMailer, to: string): string {
-	const text = mailer.last(to)?.text ?? "";
-	const match = text.match(/\b(\d{6})\b/);
-	if (!match) throw new Error(`no 6-digit code in mail to ${to}: ${text}`);
-	return match[1];
+/** Demande un code de connexion et le récupère dans le `signInBag` (aucun email envoyé). */
+async function sendOtp(auth: Auth, email: string): Promise<string> {
+	const { otp } = await captureSignIn(() =>
+		auth.api.sendVerificationOTP({ body: { email, type: "sign-in" } }),
+	);
+	if (!otp || !/^\d{6}$/.test(otp))
+		throw new Error(`no 6-digit code for ${email}`);
+	return otp;
 }
 
 describe("auth migrations", () => {
@@ -37,7 +41,6 @@ describe("auth migrations", () => {
 		const auth = createAuth({
 			pool,
 			env: testEnv({ DATABASE_URL: db.connectionString }),
-			mailer: new MemoryMailer(),
 			onUserCreated: async () => {},
 		});
 		await migrateFresh(auth);
@@ -74,13 +77,11 @@ describe("auth migrations", () => {
 });
 
 describe("createAuth", () => {
-	test("sends a 6-digit OTP by email and notifies onUserCreated with the new user id", async () => {
-		const mailer = new MemoryMailer();
+	test("issues a 6-digit OTP and notifies onUserCreated with the new user id", async () => {
 		const created: string[] = [];
 		const auth = createAuth({
 			pool,
 			env: testEnv({ DATABASE_URL: db.connectionString }),
-			mailer,
 			onUserCreated: async (id) => {
 				created.push(id);
 			},
@@ -88,9 +89,9 @@ describe("createAuth", () => {
 		await runAuthMigrations(auth);
 
 		const email = "alice@example.test";
-		await auth.api.sendVerificationOTP({ body: { email, type: "sign-in" } });
+		const otp = await sendOtp(auth, email);
 		const res = await auth.api.signInEmailOTP({
-			body: { email, otp: otpFrom(mailer, email) },
+			body: { email, otp },
 		});
 
 		expect(res.user.email).toBe(email);
@@ -104,11 +105,9 @@ describe("createAuth", () => {
 	test("a failing onUserCreated is logged and never breaks sign-in", async () => {
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
-			const mailer = new MemoryMailer();
 			const auth = createAuth({
 				pool,
 				env: testEnv({ DATABASE_URL: db.connectionString }),
-				mailer,
 				onUserCreated: async () => {
 					throw new Error("api down");
 				},
@@ -116,9 +115,9 @@ describe("createAuth", () => {
 			await runAuthMigrations(auth);
 
 			const email = "bob@example.test";
-			await auth.api.sendVerificationOTP({ body: { email, type: "sign-in" } });
+			const otp = await sendOtp(auth, email);
 			const res = await auth.api.signInEmailOTP({
-				body: { email, otp: otpFrom(mailer, email) },
+				body: { email, otp },
 			});
 
 			expect(res.user.email).toBe(email);
@@ -133,20 +132,18 @@ describe("createAuth", () => {
 	});
 
 	test("issues an EdDSA JWT (15 min, iss=aud=PUBLIC_URL, sub=user id, empty payload) via bearer", async () => {
-		const mailer = new MemoryMailer();
 		const env = testEnv({ DATABASE_URL: db.connectionString });
 		const auth = createAuth({
 			pool,
 			env,
-			mailer,
 			onUserCreated: async () => {},
 		});
 		await runAuthMigrations(auth);
 
 		const email = "dave@example.test";
-		await auth.api.sendVerificationOTP({ body: { email, type: "sign-in" } });
+		const otp = await sendOtp(auth, email);
 		const session = await auth.api.signInEmailOTP({
-			body: { email, otp: otpFrom(mailer, email) },
+			body: { email, otp },
 		});
 		const { token } = await auth.api.getToken({
 			headers: new Headers({ authorization: `Bearer ${session.token}` }),
@@ -167,19 +164,19 @@ describe("createAuth", () => {
 		]);
 	});
 
-	test("sends a magic link pointing at /auth/magic-link/verify", async () => {
-		const mailer = new MemoryMailer();
+	test("builds a magic link pointing at /auth/magic-link/verify", async () => {
 		const auth = createAuth({
 			pool,
 			env: testEnv({ DATABASE_URL: db.connectionString }),
-			mailer,
 			onUserCreated: async () => {},
 		});
 		await runAuthMigrations(auth);
 
 		const email = "carol@example.test";
-		await auth.api.signInMagicLink({ body: { email }, headers: new Headers() });
-		expect(mailer.last(email)?.text).toContain(
+		const { url } = await captureSignIn(() =>
+			auth.api.signInMagicLink({ body: { email }, headers: new Headers() }),
+		);
+		expect(url).toContain(
 			"http://localhost:8080/auth/magic-link/verify?token=",
 		);
 	});

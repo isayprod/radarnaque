@@ -4,6 +4,7 @@ import { vi } from "vitest";
 import type { Auth } from "../src/auth";
 import type { Env } from "../src/env";
 import { runAuthMigrations } from "../src/migrate";
+import { type SignInBagValue, signInBag } from "../src/sign-in";
 
 export type StartedPg = { connectionString: string; stop: () => Promise<void> };
 
@@ -66,4 +67,13 @@ export async function migrateFresh(auth: Auth): Promise<void> {
 	} finally {
 		errors.mockRestore();
 	}
+}
+
+/** Exécute `fn` dans un `signInBag` (comme `startSignIn`) et renvoie le lien et le code déposés. */
+export async function captureSignIn(
+	fn: () => Promise<unknown>,
+): Promise<SignInBagValue> {
+	const bag: SignInBagValue = {};
+	await signInBag.run(bag, fn);
+	return bag;
 }
