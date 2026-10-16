@@ -57,7 +57,8 @@ class JwtVerifier:
         self._lock = asyncio.Lock()
 
     async def _load_jwks(self) -> dict[str, jwt.PyJWK]:
-        """Télécharge et analyse le JWKS. Lève une exception si la réponse est inutilisable."""
+        """Télécharge et analyse le JWKS. Lève une exception si la réponse est inutilisable,
+        y compris sans aucune clé lisible : un JWKS vide ne remplace jamais le cache."""
         jwks = await self._fetch_jwks()
         raw_keys = jwks["keys"]
         if not isinstance(raw_keys, list):
@@ -68,6 +69,8 @@ class JwtVerifier:
                 keys[jwk["kid"]] = jwt.PyJWK(jwk)
             except Exception:
                 logger.warning("Clé JWKS illisible ignorée", exc_info=True)
+        if not keys:
+            raise ValueError("le JWKS ne contient aucune clé lisible")
         return keys
 
     async def _refresh(self, kid: str) -> jwt.PyJWK | None:
