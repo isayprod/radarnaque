@@ -10,6 +10,7 @@ import {
 import {
 	createHandlers,
 	createMessageListener,
+	guardInternalSender,
 	handleExternal,
 } from "../lib/background-handlers";
 import { PUBLIC_URL } from "../lib/config";
@@ -37,8 +38,17 @@ export default defineBackground(() => {
 		api,
 	});
 
+	// Messages internes : uniquement depuis les pages de l'extension (popup), jamais
+	// depuis un script de contenu ou un onglet.
+	const handleInternal = guardInternalSender(handle, {
+		id: browser.runtime.id,
+		baseUrl: browser.runtime.getURL("/"),
+	});
 	browser.runtime.onMessage.addListener(
-		createMessageListener((message: BgRequest) => handle(message)),
+		createMessageListener(
+			(message: BgRequest, sender: Browser.runtime.MessageSender) =>
+				handleInternal(message, sender),
+		),
 	);
 	browser.runtime.onMessageExternal.addListener(
 		createMessageListener(

@@ -6,6 +6,7 @@ import { AuthError } from "../lib/auth-client";
 import {
 	createHandlers,
 	createMessageListener,
+	guardInternalSender,
 	type HandlerDeps,
 	handleExternal,
 } from "../lib/background-handlers";
@@ -205,6 +206,61 @@ describe("background handlers", () => {
 				data: { status: "signedOut" },
 			}),
 		);
+	});
+});
+
+describe("internal sender check", () => {
+	const self = {
+		id: "abcdefghijklmnopabcdefghijklmnop",
+		baseUrl: "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
+	};
+	const popup = { id: self.id, url: `${self.baseUrl}popup.html` };
+	const forbidden = { ok: false, error: { code: "forbidden_sender" } };
+
+	function guarded() {
+		const handle = vi.fn(async (_req: BgRequest) => ({
+			ok: true as const,
+			data: "handled",
+		}));
+		return { handle, guard: guardInternalSender(handle, self) };
+	}
+
+	test("a popup-like sender (own id, extension page, no tab) is accepted", async () => {
+		const { handle, guard } = guarded();
+		expect(await guard({ type: "auth/state" }, popup)).toEqual({
+			ok: true,
+			data: "handled",
+		});
+		expect(handle).toHaveBeenCalledWith({ type: "auth/state" });
+	});
+
+	test("a sender with a tab (content script, web page) is rejected", async () => {
+		const { handle, guard } = guarded();
+		const tab = { id: 1, index: 0 };
+		for (const sender of [
+			{ ...popup, tab },
+			{ id: self.id, url: "https://evil.example/", tab },
+		]) {
+			expect(await guard({ type: "auth/sign-out" }, sender)).toEqual(forbidden);
+		}
+		expect(handle).not.toHaveBeenCalled();
+	});
+
+	test("a foreign extension id or a non-extension page is rejected", async () => {
+		const { handle, guard } = guarded();
+		for (const sender of [
+			{ ...popup, id: "ponmlkjihgfedcbaponmlkjihgfedcba" },
+			{ url: popup.url },
+			{ id: self.id, url: "https://evil.example/popup.html" },
+			{
+				id: self.id,
+				url: "chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba/popup.html",
+			},
+			{ id: self.id },
+		]) {
+			expect(await guard({ type: "auth/state" }, sender)).toEqual(forbidden);
+		}
+		expect(handle).not.toHaveBeenCalled();
 	});
 });
 
