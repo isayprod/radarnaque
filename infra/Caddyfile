@@ -1,0 +1,41 @@
+# Caddy de production : une seule origine. SITE_ADDRESS vaut radarnaque.mostconsult.be
+# (HTTPS automatique) ; http://localhost pour un essai local sans TLS.
+# auth et api sont joints sur le réseau interne de docker compose ; le site compilé
+# est dans l'image (/srv/site). Les routes sont celles de Caddyfile.dev.
+#
+# Pas de trusted_proxies : Caddy remplace X-Forwarded-For par l'IP réelle du client, donc
+# le limiteur par IP du service auth ne peut pas être usurpé par un en-tête fourni.
+{
+	admin off
+}
+
+{$SITE_ADDRESS:radarnaque.mostconsult.be} {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+
+	# Page de retour du lien magique : chemins EXACTS, déclarés avant /auth/*.
+	# Jamais de joker : Better Auth possède /auth/callback/:provider.
+	@callback path /auth/callback /auth/callback/
+	handle @callback {
+		root * /srv/site
+		rewrite * /auth/callback/index.html
+		file_server
+	}
+
+	handle /auth/* {
+		reverse_proxy auth:3000
+	}
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		root * /srv/site
+		file_server
+	}
+}

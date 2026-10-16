@@ -2,8 +2,8 @@
 //
 //   pnpm e2e:login
 //
-// Lit infra/.env (PUBLIC_URL, EXTENSION_ID), crée un compte neuf à chaque exécution, puis
-// enchaîne : /auth/start → /auth/dev/last-email → /auth/sign-in/email-otp → /auth/token
+// Lit PUBLIC_URL et EXTENSION_ID dans infra/.env (ou dans le fichier E2E_ENV_FILE), crée un
+// compte neuf à chaque exécution, puis enchaîne : /auth/start → /auth/dev/last-email → /auth/sign-in/email-otp → /auth/token
 // → /api/me. Affiche `E2E LOGIN OK` (code 0) ; à la première étape en échec, affiche son
 // nom, le statut HTTP et le corps de la réponse (code 1).
 import { readFileSync } from "node:fs";
@@ -12,7 +12,10 @@ import { parseEnv } from "node:util";
 
 class StepError extends Error {}
 
-const envPath = resolve(import.meta.dirname, "../infra/.env");
+// E2E_ENV_FILE permet de viser une autre stack (ex. la composition de production en local).
+const envPath = process.env.E2E_ENV_FILE
+	? resolve(process.env.E2E_ENV_FILE)
+	: resolve(import.meta.dirname, "../infra/.env");
 
 function loadConfig(): { baseUrl: string; origin: string } {
 	let env: NodeJS.Dict<string>;

@@ -7,3 +7,4 @@ __pycache__
 .env
 *.pem
 .pytest_cache
+infra/backup/rclone/

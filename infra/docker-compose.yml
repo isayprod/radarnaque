@@ -1,0 +1,161 @@
+# Production : docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --build
+# Seul Caddy publie des ports (80 et 443) ; postgres, auth (3000) et api (8000) restent sur
+# le réseau interne. Nom de projet distinct de la stack de dev (volumes séparés).
+name: radarnaque
+
+x-auth-env: &auth-env
+  NODE_ENV: production
+  PUBLIC_URL: ${PUBLIC_URL:?PUBLIC_URL manquante}
+  BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET manquante}
+  DATABASE_URL: postgres://radarnaque:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquante}@postgres:5432/radarnaque
+  EXTENSION_ID: ${EXTENSION_ID:?EXTENSION_ID manquante}
+  API_INTERNAL_URL: http://api:8000
+  INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET manquante}
+  MAIL_FROM: ${MAIL_FROM:?MAIL_FROM manquante}
+  RESEND_API_KEY: ${RESEND_API_KEY:?RESEND_API_KEY manquante}
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: radarnaque
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquante}
+      POSTGRES_DB: radarnaque
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U radarnaque -d radarnaque"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Migrations Better Auth (schéma auth), puis Alembic (schéma app, qui référence auth."user").
+  migrate:
+    build:
+      context: ..
+      dockerfile: services/auth/Dockerfile
+    image: radarnaque-auth
+    restart: "no"
+    command: ["node", "--import", "tsx", "src/migrate.ts"]
+    environment: *auth-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  migrate-api:
+    build:
+      context: ../services/api
+    image: radarnaque-api
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgres://radarnaque:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquante}@postgres:5432/radarnaque
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  auth:
+    build:
+      context: ..
+      dockerfile: services/auth/Dockerfile
+    image: radarnaque-auth
+    restart: unless-stopped
+    # NODE_ENV=development ajouterait la route /auth/dev/last-email : jamais en production.
+    environment: *auth-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/auth/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  api:
+    build:
+      context: ../services/api
+    image: radarnaque-api
+    restart: unless-stopped
+    environment:
+      ENV: production
+      DATABASE_URL: postgres://radarnaque:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquante}@postgres:5432/radarnaque
+      JWKS_URL: http://auth:3000/auth/jwks
+      JWT_ISSUER: ${PUBLIC_URL:?PUBLIC_URL manquante}
+      JWT_AUDIENCE: ${PUBLIC_URL:?PUBLIC_URL manquante}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET manquante}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    depends_on:
+      migrate-api:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # Seul service qui publie des ports. Le site est compilé dans l'image (VITE_EXTENSION_ID
+  # est lu au build). Le certificat TLS (Let's Encrypt) est conservé dans caddy-data.
+  caddy:
+    build:
+      context: ..
+      dockerfile: infra/caddy/Dockerfile
+      args:
+        VITE_EXTENSION_ID: ${EXTENSION_ID:?EXTENSION_ID manquante}
+    image: radarnaque-caddy
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-radarnaque.mostconsult.be}
+    ports:
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+      - "${CADDY_HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      auth:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  # Sauvegarde chiffrée toutes les 24 h (voir backup/backup.sh). La configuration rclone du
+  # dépôt distant est lue dans RCLONE_CONFIG_DIR (par défaut infra/backup/rclone/rclone.conf).
+  backup:
+    build:
+      context: ./backup
+    image: radarnaque-backup
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGUSER: radarnaque
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquante}
+      PGDATABASE: radarnaque
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:?BACKUP_AGE_RECIPIENT manquante}
+      BACKUP_RCLONE_REMOTE: ${BACKUP_RCLONE_REMOTE:?BACKUP_RCLONE_REMOTE manquante}
+      BACKUP_RUN_ONCE: ${BACKUP_RUN_ONCE:-0}
+      RCLONE_CONFIG: /config/rclone/rclone.conf
+    volumes:
+      - backups:/backups
+      - ${RCLONE_CONFIG_DIR:-./backup/rclone}:/config/rclone:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:
+  backups:
