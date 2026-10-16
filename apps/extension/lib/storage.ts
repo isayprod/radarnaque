@@ -11,3 +11,17 @@ export const sessionToken = storage.defineItem<string | null>(
 export const localePref = storage.defineItem<Locale | null>("local:locale", {
 	fallback: null,
 });
+
+/**
+ * Connexion en cours (lien ou code envoyé par email) : survit à la fermeture de la popup,
+ * pas à celle du navigateur (`storage.session`). `sentAt` en millisecondes epoch.
+ */
+export interface PendingSignIn {
+	email: string;
+	sentAt: number;
+}
+
+export const pendingSignIn = storage.defineItem<PendingSignIn | null>(
+	"session:pendingSignIn",
+	{ fallback: null },
+);

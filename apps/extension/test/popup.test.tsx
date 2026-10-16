@@ -13,7 +13,7 @@ import { fakeBrowser } from "wxt/testing/fake-browser";
 import App from "../entrypoints/popup/App";
 import { detectLocale, dictionaries, t } from "../lib/i18n";
 import type { BgRequest, BgResponse } from "../lib/messages";
-import { localePref, sessionToken } from "../lib/storage";
+import { localePref, pendingSignIn, sessionToken } from "../lib/storage";
 import { trialMe } from "./helpers";
 
 const { sendToBackground } = vi.hoisted(() => ({
@@ -289,6 +289,157 @@ describe("popup", () => {
 
 		expect(await screen.findByLabelText("Adresse email")).toBeTruthy();
 		expect(requestsOf("auth/sign-out")).toHaveLength(1);
+	});
+
+	test("pasting a formatted code submits exactly one auth/verify-otp with digits only", async () => {
+		background({
+			"auth/state": () => signedOut,
+			"auth/start": () => ok(null),
+			"auth/verify-otp": () => fail("invalid_otp"),
+		});
+		const user = userEvent.setup();
+		render(<App />);
+		await user.type(await screen.findByLabelText("Adresse email"), "a@b.be");
+		await user.click(
+			screen.getByRole("button", { name: "Recevoir mon lien de connexion" }),
+		);
+		await user.click(await screen.findByLabelText("Code à 6 chiffres"));
+
+		await user.paste("123 456");
+
+		await waitFor(() =>
+			expect(requestsOf("auth/verify-otp")).toEqual([
+				{ type: "auth/verify-otp", email: "a@b.be", otp: "123456" },
+			]),
+		);
+		await screen.findByText(
+			"Code incorrect ou expiré. Vérifiez-le ou demandez un nouvel email.",
+		);
+		expect(requestsOf("auth/verify-otp")).toHaveLength(1);
+	});
+
+	test("reopening the popup after auth/start restores the code step for the same email", async () => {
+		background({ "auth/state": () => signedOut, "auth/start": () => ok(null) });
+		const user = userEvent.setup();
+		const first = render(<App />);
+		await user.type(await screen.findByLabelText("Adresse email"), " A@B.be ");
+		await user.click(
+			screen.getByRole("button", { name: "Recevoir mon lien de connexion" }),
+		);
+		await screen.findByLabelText("Code à 6 chiffres");
+		first.unmount();
+
+		render(<App />);
+
+		const code = (await screen.findByLabelText(
+			"Code à 6 chiffres",
+		)) as HTMLInputElement;
+		expect(code.value).toBe("");
+		expect(screen.getByText("a@b.be")).toBeTruthy();
+		expect(requestsOf("auth/start")).toHaveLength(1);
+		const pending = await pendingSignIn.getValue();
+		expect(pending?.email).toBe("a@b.be");
+		expect(Date.now() - (pending?.sentAt ?? 0)).toBeLessThan(5_000);
+	});
+
+	test("resend refreshes sentAt of the pending sign-in", async () => {
+		background({ "auth/state": () => signedOut, "auth/start": () => ok(null) });
+		await pendingSignIn.setValue({
+			email: "a@b.be",
+			sentAt: Date.now() - 60_000,
+		});
+		const before = Date.now();
+		const user = userEvent.setup();
+		render(<App />);
+
+		await user.click(
+			await screen.findByRole("button", { name: "Renvoyer l'email" }),
+		);
+
+		await screen.findByText("Email renvoyé.");
+		expect((await pendingSignIn.getValue())?.sentAt).toBeGreaterThanOrEqual(
+			before,
+		);
+	});
+
+	test("an expired pending sign-in (> 10 min) shows the email step and is removed", async () => {
+		await pendingSignIn.setValue({
+			email: "a@b.be",
+			sentAt: Date.now() - 10 * 60_000 - 1,
+		});
+		background({ "auth/state": () => signedOut });
+		render(<App />);
+
+		expect(await screen.findByLabelText("Adresse email")).toBeTruthy();
+		expect(screen.queryByLabelText("Code à 6 chiffres")).toBeNull();
+		await waitFor(async () =>
+			expect(await pendingSignIn.getValue()).toBeNull(),
+		);
+	});
+
+	test("a successful sign-in clears the pending sign-in", async () => {
+		let verified = false;
+		background({
+			"auth/state": () => (verified ? signedIn() : signedOut),
+			"auth/start": () => ok(null),
+			"auth/verify-otp": () => {
+				verified = true;
+				return ok(null);
+			},
+		});
+		const user = userEvent.setup();
+		render(<App />);
+		await user.type(await screen.findByLabelText("Adresse email"), "a@b.be");
+		await user.click(
+			screen.getByRole("button", { name: "Recevoir mon lien de connexion" }),
+		);
+		await screen.findByLabelText("Code à 6 chiffres");
+		expect(await pendingSignIn.getValue()).not.toBeNull();
+
+		await user.type(screen.getByLabelText("Code à 6 chiffres"), "123456");
+
+		await screen.findByText("Essai");
+		await waitFor(async () =>
+			expect(await pendingSignIn.getValue()).toBeNull(),
+		);
+	});
+
+	test("change address clears the pending sign-in", async () => {
+		background({ "auth/state": () => signedOut });
+		await pendingSignIn.setValue({ email: "a@b.be", sentAt: Date.now() });
+		const user = userEvent.setup();
+		render(<App />);
+
+		await user.click(
+			await screen.findByRole("button", { name: "Changer d'adresse" }),
+		);
+
+		await screen.findByLabelText("Adresse email");
+		await waitFor(async () =>
+			expect(await pendingSignIn.getValue()).toBeNull(),
+		);
+	});
+
+	test("sign out clears the pending sign-in", async () => {
+		let out = false;
+		background({
+			"auth/state": () => (out ? signedOut : signedIn()),
+			"auth/sign-out": () => {
+				out = true;
+				return ok(null);
+			},
+		});
+		const user = userEvent.setup();
+		render(<App />);
+		const signOut = await screen.findByRole("button", {
+			name: "Se déconnecter",
+		});
+		await pendingSignIn.setValue({ email: "a@b.be", sentAt: Date.now() });
+
+		await user.click(signOut);
+
+		await screen.findByLabelText("Adresse email");
+		expect(await pendingSignIn.getValue()).toBeNull();
 	});
 
 	test("session_expired during verification returns to the email step", async () => {
