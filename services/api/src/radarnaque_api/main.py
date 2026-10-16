@@ -7,7 +7,7 @@ from radarnaque_api.auth.jwt import JwksFetcher, JwtVerifier, http_jwks_fetcher
 from radarnaque_api.config import Settings
 from radarnaque_api.db import make_engine
 from radarnaque_api.errors import install_error_handlers
-from radarnaque_api.routes import health
+from radarnaque_api.routes import health, internal, me
 
 
 def create_app(
@@ -35,4 +35,6 @@ def create_app(
     )
     install_error_handlers(app)
     app.include_router(health.router)
+    app.include_router(me.router)
+    app.include_router(internal.router)
     return app
