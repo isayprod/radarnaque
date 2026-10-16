@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { renderSignInEmail } from "../src/mail/templates";
+import {
+	renderSignInEmail,
+	renderStandaloneSignInEmail,
+} from "../src/mail/templates";
 
 describe("renderSignInEmail", () => {
 	test("FR/NL sign-in email contains link and 6-digit code", () => {
@@ -42,5 +45,27 @@ describe("renderSignInEmail", () => {
 			"https://x/?a=1&amp;b=&quot;2&quot;&lt;script&gt;",
 		);
 		expect(m.html).toContain("&lt;b&gt;1&lt;/b&gt;");
+	});
+});
+
+describe("renderStandaloneSignInEmail", () => {
+	test("link-only or code-only email, in both FR and NL (locale unknown)", () => {
+		const link = renderStandaloneSignInEmail({
+			url: "https://x/auth/magic-link/verify?token=t&a=1",
+		});
+		expect(link.text).toContain("https://x/auth/magic-link/verify?token=t&a=1");
+		expect(link.html).toContain(
+			"https://x/auth/magic-link/verify?token=t&amp;a=1",
+		);
+		expect(link.text).toContain("10 minutes");
+		expect(link.text).toContain("10 minuten");
+		expect(link.subject).toContain("Radarnaque");
+
+		const code = renderStandaloneSignInEmail({ otp: "654321" });
+		expect(code.text).toContain("654321");
+		expect(code.html).toContain("654321");
+		expect(code.html).not.toContain("<a ");
+		expect(code.text).toContain("10 minutes");
+		expect(code.text).toContain("10 minuten");
 	});
 });

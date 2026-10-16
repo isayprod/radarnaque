@@ -65,6 +65,10 @@ export function loadEnv(source: Source = process.env): Env {
 	if (secret.length < 32)
 		throw invalid("BETTER_AUTH_SECRET", "au moins 32 caractères");
 
+	const internalSecret = required(source, "INTERNAL_API_SECRET");
+	if (internalSecret.length < 32)
+		throw invalid("INTERNAL_API_SECRET", "au moins 32 caractères");
+
 	const extensionId = required(source, "EXTENSION_ID");
 	if (!/^[a-p]{32}$/.test(extensionId)) {
 		throw invalid("EXTENSION_ID", "exactement 32 lettres de a à p");
@@ -89,7 +93,7 @@ export function loadEnv(source: Source = process.env): Env {
 		DATABASE_URL: databaseUrl,
 		EXTENSION_ID: extensionId,
 		API_INTERNAL_URL: baseUrl(source, "API_INTERNAL_URL"),
-		INTERNAL_API_SECRET: required(source, "INTERNAL_API_SECRET"),
+		INTERNAL_API_SECRET: internalSecret,
 		MAIL_FROM: required(source, "MAIL_FROM"),
 		RESEND_API_KEY: resendApiKey,
 	};

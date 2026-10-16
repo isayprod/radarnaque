@@ -1,7 +1,13 @@
 import pg from "pg";
 import { createAuth } from "./auth";
+import { makeBootstrapClient } from "./bootstrap";
 import { loadEnv } from "./env";
-import { ConsoleMailer, type Mailer, ResendMailer } from "./mail/mailer";
+import {
+	ConsoleMailer,
+	type Mailer,
+	MemoryMailer,
+	ResendMailer,
+} from "./mail/mailer";
 
 export const env = loadEnv();
 
@@ -10,14 +16,33 @@ export const pool = new pg.Pool({
 	options: "-c search_path=auth",
 });
 
-export const mailer: Mailer = env.RESEND_API_KEY
-	? new ResendMailer(env.RESEND_API_KEY, env.MAIL_FROM)
-	: new ConsoleMailer();
+/** Développement : copie des emails pour `/auth/dev/last-email`. */
+export const devMailer =
+	env.NODE_ENV === "development" ? new MemoryMailer() : undefined;
+
+function makeMailer(): Mailer {
+	if (env.NODE_ENV === "production") {
+		// loadEnv garantit la présence de la clé en production.
+		return new ResendMailer(env.RESEND_API_KEY ?? "", env.MAIL_FROM);
+	}
+	const consoleMailer = new ConsoleMailer();
+	if (!devMailer) return consoleMailer;
+	return {
+		async send(msg) {
+			await devMailer.send(msg);
+			await consoleMailer.send(msg);
+		},
+	};
+}
+
+export const mailer = makeMailer();
 
 export const auth = createAuth({
 	pool,
 	env,
 	mailer,
-	// TODO(tâche 8) : appel du bootstrap de l'API (POST interne avec X-Internal-Secret).
-	onUserCreated: async () => {},
+	onUserCreated: makeBootstrapClient(
+		env.API_INTERNAL_URL,
+		env.INTERNAL_API_SECRET,
+	),
 });

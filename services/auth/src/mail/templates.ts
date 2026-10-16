@@ -101,3 +101,53 @@ export function renderSignInEmail({
 
 	return { subject: c.subject, html, text };
 }
+
+/**
+ * Email de repli quand Better Auth envoie le lien ou le code seul (appel direct de ses
+ * routes, hors de `/auth/start`) : la langue est inconnue, le texte est donc en FR puis NL.
+ */
+export function renderStandaloneSignInEmail(
+	value: { url: string; otp?: undefined } | { otp: string; url?: undefined },
+): RenderedEmail {
+	const locales: Locale[] = ["fr", "nl"];
+	const sections = locales.map((locale) => {
+		const c = COPY[locale];
+		if (value.url !== undefined) {
+			const u = escapeHtml(value.url);
+			return {
+				html: `<p style="margin:0 0 8px"><a href="${u}">${escapeHtml(c.button)}</a></p>
+<p style="margin:0 0 8px;font-size:12px;word-break:break-all">${u}</p>
+<p style="margin:0 0 24px">${escapeHtml(c.validity)}</p>`,
+				text: `${c.button}${c.colon} ${value.url}\n${c.validity}`,
+			};
+		}
+		return {
+			html: `<p style="margin:0 0 8px">${escapeHtml(c.codeLabel)}${c.colon} <strong style="font-family:'Courier New',monospace;letter-spacing:4px">${escapeHtml(value.otp)}</strong></p>
+<p style="margin:0 0 24px">${escapeHtml(c.validity)}</p>`,
+			text: `${c.codeLabel}${c.colon} ${value.otp}\n${c.validity}`,
+		};
+	});
+
+	const subject = `${COPY.fr.subject} / ${COPY.nl.subject}`;
+	const html = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>${escapeHtml(subject)}</title></head>
+<body style="font-family:Arial,Helvetica,sans-serif;color:#1a1a1a">
+<h1 style="font-size:20px">Radarnaque</h1>
+${sections.map((s) => s.html).join("\n<hr>\n")}
+<p style="color:#666666;font-size:13px">${escapeHtml(COPY.fr.ignore)}<br>${escapeHtml(COPY.nl.ignore)}</p>
+</body>
+</html>`;
+	const text = [
+		"Radarnaque",
+		"",
+		sections[0].text,
+		"",
+		sections[1].text,
+		"",
+		COPY.fr.ignore,
+		COPY.nl.ignore,
+		"",
+	].join("\n");
+	return { subject, html, text };
+}

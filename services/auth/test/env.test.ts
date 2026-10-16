@@ -8,7 +8,7 @@ const valid = {
 	DATABASE_URL: "postgres://u:p@localhost:5432/db",
 	EXTENSION_ID: "abcdefghijklmnopabcdefghijklmnop",
 	API_INTERNAL_URL: "http://localhost:8000",
-	INTERNAL_API_SECRET: "internal",
+	INTERNAL_API_SECRET: "i".repeat(32),
 	MAIL_FROM: "Radarnaque <no-reply@example.test>",
 };
 
@@ -31,6 +31,13 @@ describe("loadEnv", () => {
 		expect(() =>
 			loadEnv({ ...valid, EXTENSION_ID: "abcdefghijklmnop" }),
 		).toThrow(/EXTENSION_ID/);
+	});
+
+	test("INTERNAL_API_SECRET must be at least 32 characters", () => {
+		expect(() =>
+			loadEnv({ ...valid, INTERNAL_API_SECRET: "i".repeat(31) }),
+		).toThrow(/INTERNAL_API_SECRET/);
+		expect(loadEnv(valid).INTERNAL_API_SECRET).toBe("i".repeat(32));
 	});
 
 	test("names the missing variable", () => {
