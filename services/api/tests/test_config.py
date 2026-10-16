@@ -45,3 +45,26 @@ def test_settings_from_environment(monkeypatch):
 def test_internal_secret_too_short_rejected(secret):
     with pytest.raises(ValueError, match="INTERNAL_API_SECRET"):
         Settings(database_url="postgres://u:p@h/d", **{**BASE, "internal_api_secret": secret})
+
+
+@pytest.mark.parametrize(
+    "placeholder",
+    ["change-me-with-a-long-random-string-0123", "CHANGE-ME-with-a-long-random-string-0123"],
+)
+def test_change_me_secret_rejected_in_production_only(placeholder):
+    base = {**BASE, "internal_api_secret": placeholder}
+    with pytest.raises(ValueError, match="INTERNAL_API_SECRET.*change-me"):
+        Settings(database_url="postgres://u:p@h/d", env="production", **base)
+    # En dev et en test, la valeur d'exemple reste utilisable.
+    for env in ("development", "test"):
+        s = Settings(database_url="postgres://u:p@h/d", env=env, **base)
+        assert s.internal_api_secret.get_secret_value() == placeholder
+    assert Settings(database_url="postgres://u:p@h/d", env="production", **BASE).env == "production"
+
+
+def test_change_me_database_password_rejected_in_production_only():
+    url = "postgres://radarnaque:change-me-postgres-password@postgres:5432/radarnaque"
+    with pytest.raises(ValueError, match="DATABASE_URL.*change-me"):
+        Settings(database_url=url, env="production", **BASE)
+    dev = Settings(database_url=url, env="development", **BASE)
+    assert dev.database_url.endswith("/radarnaque")

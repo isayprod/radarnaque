@@ -1,11 +1,19 @@
-from typing import Literal
+from typing import Literal, Self
+from urllib.parse import unquote, urlsplit
 
-from pydantic import SecretStr, field_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MIN_INTERNAL_SECRET_LENGTH = 32
+# Préfixe des valeurs d'exemple de infra/.env.example : publiques, donc refusées en production.
+_PLACEHOLDER_PREFIX = "change-me"
 _DRIVER = "postgresql+psycopg://"
 _ACCEPTED_PREFIXES = ("postgres://", "postgresql://", _DRIVER)
+
+
+def _is_placeholder(value: str) -> bool:
+    """Valeur d'exemple de infra/.env.example (préfixe `change-me`, casse ignorée)."""
+    return value.lower().startswith(_PLACEHOLDER_PREFIX)
 
 
 def normalize_database_url(value: str) -> str:
@@ -43,3 +51,19 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_database_url(cls, value: str) -> str:
         return normalize_database_url(value)
+
+    @model_validator(mode="after")
+    def _reject_placeholders_in_production(self) -> Self:
+        if self.env != "production":
+            return self
+        if _is_placeholder(self.internal_api_secret.get_secret_value()):
+            raise ValueError(
+                "INTERNAL_API_SECRET : valeur d'exemple change-me refusée en production "
+                "(générer avec `openssl rand -hex 32`)"
+            )
+        if _is_placeholder(unquote(urlsplit(self.database_url).password or "")):
+            raise ValueError(
+                "DATABASE_URL : mot de passe d'exemple change-me (POSTGRES_PASSWORD) "
+                "refusé en production"
+            )
+        return self
