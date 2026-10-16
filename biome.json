@@ -1,0 +1,15 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+	"files": {
+		"includes": [
+			"**",
+			"!**/dist",
+			"!**/.output",
+			"!**/.wxt",
+			"!packages/shared/src/api.ts",
+			"!**/.venv"
+		]
+	},
+	"formatter": { "enabled": true },
+	"linter": { "enabled": true }
+}
