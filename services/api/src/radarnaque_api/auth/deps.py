@@ -33,7 +33,7 @@ async def require_internal_secret(
 ) -> None:
     """Protège les routes internes (appelées par le service auth) par un secret partagé."""
     expected = request.app.state.settings.internal_api_secret.get_secret_value()
-    if x_internal_secret is None or not hmac.compare_digest(
+    if not x_internal_secret or not hmac.compare_digest(
         x_internal_secret.encode(), expected.encode()
     ):
         raise ApiError(403, "forbidden", "Secret interne invalide.")

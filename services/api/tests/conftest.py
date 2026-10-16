@@ -78,7 +78,7 @@ def settings(pg_url: str) -> Settings:
         jwks_url="http://auth.test/auth/jwks",
         jwt_issuer="http://issuer.test",
         jwt_audience="http://audience.test",
-        internal_api_secret="test-internal-secret",  # type: ignore[arg-type]
+        internal_api_secret="test-internal-secret-0123456789abcdef",  # type: ignore[arg-type]
         env="test",
     )
 

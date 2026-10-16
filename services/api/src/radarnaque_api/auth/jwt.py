@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -7,6 +8,8 @@ import httpx
 import jwt
 
 from radarnaque_api.errors import ApiError
+
+logger = logging.getLogger(__name__)
 
 JwksFetcher = Callable[[], Awaitable[dict]]
 
@@ -53,8 +56,26 @@ class JwtVerifier:
         self._last_fetch: float | None = None
         self._lock = asyncio.Lock()
 
+    async def _load_jwks(self) -> dict[str, jwt.PyJWK]:
+        """Télécharge et analyse le JWKS. Lève une exception si la réponse est inutilisable."""
+        jwks = await self._fetch_jwks()
+        raw_keys = jwks["keys"]
+        if not isinstance(raw_keys, list):
+            raise TypeError("le champ « keys » du JWKS n'est pas une liste")
+        keys: dict[str, jwt.PyJWK] = {}
+        for jwk in raw_keys:
+            try:
+                keys[jwk["kid"]] = jwt.PyJWK(jwk)
+            except Exception:
+                logger.warning("Clé JWKS illisible ignorée", exc_info=True)
+        return keys
+
     async def _refresh(self, kid: str) -> jwt.PyJWK | None:
-        """Recharge le JWKS si l'intervalle minimal est écoulé, puis cherche `kid`."""
+        """Recharge le JWKS si l'intervalle minimal est écoulé, puis cherche `kid`.
+
+        Lève ApiError(503) si le JWKS est injoignable ou invalide : l'échéance de rechargement
+        n'est alors pas consommée, la requête suivante réessaie.
+        """
         async with self._lock:
             # Un appel concurrent a pu charger la clé entre-temps.
             if kid in self._keys:
@@ -62,18 +83,14 @@ class JwtVerifier:
             now = self._clock()
             if self._last_fetch is not None and now - self._last_fetch < self._min_refetch_interval:
                 return None
-            self._last_fetch = now
             try:
-                jwks = await self._fetch_jwks()
+                keys = await self._load_jwks()
             except Exception:
-                return None
-            keys: dict[str, jwt.PyJWK] = {}
-            for jwk in jwks.get("keys", []):
-                try:
-                    if jwk.get("kid"):
-                        keys[jwk["kid"]] = jwt.PyJWK(jwk)
-                except Exception:  # noqa: S112 - clé illisible ignorée
-                    continue
+                logger.warning("Impossible de charger le JWKS", exc_info=True)
+                raise ApiError(
+                    503, "auth_unavailable", "Service d'authentification indisponible."
+                ) from None
+            self._last_fetch = now
             self._keys = keys
             return keys.get(kid)
 
