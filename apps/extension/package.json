@@ -1,0 +1,30 @@
+{
+	"name": "extension",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "wxt",
+		"build": "wxt build",
+		"test": "vitest run",
+		"typecheck": "wxt prepare && tsc --noEmit",
+		"postinstall": "wxt prepare"
+	},
+	"dependencies": {
+		"@radarnaque/shared": "workspace:*",
+		"react": "^19.2.0",
+		"react-dom": "^19.2.0"
+	},
+	"devDependencies": {
+		"@testing-library/react": "^16.3.0",
+		"@types/node": "^24.0.0",
+		"@types/react": "^19.2.0",
+		"@types/react-dom": "^19.2.0",
+		"@wxt-dev/module-react": "^1.2.2",
+		"happy-dom": "^21.0.0",
+		"typescript": "~6.0.3",
+		"vite": "^8.0.0",
+		"vitest": "^5.0.5",
+		"wxt": "^0.21.4"
+	}
+}
