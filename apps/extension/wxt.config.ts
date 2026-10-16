@@ -1,6 +1,15 @@
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "wxt";
 
 const DEV_PUBLIC_URL = "http://localhost:8080";
+
+const ICONS = {
+	16: "icon/16.png",
+	32: "icon/32.png",
+	48: "icon/48.png",
+	96: "icon/96.png",
+	128: "icon/128.png",
+};
 
 /**
  * Origine du site, de /auth et de /api (`WXT_PUBLIC_URL`, lue dans `.env`).
@@ -13,6 +22,7 @@ function publicOrigin(): string {
 
 export default defineConfig({
 	modules: ["@wxt-dev/module-react"],
+	vite: () => ({ plugins: [tailwindcss()] }),
 	manifest: () => {
 		const origin = publicOrigin();
 		// Les motifs de correspondance ignorent le port : en dev, la page de retour est
@@ -23,6 +33,8 @@ export default defineConfig({
 				: [`${origin}/*`];
 		return {
 			name: "Radarnaque",
+			icons: ICONS,
+			action: { default_icon: ICONS },
 			key: process.env.WXT_EXTENSION_KEY || undefined,
 			permissions: ["storage"],
 			host_permissions: [`${origin}/*`],
