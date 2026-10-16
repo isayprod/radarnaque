@@ -40,6 +40,7 @@ Les versions 1 à 3 souffraient de deux problèmes :
 - **La base de prix des objets connus.** Elle sera alimentée petit à petit, en partie à partir des `listing_snapshots`. La règle « prix anormal » existe déjà, mais reste désactivée.
 - **L'IA locale**, pour une éventuelle future offre gratuite.
 - **Le branchement réel de Stripe** (phase 5).
+- **L'analyse IA automatique à l'ouverture d'une annonce**, qui deviendra une option Premium. Pour l'ajouter, il suffira d'insérer la fonctionnalité `auto_scan` et le déclencheur `auto` dans les référentiels, d'ajouter la vérification correspondante à l'étape 2 de §7.2 et de lancer le scan dans le content script. Aucun changement de schéma n'est nécessaire. Un scan automatique comptera comme un scan texte.
 - **Firefox.** WXT génère déjà le manifeste Firefox, mais la cible du MVP est Chromium : Chrome, Edge et Brave.
 
 ## 2. Offre et droits
@@ -53,14 +54,13 @@ Il n'y a pas de freemium. Sans compte, l'extension affiche uniquement le score d
 | Score par règles locales, automatique sur la page d'une annonce, illimité | ✅ | ✅ | ✅ | ✅ |
 | Analyse IA texte via le bouton de la page d'une annonce | ❌ | ✅ | ✅ | ✅ |
 | Icône sur les cartes des résultats de recherche, avec analyse IA au clic | ❌ | ✅ | ❌ | ✅ |
-| Analyse IA automatique à l'ouverture d'une annonce | ❌ | ✅ | ❌ | ✅ |
 | Analyse IA avec photos | ❌ | ✅ | ❌ | ✅ |
 
 - L'analyse IA « texte » reçoit le texte de l'annonce, les informations du vendeur (sans son identité) et les signaux calculés par les règles locales.
 - Les quotas **texte** et **photos** sont **indépendants**.
 - L'essai offre **3 scans au total**, texte ou photos confondus, sans limite de durée.
 - **Un scan servi depuis le cache compte dans le quota.**
-- Un scan automatique à l'ouverture d'une annonce compte comme un scan texte.
+- Toute analyse IA est déclenchée par un clic de l'utilisateur. Il n'y a pas d'analyse IA automatique dans le MVP (voir §1.4).
 
 ### 2.2 Prix et quotas de départ
 
@@ -229,7 +229,6 @@ Les poids initiaux sont fixés à l'implémentation, puis ajustés en testant su
     - « Lancer une analyse IA » ;
     - « Analyse avec photos », si le plan le permet ;
     - « Se connecter », si l'utilisateur n'a pas de compte.
-  - Si le plan inclut `auto_scan`, l'analyse IA texte démarre automatiquement.
 - **Cartes des résultats de recherche (plans avec `card_icons`) :**
   - la petite icône Radarnaque dans un coin de chaque carte ;
   - au clic, une analyse IA, puis la pastille du niveau de risque, avec un résumé au survol.
@@ -306,10 +305,10 @@ marketplaces(id PK, code UNIQUE)
 locales(code PK)                         -- 'fr', 'nl'
 sites(id PK, marketplace_id FK, domain UNIQUE, default_locale FK→locales)
 currencies(code PK)                      -- 'EUR'
-features(code PK)                        -- 'card_icons', 'auto_scan', 'image_scan'
+features(code PK)                        -- 'card_icons', 'image_scan'
 billing_intervals(code PK)               -- 'month', 'year'
 quota_periods(code PK)                   -- 'subscription_month', 'lifetime'
-scan_triggers(code PK)                   -- 'button', 'card', 'auto'
+scan_triggers(code PK)                   -- 'button', 'card'
 severities(code PK)                      -- 'info', 'warning', 'danger'
 subscription_statuses(code PK)           -- 'active', 'canceled', 'past_due', 'expired'
 billing_providers(code PK)               -- 'manual', 'stripe'
@@ -407,8 +406,7 @@ Corps de la requête : `{ listing: ListingIn, rules: { version, signals: SignalI
 1. **Authentification** du JWT, puis **limite de requêtes** par utilisateur (`settings.rate_limit_per_minute`, admins compris). Sinon → `429 rate_limited`.
 2. **Droits** : l'abonnement actif doit exister, sinon → `402 no_active_subscription`. Le rôle `admin` est dispensé de cette vérification et dispose de toutes les fonctionnalités.
    - `scanKind = image` exige `image_scan` ;
-   - `trigger = card` exige `card_icons` ;
-   - `trigger = auto` exige `auto_scan`.
+   - `trigger = card` exige `card_icons`.
    - Sinon → `403 feature_not_in_plan`.
 3. **Validation** :
    - description de 5 000 caractères au plus, titre de 300 au plus ;
@@ -553,7 +551,7 @@ Chaque phase fait l'objet de son propre plan d'implémentation, et se livre et s
 
 1. **Fondations et connexion** : monorepo, Docker Compose, Postgres, service auth (lien magique + OTP, bearer, JWT, admin), vérification du JWT dans FastAPI, `/api/me`, abonnement d'essai à l'inscription, popup de connexion, page `/auth/callback`.
 2. **Adaptateurs et règles locales** : `Listing`, adaptateurs 2ememain/2dehands et Facebook, moteur de règles, pastille et panneau sur la page d'une annonce, fonctionnement sans compte.
-3. **Analyse IA** : référentiels, offre et schéma des scans, `POST /api/scans` (droits, quotas, cache, relais LLM, photos), panneau de résultat, icônes sur les cartes et scan automatique.
+3. **Analyse IA** : référentiels, offre et schéma des scans, `POST /api/scans` (droits, quotas, cache, relais LLM, photos), panneau de résultat et icônes sur les cartes.
 4. **Administration** : SPA admin, routes `/api/admin/*`, `admin_actions`.
 5. **Stripe** : `StripeBillingProvider`, webhooks, `billing_events`, pages de paiement.
 
