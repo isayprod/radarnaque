@@ -82,4 +82,31 @@ describe("loadEnv", () => {
 				.RESEND_API_KEY,
 		).toBe("re_x");
 	});
+
+	test("rejects change-me placeholder secrets in production only, naming the variable", () => {
+		const prod = { ...valid, NODE_ENV: "production", RESEND_API_KEY: "re_x" };
+		for (const name of ["BETTER_AUTH_SECRET", "INTERNAL_API_SECRET"]) {
+			for (const placeholder of [
+				"change-me-with-at-least-32-random-characters",
+				"CHANGE-ME-with-at-least-32-random-characters",
+			]) {
+				expect(() => loadEnv({ ...prod, [name]: placeholder })).toThrow(
+					new RegExp(`${name}.*change-me`),
+				);
+				// En dev et en test, la valeur d'exemple reste utilisable.
+				expect(() => loadEnv({ ...valid, [name]: placeholder })).not.toThrow();
+			}
+		}
+		expect(loadEnv(prod).NODE_ENV).toBe("production");
+	});
+
+	test("rejects a change-me Postgres password in DATABASE_URL in production only", () => {
+		const prod = { ...valid, NODE_ENV: "production", RESEND_API_KEY: "re_x" };
+		const url =
+			"postgres://radarnaque:change-me-postgres-password@postgres:5432/radarnaque";
+		expect(() => loadEnv({ ...prod, DATABASE_URL: url })).toThrow(
+			/DATABASE_URL.*change-me/,
+		);
+		expect(loadEnv({ ...valid, DATABASE_URL: url }).DATABASE_URL).toBe(url);
+	});
 });
