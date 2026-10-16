@@ -1,0 +1,16 @@
+{
+	"name": "radarnaque",
+	"private": true,
+	"packageManager": "pnpm@10.26.1",
+	"engines": {
+		"node": ">=24"
+	},
+	"scripts": {
+		"lint": "biome check .",
+		"test": "pnpm -r test",
+		"db:up": "docker compose -f infra/docker-compose.dev.yml up -d postgres"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.15"
+	}
+}
