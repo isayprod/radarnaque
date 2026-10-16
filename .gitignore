@@ -1,10 +1,51 @@
+# Dépendances et builds
 node_modules
 dist
 .output
 .wxt
 .venv
 __pycache__
-.env
-*.pem
 .pytest_cache
+.ruff_cache
+*.tsbuildinfo
+
+# Vidéo de présentation (fichiers lourds, hors dépôt)
+video/
+
+# Environnement : tous les .env, sauf les exemples documentés
+.env
+.env.*
+!.env.example
+
+# Clés, certificats et identifiants
+*.pem
+*.key
+*.p12
+*.pfx
+*.crx
 infra/backup/rclone/
+rclone.conf
+age-key*.txt
+*.age
+
+# Sauvegardes et dumps (contiennent des données personnelles)
+backups/
+*.sql
+!infra/postgres/init/*.sql
+*.sql.gz
+*.dump
+
+# Logs
+*.log
+logs/
+
+# Fichiers système et d'éditeur
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Espace de travail des agents
+.superpowers/
