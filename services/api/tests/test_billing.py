@@ -128,3 +128,59 @@ async def test_provider_is_taken_from_app_state(app, client, make_user, bearer):
     )
     assert r.status_code == 200, r.text
     assert app.state.billing.webhooks == [(b"raw", "s")]
+
+
+# --- Taille du corps du webhook ----------------------------------------------------------
+
+WEBHOOK_MAX = 1024 * 1024
+TOO_LARGE_MESSAGE = "Requête trop volumineuse."
+
+
+class _WebhookRecorder:
+    def __init__(self) -> None:
+        self.payloads: list[bytes] = []
+
+    async def handle_webhook(self, payload: bytes, signature: str | None) -> None:
+        self.payloads.append(payload)
+
+
+def _assert_too_large(r) -> None:
+    assert r.status_code == 413, r.text
+    assert r.json()["error"]["code"] == "payload_too_large"
+    assert r.json()["error"]["message"] == TOO_LARGE_MESSAGE
+
+
+async def test_webhook_refuses_declared_length_over_limit_before_reading(app, client):
+    app.state.billing = recorder = _WebhookRecorder()
+    r = await client.post(
+        "/api/billing/webhooks/stripe",
+        content=b"x",
+        headers={"Content-Length": str(WEBHOOK_MAX + 1)},
+    )
+    _assert_too_large(r)
+    assert recorder.payloads == []
+
+
+async def test_webhook_refuses_oversized_chunked_body(app, client):
+    app.state.billing = recorder = _WebhookRecorder()
+
+    async def chunks():
+        for _ in range(17):
+            yield b"x" * 65536  # 17 × 64 Kio : 1 Mio + 64 Kio, sans Content-Length
+
+    r = await client.post("/api/billing/webhooks/stripe", content=chunks())
+    assert "content-length" not in r.request.headers
+    _assert_too_large(r)
+    assert recorder.payloads == []
+
+
+async def test_webhook_accepts_exactly_one_mebibyte(app, client):
+    app.state.billing = recorder = _WebhookRecorder()
+
+    async def chunks():
+        for _ in range(16):
+            yield b"x" * 65536
+
+    r = await client.post("/api/billing/webhooks/stripe", content=chunks())
+    assert r.status_code == 200, r.text
+    assert recorder.payloads == [b"x" * WEBHOOK_MAX]

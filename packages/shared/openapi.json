@@ -959,7 +959,7 @@
     },
     "/api/billing/webhooks/stripe": {
       "post": {
-        "description": "Sans authentification : l'appelant est Stripe, authentifi\u00e9 par sa signature. Le corps est\nlu brut, sans \u00eatre interpr\u00e9t\u00e9 ; ni lui ni la signature ne sont journalis\u00e9s.",
+        "description": "Sans authentification : l'appelant est Stripe, authentifi\u00e9 par sa signature. Le corps est\nlu brut, sans \u00eatre interpr\u00e9t\u00e9, dans la limite de 1 Mio ; ni lui ni la signature ne sont\njournalis\u00e9s.",
         "operationId": "stripe_webhook_api_billing_webhooks_stripe_post",
         "parameters": [
           {
