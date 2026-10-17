@@ -470,6 +470,37 @@ test/risk-badge.test.tsx, test/controller.test.ts
 
 ---
 
+### Tâche 10 : lancer toute la stack de dev en une seule commande
+
+**Fichiers :**
+- Modifier : `package.json` (racine) et `README.md` (section « Démarrer en dev »)
+
+**Interfaces :**
+- Consomme : les scripts existants `db:up`, `dev:auth`, `dev:api`, `dev:site` et `dev:ext`, ainsi que `GET http://localhost:3000/auth/health`.
+- Produit : `pnpm dev`, qui démarre Postgres et Caddy (Docker), puis auth, api, site et extension dans **un seul terminal**, avec des logs préfixés et colorés `[auth]`, `[api]`, `[site]` et `[ext]`. Un seul Ctrl+C arrête les 4 processus. Postgres et Caddy restent lancés, comme avec les commandes séparées.
+
+**Choix imposés :**
+- `concurrently` et `wait-on` en dépendances de développement à la racine.
+- L'API ne démarre **qu'après** la réponse 200 de `/auth/health`, car les migrations Better Auth doivent passer avant Alembic. Délai de 120 s, sinon l'API ne démarre pas et un message l'explique.
+- Si un processus s'arrête en erreur, les autres sont arrêtés aussi (`--kill-others-on-fail`), et le code de sortie est non nul.
+- Avant de lancer les processus, `pnpm dev` vérifie que les ports 3000, 8000 et 3100 sont libres. Si l'un est occupé, la commande s'arrête avec un message clair qui nomme le port et affiche la commande `lsof -nP -iTCP:<port> -sTCP:LISTEN` pour trouver le processus responsable. Cette vérification passe par un petit script `scripts/check-ports.mjs`, testé.
+
+- [ ] **Étape 1 : écrire un test pour `scripts/check-ports.mjs`** (Vitest, dans `scripts/check-ports.test.mjs`, ou un test lancé par `node --test`, au choix documenté).
+  - Un port libre passe.
+  - Un port occupé par un serveur de test (`net.createServer().listen(0)`) fait échouer le script avec un code de sortie 1 et un message qui contient le numéro du port.
+- [ ] **Étape 2 : lancer le test.** Résultat attendu : ÉCHEC.
+- [ ] **Étape 3 : implémenter `check-ports.mjs`**, et ajouter à la racine :
+  - `"dev": "node scripts/check-ports.mjs 3000 8000 3100 && pnpm db:up && docker compose -f infra/docker-compose.dev.yml up -d caddy && concurrently --kill-others-on-fail -n auth,api,site,ext -c blue,green,magenta,yellow \"pnpm dev:auth\" \"wait-on -t 120000 http-get://localhost:3000/auth/health && pnpm dev:api\" \"pnpm dev:site\" \"pnpm dev:ext\""` ;
+  - `"dev:stop": "docker compose -f infra/docker-compose.dev.yml stop caddy postgres"`.
+- [ ] **Étape 4 : vérifier en vrai.**
+  - Lancer `pnpm dev` en arrière-plan. Résultat attendu : les 4 préfixes apparaissent, `[api]` démarre après la santé de l'auth, et `[ext]` affiche `Opened browser`.
+  - Lancer `pnpm e2e:login`. Résultat attendu : `E2E LOGIN OK`.
+  - Arrêter avec SIGINT, puis vérifier que les ports 3000, 8000 et 3100 sont libérés.
+  - Relancer `pnpm dev` avec un port volontairement occupé. Résultat attendu : le message clair.
+- [ ] **Étape 5 : README.** Remplacer la liste des 4 terminaux par `pnpm dev`, et garder les commandes séparées comme alternative. Expliquer `pnpm dev:stop`. Commit : `chore(dev): pnpm dev lance toute la stack en une commande`.
+
+---
+
 ## Couverture du spec
 
 | Spec | Tâche |
@@ -481,6 +512,7 @@ test/risk-badge.test.tsx, test/controller.test.ts
 | §4.7 langue selon le site, préférence de la popup | 7, 9 |
 | §12 adaptateurs testés sur pages réelles enregistrées | 2, 5, 6 |
 | §10 vie privée : aucune donnée envoyée, identité du vendeur gardée côté client | contraintes globales, tâches 2 et 9 |
+| (demande utilisateur) une seule commande pour la stack de dev | 10 |
 
 **Hors phase 2 :**
 - les icônes sur les cartes et `findCards` (phase 3) ;
