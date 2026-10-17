@@ -21,6 +21,8 @@ const NON_SEARCH_SECTIONS = new Set([
 
 const PROFILE_LINK = 'a[href*="/marketplace/profile/"]';
 const PROFILE_ID_RE = /\/marketplace\/profile\/(\d+)/;
+// h1 de la navigation du site ou d'un panneau, jamais le titre d'une annonce.
+const SITE_HEADING_RE = /^(Marketplace|Notifications)$/i;
 const LOCATION_LINK = 'a[href^="https://www.facebook.com/marketplace/"]';
 const POSTED_LINE_RE = /^(Publié|Listed|Geplaatst)\b/i;
 const BELGIAN_REGIONS = new Set(["WAL", "BRU", "VLG"]);
@@ -61,23 +63,55 @@ function pageType(url: URL): PageType {
 	return NON_SEARCH_SECTIONS.has(section) ? "other" : "search";
 }
 
-function isListingContainer(el: Element): boolean {
+/** Le titre de la fiche : premier `h1` du conteneur qui n'est pas un titre du site. */
+function listingHeading(container: Element): Element | null {
 	return (
-		el.querySelector("h1") !== null && el.querySelector(PROFILE_LINK) !== null
+		[...container.querySelectorAll("h1")].find(
+			(h1) => !SITE_HEADING_RE.test(textOf(h1) ?? ""),
+		) ?? null
 	);
+}
+
+function productIdOf(link: Element): string | null {
+	try {
+		return new URL(
+			link.getAttribute("href") ?? "",
+			"https://www.facebook.com",
+		).searchParams.get("product_id");
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Un conteneur est la fiche de `itemId` s'il a un titre et un lien vendeur, et
+ * si ses liens vendeur, quand ils portent un `product_id`, nomment cette
+ * annonce. Sinon c'est une autre annonce (modale pas encore remplacée après une
+ * navigation) ou un panneau étranger (notifications, discussion).
+ */
+function isListingContainer(el: Element, itemId: string): boolean {
+	const links = [...el.querySelectorAll(PROFILE_LINK)];
+	if (!links.length || !listingHeading(el)) return false;
+	const productIds = links.map(productIdOf).filter((id) => id !== null);
+	return !productIds.length || productIds.includes(itemId);
 }
 
 /**
  * La fiche en modale coexiste avec la grille sous `[role="main"]` : le
- * dialogue complet passe d'abord, la page directe ensuite.
+ * dialogue le plus profond qui convient passe d'abord, la page directe ensuite.
  */
 function findRoot(doc: Document, url: URL): Element | null {
-	if (!idOf(url)) return null;
-	for (const dialog of doc.querySelectorAll('[role="dialog"]')) {
-		if (isListingContainer(dialog)) return dialog;
-	}
+	const itemId = idOf(url);
+	if (!itemId) return null;
+	const dialogs = [...doc.querySelectorAll('[role="dialog"]')].filter((d) =>
+		isListingContainer(d, itemId),
+	);
+	const innermost = dialogs.find(
+		(d) => !dialogs.some((other) => other !== d && d.contains(other)),
+	);
+	if (innermost) return innermost;
 	const main = doc.querySelector('[role="main"]');
-	return main && isListingContainer(main) ? main : null;
+	return main && isListingContainer(main, itemId) ? main : null;
 }
 
 /**
@@ -113,6 +147,30 @@ function findText(
 	return [...root.querySelectorAll(selector)].find((el) =>
 		re.test(textOf(el) ?? ""),
 	);
+}
+
+/** Profondeur de `el` sous son ancêtre `ancestor`. */
+function depthBelow(el: Element, ancestor: Element): number {
+	let depth = 0;
+	for (let n: Element | null = el; n && n !== ancestor; n = n.parentElement)
+		depth++;
+	return depth;
+}
+
+/**
+ * Valeur de la ligne `label` : le libellé et la valeur sont rendus par le même
+ * composant, donc à la même profondeur sous leur ancêtre commun. Un texte plus
+ * lointain (la description, quand la valeur manque) est refusé.
+ */
+function lineValue(label: Element, root: Element): Element | undefined {
+	const value = nextText(label, root);
+	if (!value) return undefined;
+	let common: Element | null = label.parentElement;
+	while (common && !common.contains(value)) common = common.parentElement;
+	if (!common) return undefined;
+	return depthBelow(label, common) === depthBelow(value, common)
+		? value
+		: undefined;
 }
 
 /** Bloc du prix : le premier frère qui suit le `h1` (ou un de ses ancêtres). */
@@ -167,10 +225,10 @@ function readDetails(root: Element): {
 	description?: string;
 } {
 	const label = findText(root, CONDITION_LABEL_RE);
-	const value = label ? nextText(label, root) : undefined;
+	const value = label ? lineValue(label, root) : undefined;
 	const condition = textOf(value);
 	// Sans ligne État, la description suit directement le titre « Détails ».
-	const after = value ?? findText(root, DETAILS_TITLE_RE, "h2");
+	const after = value ?? label ?? findText(root, DETAILS_TITLE_RE, "h2");
 	const descriptionEl = after ? nextText(after, root) : undefined;
 	const description = descriptionEl ? str(multiline(descriptionEl)) : undefined;
 	return { condition, description };
@@ -217,7 +275,7 @@ function extract(doc: Document, url: URL, now: Date): ExtractResult | null {
 	const root = findRoot(doc, url);
 	if (!site || !externalId || !root) return null;
 
-	const h1 = root.querySelector("h1");
+	const h1 = listingHeading(root);
 	const title = textOf(h1);
 	if (!h1 || !title) return null;
 
@@ -282,7 +340,7 @@ export function createFacebookAdapter(
 			return findRoot(doc, url);
 		},
 		badgeAnchor(root) {
-			return root.querySelector("h1");
+			return listingHeading(root);
 		},
 	};
 }
