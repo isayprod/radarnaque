@@ -498,13 +498,175 @@ describe("twhAdapter.extractListing — robustness and NL", () => {
 	});
 });
 
-describe("twhAdapter — cartes (avant la tâche 6)", () => {
-	test("findCards rend [] et cardAnchor rend null", () => {
-		const doc = fixed();
+const SEARCH_URL = new URL("https://www.2ememain.be/q/iphone/");
+const SEARCH_IDS = [
+	"m1000000101",
+	"m1000000102",
+	"m1000000103",
+	"m1000000104",
+	"m1000000105",
+	"m1000000106",
+];
+
+function search(): Document {
+	return loadFixture("twh/search.html");
+}
+
+/** Cartes de la fixture, en échouant si la page n'en donne aucune. */
+function searchCards(doc: Document, url = SEARCH_URL) {
+	const cards = twhAdapter.findCards(doc, url);
+	if (!cards.length) throw new Error("findCards returned no card");
+	return cards;
+}
+
+describe("twhAdapter — page de résultats", () => {
+	test("pageType vaut search sur /q/ et /l/ avec des cartes", () => {
+		const doc = search();
+		expect(twhAdapter.pageType(SEARCH_URL, doc)).toBe("search");
 		expect(
-			twhAdapter.findCards(doc, new URL("https://www.2ememain.be/q/iphone/")),
+			twhAdapter.pageType(
+				new URL(
+					"https://www.2ememain.be/l/telecoms/telephonie-mobile-apple-iphone/q/iphone/",
+				),
+				doc,
+			),
+		).toBe("search");
+		expect(
+			twhAdapter.pageType(new URL("https://www.2dehands.be/q/iphone/"), doc),
+		).toBe("search");
+	});
+
+	test("pageType vaut other hors /l/ et /q/, ou sans carte", () => {
+		const empty = new DOMParser().parseFromString("", "text/html");
+		expect(
+			twhAdapter.pageType(new URL("https://www.2ememain.be/"), search()),
+		).toBe("other");
+		expect(twhAdapter.pageType(SEARCH_URL, empty)).toBe("other");
+		expect(twhAdapter.pageType(SEARCH_URL, fixed())).toBe("other");
+		expect(twhAdapter.pageType(FIXED_URL, search())).toBe("other");
+		expect(twhAdapter.pageType(FIXED_URL, fixed())).toBe("listing");
+	});
+
+	test("findCards rend les cartes non sponsorisées, dans l'ordre, sans suivi", () => {
+		const doc = search();
+		const cards = searchCards(doc);
+		expect(cards.map((c) => c.externalId)).toEqual(SEARCH_IDS);
+		for (const card of cards) {
+			expect(card.element.tagName).toBe("LI");
+			expect(card.url).toMatch(
+				new RegExp(
+					`^https://www\\.2ememain\\.be/v/telecoms/telephonie-mobile-apple-iphone/${card.externalId}-[a-z0-9-]+$`,
+				),
+			);
+		}
+		expect(cards[1]?.url).toBe(
+			"https://www.2ememain.be/v/telecoms/telephonie-mobile-apple-iphone/m1000000102-iphone-14-pro",
+		);
+		// Une carte par élément de liste, malgré les trois variantes de mise en page.
+		expect(new Set(cards.map((c) => c.element)).size).toBe(cards.length);
+	});
+
+	test("la carte sponsorisée et la carte sans lien sont ignorées", () => {
+		const doc = search();
+		const items = [...doc.querySelectorAll("ul > li")];
+		const cards = searchCards(doc);
+		expect(items).toHaveLength(9);
+		expect(doc.querySelector('a[href*="/a1000000201-"]')).not.toBeNull();
+		expect(cards.map((c) => c.element)).not.toContain(items[0]);
+		expect(cards.map((c) => c.element)).not.toContain(items[2]);
+		expect(cards[0]?.element).toBe(items[3]);
+	});
+
+	test("sur 2dehands, l'URL des cartes suit l'hôte de la page", () => {
+		const url = new URL("https://www.2dehands.be/q/iphone/");
+		const cards = searchCards(search(), url);
+		expect(cards.map((c) => c.externalId)).toEqual(SEARCH_IDS);
+		for (const card of cards) {
+			expect(card.url.startsWith("https://www.2dehands.be/v/")).toBe(true);
+		}
+	});
+
+	test("findCards rend [] hors page de résultats ou hors site", () => {
+		const doc = search();
+		expect(twhAdapter.findCards(doc, FIXED_URL)).toEqual([]);
+		expect(
+			twhAdapter.findCards(doc, new URL("https://www.2ememain.be/")),
 		).toEqual([]);
-		expect(twhAdapter.cardAnchor(doc.body)).toBeNull();
-		expect(twhAdapter.listingFromCard).toBeUndefined();
+		expect(
+			twhAdapter.findCards(doc, new URL("https://www.example.com/q/iphone/")),
+		).toEqual([]);
+	});
+
+	test("findCards sous une seule carte (ajout du défilement infini)", () => {
+		const doc = search();
+		const item = doc.querySelectorAll("ul > li")[4];
+		if (!item) throw new Error("no list item");
+		const cards = twhAdapter.findCards(item, SEARCH_URL);
+		expect(cards.map((c) => c.externalId)).toEqual(["m1000000102"]);
+		expect(cards[0]?.element).toBe(item);
+	});
+
+	test("un lien hors site ou sans id m<chiffres> n'est pas une carte", () => {
+		const doc = search();
+		const list = doc.querySelector("ul");
+		for (const href of [
+			"https://ads.example/v/telecoms/x/m1234567890-pub",
+			"/v/telecoms/x/a1234567890-pub",
+			"/v/telecoms/m1234567890-court",
+		]) {
+			const li = doc.createElement("li");
+			const a = doc.createElement("a");
+			a.setAttribute("href", href);
+			a.textContent = "Pub";
+			li.append(a);
+			list?.prepend(li);
+		}
+		expect(searchCards(doc).map((c) => c.externalId)).toEqual(SEARCH_IDS);
+	});
+});
+
+describe("twhAdapter.cardAnchor", () => {
+	test("le titre de la carte, jamais null", () => {
+		const doc = search();
+		for (const card of searchCards(doc)) {
+			const anchor = twhAdapter.cardAnchor(card.element);
+			expect(anchor).not.toBeNull();
+			const title = card.element.querySelector("img")?.getAttribute("alt");
+			expect(anchor?.textContent).toBe(title);
+			expect(anchor?.querySelector("img")).toBeNull();
+			expect(card.element.contains(anchor)).toBe(true);
+		}
+		const first = searchCards(doc)[0];
+		if (!first) throw new Error("no card");
+		expect(twhAdapter.cardAnchor(first.element)?.textContent).toBe(
+			"Apple iPhone 15 - 256 Go - Noir - Excellent état",
+		);
+	});
+
+	test("le titre de la variante affichée", () => {
+		const doc = search();
+		const card = searchCards(doc)[0];
+		if (!card) throw new Error("no card");
+		const [desktop, tablet] = card.element.querySelectorAll('a[href*="/v/"]');
+		if (!desktop || !tablet) throw new Error("no layout variants");
+		desktop.checkVisibility = () => false;
+		const anchor = twhAdapter.cardAnchor(card.element);
+		expect(tablet.contains(anchor)).toBe(true);
+		expect(anchor?.textContent).toBe(
+			"Apple iPhone 15 - 256 Go - Noir - Excellent état",
+		);
+	});
+
+	test("repli sur la carte quand elle n'a pas de titre", () => {
+		const doc = search();
+		const items = doc.querySelectorAll("ul > li");
+		const banner = items[1];
+		const noHref = items[2];
+		if (!banner || !noHref) throw new Error("no list items");
+		expect(twhAdapter.cardAnchor(banner)).toBe(banner);
+		// Carte sans lien de fiche : son titre reste lisible.
+		expect(twhAdapter.cardAnchor(noHref)?.textContent).toBe("iPhone SE 2020");
+		const bare = doc.createElement("li");
+		expect(twhAdapter.cardAnchor(bare)).toBe(bare);
 	});
 });

@@ -43,6 +43,7 @@ const FORBIDDEN_PATTERNS: Array<string | RegExp> = [
 const EXPECTED_FIXTURES = [
 	"twh/listing-fixed.html",
 	"twh/listing-bidding-skeleton.html",
+	"twh/search.html",
 	"facebook/grid.html",
 	"facebook/item-modal.html",
 	"facebook/item-page.html",
