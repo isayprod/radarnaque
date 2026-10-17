@@ -157,14 +157,16 @@ pour pouvoir revenir ensuite au modèle d'origine.
 ### Faux fournisseur (`stub`), sans réseau ni clé
 
 ```sh
-pnpm llm:stub                # terminal à part : http://127.0.0.1:20199/v1 (autre port : pnpm llm:stub 20200)
+pnpm llm:stub                # terminal à part : http://127.0.0.1:20199/v1
 cd services/api && uv run --env-file ../../infra/.env radarnaque-llm use stub stub-model --kind text
 pnpm e2e:scan                # contre la stack lancée (pnpm dev)
 ```
 
 Le faux fournisseur répond toujours la même analyse (score 42, une raison, textes FR/NL fixes)
 et écrit une ligne par requête : modèle, nombre de messages, présence d'images, jamais le
-contenu ni les en-têtes. Il n'écoute que sur `127.0.0.1`.
+contenu ni les en-têtes. Il n'écoute que sur `127.0.0.1`. Le port 20199 est imposé : le
+fournisseur `stub` de `providers.toml` n'a pas de `base_url_env`, l'API appelle donc toujours
+`http://localhost:20199/v1`, même si le faux fournisseur est lancé sur un autre port.
 
 `pnpm e2e:scan` reprend la connexion de `pnpm e2e:login` (compte neuf, donc essai neuf de 3
 scans à chaque exécution), puis envoie deux fois le même scan texte, sans photo : le premier
@@ -173,17 +175,27 @@ même analyse) et `remaining.total` baisse de 1 à chaque scan. Il affiche
 `E2E SCAN OK (provider=<p>, model=<m>, score=<n>)` ; sinon il nomme l'étape en échec
 (connexion, modèle actif, premier scan, second scan, cache ou quota) et sort avec le code 1.
 Le modèle affiché est le modèle actif du type `text`, lu avec `radarnaque-llm list` ;
-`E2E_PROVIDER` et `E2E_MODEL` permettent de l'imposer. Il fonctionne avec n'importe quel
-fournisseur ; le score 42 n'est vérifié qu'avec `stub`.
+`E2E_PROVIDER` et `E2E_MODEL` permettent de l'imposer, à condition de définir les deux : avec
+une seule des deux, le modèle est lu avec `radarnaque-llm list`. Il fonctionne avec n'importe
+quel fournisseur ; le score 42 n'est vérifié qu'avec `stub`.
+
+Au-delà d'environ 3 connexions par minute (`pnpm e2e:login` et `pnpm e2e:scan` confondus),
+le limiteur du service auth répond 429 à l'étape « connexion 3 »
+(`POST /auth/sign-in/email-otp`) : attendre une minute avant de relancer.
 
 Le fournisseur `stub` figure aussi dans le `providers.toml` de la production : il n'a pas de
 clé et ne vise que `localhost:20199`, où rien n'écoute en production. Il est donc sans effet
-tant qu'aucun type de scan ne l'utilise.
+tant qu'aucun type de scan ne l'utilise. Après `radarnaque-llm use stub stub-model`, la ligne
+`stub/stub-model` reste dans la table `models`, même une fois un autre modèle activé : tant
+qu'elle existe, l'API refuse de démarrer si `stub` est retiré de `providers.toml`.
 
 ### OmniRoute (routeur local vers des modèles gratuits ou par abonnement)
 
 1. Lancer OmniRoute sur le port 20128 : `npx omniroute`, ou avec Docker
-   `docker run -d --name omniroute -p 20128:20128 diegosouzapw/omniroute`.
+   `docker run -d --name omniroute -p 20128:20128 diegosouzapw/omniroute` (commande à
+   vérifier dans la documentation d'OmniRoute). Sans volume monté pour ses données, la
+   configuration d'OmniRoute (fournisseurs connectés, clé d'API) est perdue quand le
+   conteneur est recréé.
 2. Dans son interface (`http://localhost:20128`), connecter au moins un fournisseur, puis
    copier la clé d'API dans **Dashboard → Endpoints**.
 3. Dans `infra/.env` : `OMNIROUTE_API_KEY=<clé>` (et `OMNIROUTE_BASE_URL` seulement si
