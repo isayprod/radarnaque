@@ -3,13 +3,21 @@ import {
 	parseAccountAge,
 	parsePriceText,
 } from "../listing/parse";
-import type { Listing, Site } from "../listing/types";
-import type { ExtractResult, MarketplaceAdapter } from "./types";
+import type { Listing, PageType, Site } from "../listing/types";
+import type { CardRef, ExtractResult, MarketplaceAdapter } from "./types";
 
 const SITES: Site[] = ["2ememain.be", "2dehands.be"];
 
 const LISTING_PATH_RE = /^\/v\/[^/]+\/[^/]+\/(m\d+)/i;
 const CONFIG_PREFIX_RE = /^\s*window\.__CONFIG__\s*=/;
+/** Pages de résultats : catégorie (`/l/…`) ou recherche libre (`/q/…`). */
+const SEARCH_PATH_RE = /^\/(l|q)\//i;
+/**
+ * Lien de carte : repéré par le motif d'URL de la fiche, pas par les classes du
+ * site (hachées). Les annonces sponsorisées (Admarkt) ont un id `a<chiffres>`,
+ * que `LISTING_PATH_RE` écarte.
+ */
+const CARD_LINK = 'a[href*="/v/"]';
 
 const PRICE_TYPES: Record<string, Listing["priceType"]> = {
 	FIXED: "fixed",
@@ -264,6 +272,91 @@ function isListingPage(url: URL, doc: Document): boolean {
 	);
 }
 
+/** Id de la fiche visée par `href`, si le lien reste sur 2ememain ou 2dehands. */
+function cardIdOfHref(href: string | null, pageUrl: URL): string | null {
+	if (!href) return null;
+	try {
+		const url = new URL(href, pageUrl.origin);
+		return siteOf(url) ? idOf(url) : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Une carte est l'élément de liste qui contient un lien de fiche ; elle
+ * répète ce lien dans ses trois mises en page (bureau, tablette, mobile), d'où
+ * la déduplication par id et par élément. Rien hors page de résultats.
+ */
+function findCards(root: ParentNode, pageUrl: URL): CardRef[] {
+	if (!siteOf(pageUrl) || !SEARCH_PATH_RE.test(pageUrl.pathname)) return [];
+	const seen = new Set<string>();
+	const used = new Set<Element>();
+	const cards: CardRef[] = [];
+	for (const link of root.querySelectorAll(CARD_LINK)) {
+		const href = link.getAttribute("href");
+		const id = cardIdOfHref(href, pageUrl);
+		// Hors d'un élément de liste (lien interne d'une fiche, etc.) : pas une carte.
+		const element = link.closest('li, [role="listitem"]');
+		if (!href || !id || !element || seen.has(id) || used.has(element)) continue;
+		seen.add(id);
+		used.add(element);
+		const { pathname } = new URL(href, pageUrl.origin);
+		cards.push({
+			element,
+			externalId: id,
+			// Hôte de la page (même origine pour `fetch`), sans paramètres de suivi.
+			url: `${pageUrl.origin}${pathname}`,
+		});
+	}
+	return cards;
+}
+
+function pageType(url: URL, doc: Document): PageType {
+	if (isListingPage(url, doc)) return "listing";
+	return findCards(doc, url).length > 0 ? "search" : "other";
+}
+
+/** Variante de mise en page affichée ; sans `checkVisibility`, toutes le sont. */
+function isRendered(el: Element): boolean {
+	return typeof el.checkVisibility === "function" ? el.checkVisibility() : true;
+}
+
+/** Premier élément portant du texte propre sous `el`, dans l'ordre du document. */
+function firstText(el: Element): Element | null {
+	for (const candidate of [el, ...el.querySelectorAll("*")]) {
+		const own = [...candidate.childNodes].some(
+			(n) =>
+				n.nodeType === Node.TEXT_NODE && normalizeText(n.textContent ?? ""),
+		);
+		if (own) return candidate;
+	}
+	return null;
+}
+
+/**
+ * Titre de la carte : dans le lien de couverture affiché (celui qui porte la
+ * photo), premier texte hors du bloc photo (favori, texte pour lecteur d'écran).
+ */
+function cardTitle(card: Element): Element | null {
+	const covers = [...card.querySelectorAll("a")].filter((a) =>
+		a.querySelector("img"),
+	);
+	const cover = covers.find(isRendered) ?? covers[0];
+	if (!cover) return null;
+	for (const part of cover.children) {
+		if (part.tagName === "IMG" || part.querySelector("img")) continue;
+		const title = firstText(part);
+		if (title) return title;
+	}
+	return null;
+}
+
+/** Le titre de la carte, sinon la carte : jamais null. */
+function cardAnchor(card: Element): Element {
+	return cardTitle(card) ?? card;
+}
+
 function extract(doc: Document, url: URL, site: Site): ExtractResult | null {
 	const externalId = idOf(url);
 	if (!externalId) return null;
@@ -367,9 +460,7 @@ export const twhAdapter: MarketplaceAdapter = {
 	id: "twh",
 	sites: SITES,
 	siteOf,
-	pageType(url, doc) {
-		return isListingPage(url, doc) ? "listing" : "other";
-	},
+	pageType,
 	extractListing(doc, url) {
 		const site = siteOf(url);
 		if (!site || !isListingPage(url, doc)) return null;
@@ -381,11 +472,6 @@ export const twhAdapter: MarketplaceAdapter = {
 	badgeAnchor(root) {
 		return sidebarTitle(root) ?? root.querySelector("h1");
 	},
-	// Cartes des résultats : tâche 6.
-	findCards() {
-		return [];
-	},
-	cardAnchor() {
-		return null;
-	},
+	findCards,
+	cardAnchor,
 };
