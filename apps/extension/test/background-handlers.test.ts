@@ -1,16 +1,17 @@
 import type { Me } from "@radarnaque/shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing/fake-browser";
-import { createApiClient } from "../lib/api-client";
+import { adapterFor } from "../lib/adapters/registry";
+import { ApiRequestError, createApiClient } from "../lib/api-client";
 import { AuthError } from "../lib/auth-client";
 import {
 	createHandlers,
 	createMessageListener,
-	guardInternalSender,
+	guardSender,
 	type HandlerDeps,
 	handleExternal,
 } from "../lib/background-handlers";
-import type { BgRequest } from "../lib/messages";
+import { type BgRequest, CONTENT_SCRIPT_MESSAGES } from "../lib/messages";
 import { sessionToken } from "../lib/storage";
 import { errorResponse, fetchSequence, trialMe } from "./helpers";
 
@@ -194,6 +195,49 @@ describe("background handlers", () => {
 		}
 	});
 
+	test("content/access without token → signedOut, no getMe", async () => {
+		const { deps, api } = makeDeps();
+		expect(await createHandlers(deps)({ type: "content/access" })).toEqual({
+			ok: true,
+			data: { status: "signedOut" },
+		});
+		expect(api.getMe).not.toHaveBeenCalled();
+	});
+
+	test("content/access with a session → access computed from me", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps } = makeDeps();
+		expect(await createHandlers(deps)({ type: "content/access" })).toEqual({
+			ok: true,
+			data: {
+				status: "active",
+				features: ["card_icons", "image_scan"],
+				unlimited: false,
+				remaining: { text: 3, image: 3, total: 3 },
+			},
+		});
+	});
+
+	test("content/access: expired session → signedOut; 503 → auth_unavailable", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps, api } = makeDeps();
+		const handle = createHandlers(deps);
+		api.getMe.mockRejectedValueOnce(new AuthError("session_expired"));
+		expect(await handle({ type: "content/access" })).toEqual({
+			ok: true,
+			data: { status: "signedOut" },
+		});
+		api.getMe.mockRejectedValueOnce(
+			new ApiRequestError(503, {
+				error: { code: "auth_unavailable", message: "", details: {} },
+			}),
+		);
+		expect(await handle({ type: "content/access" })).toEqual({
+			ok: false,
+			error: { code: "auth_unavailable" },
+		});
+	});
+
 	test("message listener answers asynchronously through sendResponse", async () => {
 		const { deps } = makeDeps();
 		const listener = createMessageListener(createHandlers(deps));
@@ -209,34 +253,106 @@ describe("background handlers", () => {
 	});
 });
 
-describe("internal sender check", () => {
+describe("sender check", () => {
 	const self = {
 		id: "abcdefghijklmnopabcdefghijklmnop",
 		baseUrl: "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
 	};
 	const popup = { id: self.id, url: `${self.baseUrl}popup.html` };
+	const tab = { id: 1, index: 0 };
+	const listingPage = {
+		id: self.id,
+		url: "https://www.2ememain.be/v/x/m1",
+		tab,
+	};
 	const forbidden = { ok: false, error: { code: "forbidden_sender" } };
+	const AUTH_MESSAGES: BgRequest[] = [
+		{ type: "auth/start", email: "a@b.be", locale: "fr" },
+		{ type: "auth/verify-otp", email: "a@b.be", otp: "123456" },
+		{ type: "auth/state" },
+		{ type: "auth/sign-out" },
+	];
 
 	function guarded() {
 		const handle = vi.fn(async (_req: BgRequest) => ({
 			ok: true as const,
 			data: "handled",
 		}));
-		return { handle, guard: guardInternalSender(handle, self) };
+		return {
+			handle,
+			guard: guardSender(handle, self, (url) => adapterFor(url) !== null),
+		};
 	}
 
-	test("a popup-like sender (own id, extension page, no tab) is accepted", async () => {
+	test("the content script allow-list is exactly the three content messages", () => {
+		expect([...CONTENT_SCRIPT_MESSAGES].sort()).toEqual([
+			"content/access",
+			"scan/run",
+			"ui/open-popup",
+		]);
+	});
+
+	test("a popup-like sender (own id, extension page, no tab) is accepted for every message", async () => {
 		const { handle, guard } = guarded();
-		expect(await guard({ type: "auth/state" }, popup)).toEqual({
+		for (const req of [
+			...AUTH_MESSAGES,
+			{ type: "content/access" },
+		] as BgRequest[]) {
+			expect(await guard(req, popup)).toEqual({ ok: true, data: "handled" });
+			expect(handle).toHaveBeenLastCalledWith(req);
+		}
+	});
+
+	test("a content script on a supported site may send the content messages", async () => {
+		const { handle, guard } = guarded();
+		expect(await guard({ type: "content/access" }, listingPage)).toEqual({
 			ok: true,
 			data: "handled",
 		});
-		expect(handle).toHaveBeenCalledWith({ type: "auth/state" });
+		expect(handle).toHaveBeenCalledWith({ type: "content/access" });
+		expect(
+			await guard(
+				{ type: "ui/open-popup" },
+				{
+					...listingPage,
+					url: "https://www.facebook.com/marketplace/item/1/",
+				},
+			),
+		).toEqual({ ok: true, data: "handled" });
+		expect(handle).toHaveBeenCalledTimes(2);
 	});
 
-	test("a sender with a tab (content script, web page) is rejected", async () => {
+	test("a content script on a supported site may not send auth messages", async () => {
 		const { handle, guard } = guarded();
-		const tab = { id: 1, index: 0 };
+		for (const req of AUTH_MESSAGES) {
+			expect(await guard(req, listingPage)).toEqual(forbidden);
+		}
+		for (const req of [{ type: "nope" }, null, "content/access"]) {
+			expect(await guard(req as BgRequest, listingPage)).toEqual(forbidden);
+		}
+		expect(handle).not.toHaveBeenCalled();
+	});
+
+	test("content messages from an unsupported page, a foreign id or without tab are rejected", async () => {
+		const { handle, guard } = guarded();
+		for (const sender of [
+			{ ...listingPage, url: "https://evil.example/" },
+			{ ...listingPage, url: "https://www.2ememain.be.evil.com/v/x/m1" },
+			{ ...listingPage, url: "pas une url" },
+			{ id: self.id, tab },
+			{ ...listingPage, id: "ponmlkjihgfedcbaponmlkjihgfedcba" },
+			{ url: listingPage.url, tab },
+			{ id: self.id, url: listingPage.url },
+		]) {
+			expect(await guard({ type: "content/access" }, sender)).toEqual(
+				forbidden,
+			);
+		}
+		expect(handle).not.toHaveBeenCalled();
+	});
+
+	test("an extension page inside a tab is not a popup", async () => {
+		const { handle, guard } = guarded();
 		for (const sender of [
 			{ ...popup, tab },
 			{ id: self.id, url: "https://evil.example/", tab },

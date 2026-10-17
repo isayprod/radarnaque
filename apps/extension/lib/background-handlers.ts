@@ -1,4 +1,5 @@
 import type { Locale, Me } from "@radarnaque/shared";
+import { accessOf } from "./access";
 import { ApiRequestError } from "./api-client";
 import {
 	AuthError,
@@ -8,7 +9,13 @@ import {
 } from "./auth-client";
 import { isValidEmail, normalizeEmail } from "./email";
 import type { JwtProvider } from "./jwt-provider";
-import type { AuthState, BgRequest, BgResponse } from "./messages";
+import {
+	type AuthState,
+	type BgRequest,
+	type BgResponse,
+	CONTENT_SCRIPT_MESSAGES,
+	type ContentAccess,
+} from "./messages";
 
 /** Ce dont les handlers ont besoin du stockage (`sessionToken` de `storage.ts`). */
 export interface SessionTokenStore {
@@ -68,17 +75,31 @@ export function createHandlers(
 		jwt.invalidate();
 	}
 
-	async function state(): Promise<BgResponse<AuthState>> {
-		if (!(await sessionToken.getValue())) return ok({ status: "signedOut" });
+	/**
+	 * `Me` de l'utilisateur connecté, ou `null` sans session (aucun appel réseau) ou si
+	 * elle a expiré. Toute autre erreur (réseau, 503 `auth_unavailable`) est propagée.
+	 */
+	async function currentMe(): Promise<Me | null> {
+		if (!(await sessionToken.getValue())) return null;
 		try {
-			return ok({ status: "signedIn", me: await api.getMe() });
+			return await api.getMe();
 		} catch (error) {
 			// L'api client a déjà effacé la session (onUnauthenticated).
 			if (error instanceof AuthError && error.code === "session_expired") {
-				return ok({ status: "signedOut" });
+				return null;
 			}
-			return fail(errorCode(error));
+			throw error;
 		}
+	}
+
+	async function state(): Promise<BgResponse<AuthState>> {
+		const me = await currentMe();
+		return ok(me ? { status: "signedIn", me } : { status: "signedOut" });
+	}
+
+	async function contentAccess(): Promise<BgResponse<ContentAccess>> {
+		const me = await currentMe();
+		return ok(me ? accessOf(me) : { status: "signedOut" });
 	}
 
 	async function handle(req: BgRequest): Promise<BgResponse<unknown>> {
@@ -100,6 +121,8 @@ export function createHandlers(
 			}
 			case "auth/state":
 				return state();
+			case "content/access":
+				return contentAccess();
 			case "auth/sign-out": {
 				const token = await sessionToken.getValue();
 				// La déconnexion locale a lieu même si la révocation distante échoue.
@@ -142,9 +165,8 @@ export interface InternalSender {
 }
 
 /**
- * Un message interne n'est accepté que d'une page de cette extension (popup) : même
- * identifiant, URL sous `chrome-extension://<id>/`, et aucun onglet. Un émetteur avec
- * `tab` est un script de contenu ou un contexte web : refusé (`forbidden_sender`).
+ * Page de cette extension (popup) : même identifiant, URL sous `chrome-extension://<id>/`,
+ * et aucun onglet. Un émetteur avec `tab` est un content script ou un contexte web.
  */
 export function isOwnExtensionPage(
 	sender: InternalSender,
@@ -158,15 +180,45 @@ export function isOwnExtensionPage(
 	);
 }
 
-/** Enveloppe le handler interne : tout émetteur qui n'est pas une page de l'extension est refusé. */
-export function guardInternalSender(
+/** Content script de cette extension, dans un onglet d'un site pris en charge. */
+function isOwnContentScript(
+	sender: InternalSender,
+	self: ExtensionSelf,
+	isSupportedPage: (url: URL) => boolean,
+): boolean {
+	if (sender.id !== self.id || !sender.tab || typeof sender.url !== "string") {
+		return false;
+	}
+	try {
+		return isSupportedPage(new URL(sender.url));
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Enveloppe le handler interne. Une page de l'extension a droit à tout ; un content
+ * script d'un site pris en charge, uniquement à `CONTENT_SCRIPT_MESSAGES` (jamais
+ * `auth/*`). Tout autre émetteur ou message répond `forbidden_sender`.
+ */
+export function guardSender(
 	handle: (req: BgRequest) => Promise<BgResponse<unknown>>,
 	self: ExtensionSelf,
+	isSupportedPage: (url: URL) => boolean,
 ): (req: BgRequest, sender: InternalSender) => Promise<BgResponse<unknown>> {
-	return async (req, sender) =>
-		isOwnExtensionPage(sender ?? {}, self)
-			? handle(req)
-			: fail("forbidden_sender");
+	return async (req, sender) => {
+		const from = sender ?? {};
+		if (isOwnExtensionPage(from, self)) return handle(req);
+		const type = (req as { type?: unknown } | null)?.type;
+		if (
+			typeof type === "string" &&
+			CONTENT_SCRIPT_MESSAGES.has(type as BgRequest["type"]) &&
+			isOwnContentScript(from, self, isSupportedPage)
+		) {
+			return handle(req);
+		}
+		return fail("forbidden_sender");
+	};
 }
 
 /**
