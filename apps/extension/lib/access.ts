@@ -14,9 +14,12 @@ function remainingOf(me: Me, kind: ScanKind): number | null {
 	return me.quotas.find((q) => q.scanKind === kind)?.remaining ?? null;
 }
 
-/** Droits de la page déduits de `GET /api/me`. Sans plan actif : `noSubscription`. */
+/**
+ * Droits de la page déduits de `GET /api/me`. Sans plan actif : `noSubscription`, sauf
+ * pour un admin (`unlimited`), que le serveur laisse scanner même sans abonnement.
+ */
 export function accessOf(me: Me): ContentAccess {
-	if (me.plan === null) return { status: "noSubscription" };
+	if (me.plan === null && !me.unlimited) return { status: "noSubscription" };
 	return {
 		status: "active",
 		features: me.features,

@@ -362,6 +362,14 @@ describe("sender check", () => {
 		expect(handle).not.toHaveBeenCalled();
 	});
 
+	test("an extension page inside a tab may not send content messages either", async () => {
+		const { handle, guard } = guarded();
+		expect(await guard({ type: "content/access" }, { ...popup, tab })).toEqual(
+			forbidden,
+		);
+		expect(handle).not.toHaveBeenCalled();
+	});
+
 	test("a foreign extension id or a non-extension page is rejected", async () => {
 		const { handle, guard } = guarded();
 		for (const sender of [
