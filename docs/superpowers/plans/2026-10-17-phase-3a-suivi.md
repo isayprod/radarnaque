@@ -4,26 +4,10 @@ Remarques relevées pendant les relectures de la phase 3a (serveur des analyses 
 
 ## À intégrer au brief de la phase 3b (extension)
 
-- **Bornes d'entrée à tronquer côté client**, sinon le serveur répond `422 invalid_listing` :
+Les points sur les bornes d'entrée, le scan photos, `remaining.*`, l'enveloppe d'erreur et l'identité du vendeur sont traités par la phase 3b (voir « Décisions prises pendant l'exécution »). Reste ouvert :
 
-  | Champ | Limite |
-  |---|---|
-  | `title` | 300 |
-  | `description` | 5 000 |
-  | `images` | 10 |
-  | `category` | 200 |
-  | `condition` | 100 |
-  | `postedAt` | 64 |
-  | `location.city`, `location.region`, `location.country` | 100 chacun |
-  | `signals` | 20 |
-  | `params` de chaque signal | 10 entrées, clés de 1 à 40 caractères, chaînes de 200 au plus, entiers stricts |
-
-  `condition` est lu dans le DOM : si le site change son balisage, la valeur peut dépasser la limite.
-- **Scan photos** : il est refusé (`422`, champ `listing.images`) si l'annonce n'a aucune photo. Ne pas proposer le bouton dans ce cas.
-- **`remaining.*` vaut `null` pour un admin** : c'est un quota illimité.
-- **Historique** : `score`, `level`, `site` et `title` valent `null` pour un scan sans résultat. Un scan sans score et sans `failed` est « en cours ou inconnu ». C'est aussi le cas, pour toujours, d'un scan dont le serveur est mort en pleine analyse.
-- **Format des erreurs** : toutes suivent l'enveloppe `ApiErrorBody`, `{ error: { code, message, details } }`. L'OpenAPI décrit encore les 422 avec le schéma FastAPI par défaut, `HTTPValidationError` : ne pas s'y fier.
-- **Identité du vendeur** : `seller.id`, `seller.name` et `seller.profileUrl` doivent être retirés avant l'envoi, sinon le serveur répond `422`.
+- **Historique** : `score`, `level`, `site` et `title` valent `null` pour un scan sans résultat. Un scan sans score et sans `failed` est « en cours ou inconnu ». C'est aussi le cas, pour toujours, d'un scan dont le serveur est mort en pleine analyse. La phase 3b n'affiche pas l'historique : à prendre en compte quand une page ou la popup le montrera.
+- **OpenAPI** : les 422 sont encore décrits avec le schéma FastAPI par défaut, `HTTPValidationError`, alors que le serveur répond avec l'enveloppe `ApiErrorBody`. Ne pas s'y fier tant que ce n'est pas corrigé.
 
 ## Avant la mise en ligne
 
@@ -90,4 +74,22 @@ Remarques relevées pendant les relectures de la phase 3a (serveur des analyses 
 - **Clé du cache** : tout fait envoyé au LLM est couvert par `content_hash` ou `input_hash`. `category`, `condition`, `postedAt` et `location` sont dans `input_hash`. Un test de garde l'impose.
 - **Historique, `failed`** : un scan est en échec s'il a un `scan_failures` et aucun `scan_results`.
 - **Pool de connexions** : il est dimensionné pour des transactions verrouillées d'environ 80 s (`pool_size` 10, `max_overflow` 10).
-- **Bornes d'entrée** : bornes des champs envoyés au LLM (tableau ci-dessus) et corps plafonné à 1 MB sur `/api/*` dans Caddy.
+- **Bornes d'entrée** : bornes des champs envoyés au LLM et corps plafonné à 1 MB sur `/api/*` dans Caddy. Au-delà, le serveur répond `422 invalid_listing`.
+
+  | Champ | Limite |
+  |---|---|
+  | `title` | 300 |
+  | `description` | 5 000 |
+  | `images` | 10 |
+  | `category` | 200 |
+  | `condition` | 100 |
+  | `postedAt` | 64 |
+  | `location.city`, `location.region`, `location.country` | 100 chacun |
+  | `signals` | 20 |
+  | `params` de chaque signal | 10 entrées, clés de 1 à 40 caractères, chaînes de 200 au plus, entiers stricts |
+- **Extension, phase 3b** (faits dans `apps/extension`) :
+  - **Bornes d'entrée** : `lib/scan-payload.ts` (`toScanIn`) tronque tous les champs aux limites du tableau ci-dessus, en points de code, y compris `condition` lu dans le DOM, et écarte les `params` invalides. Un titre vide donne `invalid_listing` sans appel réseau. Le client ne filtre pas encore les URL des photos (http(s), 2 083 caractères au plus) : une seule URL invalide ferait refuser tout le scan en `422`.
+  - **Scan photos** : le bouton « Analyse avec photos » n'est proposé que si l'annonce a des photos et que le plan le permet (`image_scan`, ou admin).
+  - **Quotas** : `remaining.* = null` (admin, ou quota absent du plan) n'affiche aucun compteur, jamais « 0 ».
+  - **Erreurs** : le client API lit l'enveloppe `ApiErrorBody` ; un corps illisible donne le code `http_<statut>`. Chaque code a un message FR et NL.
+  - **Identité du vendeur** : `seller.id`, `seller.name` et `seller.profileUrl` sont retirés dans `toScanIn`, le seul point de passage vers l'API.
