@@ -37,6 +37,7 @@ export default defineBackground(() => {
 		auth: { startSignIn, verifyOtp, signOutRemote },
 		jwt,
 		api,
+		openPopup: () => browser.action.openPopup(),
 	});
 
 	// Messages internes : tout depuis les pages de l'extension (popup) ; depuis un

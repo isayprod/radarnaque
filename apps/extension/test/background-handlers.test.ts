@@ -1,4 +1,4 @@
-import type { Me } from "@radarnaque/shared";
+import type { AnalysisResult, Me, ScanIn } from "@radarnaque/shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing/fake-browser";
 import { adapterFor } from "../lib/adapters/registry";
@@ -11,9 +11,18 @@ import {
 	type HandlerDeps,
 	handleExternal,
 } from "../lib/background-handlers";
-import { type BgRequest, CONTENT_SCRIPT_MESSAGES } from "../lib/messages";
+import {
+	type BgRequest,
+	CONTENT_SCRIPT_MESSAGES,
+	type ScanRequest,
+} from "../lib/messages";
 import { sessionToken } from "../lib/storage";
-import { errorResponse, fetchSequence, trialMe } from "./helpers";
+import {
+	errorResponse,
+	fetchSequence,
+	sampleAnalysis,
+	trialMe,
+} from "./helpers";
 
 const PUBLIC_URL = "http://localhost:8080";
 
@@ -28,9 +37,22 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}) {
 		signOutRemote: vi.fn<(token: string) => Promise<void>>(async () => {}),
 	};
 	const jwt = { get: vi.fn<() => Promise<string>>(), invalidate: vi.fn() };
-	const api = { getMe: vi.fn<() => Promise<Me>>(async () => trialMe) };
-	const deps: HandlerDeps = { sessionToken, auth, jwt, api, ...overrides };
-	return { deps, auth, jwt, api };
+	const api = {
+		getMe: vi.fn<() => Promise<Me>>(async () => trialMe),
+		scan: vi.fn<(body: ScanIn) => Promise<AnalysisResult>>(
+			async () => sampleAnalysis,
+		),
+	};
+	const openPopup = vi.fn<() => Promise<void>>(async () => {});
+	const deps: HandlerDeps = {
+		sessionToken,
+		auth,
+		jwt,
+		api,
+		openPopup,
+		...overrides,
+	};
+	return { deps, auth, jwt, api, openPopup };
 }
 
 beforeEach(() => {
@@ -250,6 +272,104 @@ describe("background handlers", () => {
 				data: { status: "signedOut" },
 			}),
 		);
+	});
+});
+
+function scanRequest(overrides: Partial<ScanRequest> = {}): ScanRequest {
+	return {
+		listing: {
+			site: "2ememain.be",
+			externalId: "m123",
+			url: "https://www.2ememain.be/v/velo/m123",
+			title: "Vélo",
+			description: "Bon état.",
+			price: { amountCents: 15000, currency: "EUR" },
+			priceType: "fixed",
+			location: { city: "Namur" },
+			images: [],
+			seller: { id: "77", name: "Jean", profileUrl: "/u/jean", reviewCount: 4 },
+		},
+		signals: [{ id: "no_reviews", weight: 10, severity: "warning" }],
+		rulesVersion: 2,
+		scanKind: "text",
+		trigger: "button",
+		partial: false,
+		...overrides,
+	};
+}
+
+describe("scan and popup handlers", () => {
+	test("scan/run: success → ok(result), body sent without seller identity", async () => {
+		const { deps, api } = makeDeps();
+		expect(
+			await createHandlers(deps)({ type: "scan/run", scan: scanRequest() }),
+		).toEqual({ ok: true, data: sampleAnalysis });
+		expect(api.scan).toHaveBeenCalledTimes(1);
+		const body = api.scan.mock.calls[0]?.[0];
+		expect(body?.listing.seller).toEqual({ reviewCount: 4 });
+		expect(body?.rules).toEqual({
+			version: 2,
+			signals: [{ id: "no_reviews", weight: 10, severity: "warning" }],
+		});
+	});
+
+	test("scan/run: API and auth errors are mapped to their code", async () => {
+		const { deps, api } = makeDeps();
+		const handle = createHandlers(deps);
+		const run = () => handle({ type: "scan/run", scan: scanRequest() });
+		api.scan.mockRejectedValueOnce(
+			new ApiRequestError(502, {
+				error: { code: "analysis_failed", message: "", details: {} },
+			}),
+		);
+		expect(await run()).toEqual({
+			ok: false,
+			error: { code: "analysis_failed" },
+		});
+		api.scan.mockRejectedValueOnce(new AuthError("session_expired"));
+		expect(await run()).toEqual({
+			ok: false,
+			error: { code: "session_expired" },
+		});
+		api.scan.mockRejectedValueOnce(new AuthError("network"));
+		expect(await run()).toEqual({ ok: false, error: { code: "network" } });
+	});
+
+	test("scan/run: empty title → invalid_listing without network call", async () => {
+		const { deps, api } = makeDeps();
+		const scan = scanRequest();
+		scan.listing.title = "   ";
+		expect(await createHandlers(deps)({ type: "scan/run", scan })).toEqual({
+			ok: false,
+			error: { code: "invalid_listing" },
+		});
+		expect(api.scan).not.toHaveBeenCalled();
+	});
+
+	test("scan/run: malformed request → invalid_listing without network call", async () => {
+		const { deps, api } = makeDeps();
+		const handle = createHandlers(deps);
+		for (const scan of [undefined, null, "scan", 3, {}, { listing: null }]) {
+			expect(
+				await handle({ type: "scan/run", scan } as unknown as BgRequest),
+			).toEqual({ ok: false, error: { code: "invalid_listing" } });
+		}
+		expect(api.scan).not.toHaveBeenCalled();
+	});
+
+	test("ui/open-popup opens the popup; a rejection → popup_unavailable", async () => {
+		const { deps, openPopup } = makeDeps();
+		const handle = createHandlers(deps);
+		expect(await handle({ type: "ui/open-popup" })).toEqual({
+			ok: true,
+			data: null,
+		});
+		expect(openPopup).toHaveBeenCalledTimes(1);
+		openPopup.mockRejectedValueOnce(new Error("no active window"));
+		expect(await handle({ type: "ui/open-popup" })).toEqual({
+			ok: false,
+			error: { code: "popup_unavailable" },
+		});
 	});
 });
 

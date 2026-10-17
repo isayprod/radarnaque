@@ -1,4 +1,4 @@
-import type { Locale, Me } from "@radarnaque/shared";
+import type { AnalysisResult, Locale, Me, ScanIn } from "@radarnaque/shared";
 import { accessOf } from "./access";
 import { ApiRequestError } from "./api-client";
 import {
@@ -15,7 +15,9 @@ import {
 	type BgResponse,
 	CONTENT_SCRIPT_MESSAGES,
 	type ContentAccess,
+	type ScanRequest,
 } from "./messages";
+import { ScanPayloadError, toScanIn } from "./scan-payload";
 
 /** Ce dont les handlers ont besoin du stockage (`sessionToken` de `storage.ts`). */
 export interface SessionTokenStore {
@@ -31,7 +33,9 @@ export interface HandlerDeps {
 		signOutRemote: typeof signOutRemote;
 	};
 	jwt: Pick<JwtProvider, "invalidate">;
-	api: { getMe(): Promise<Me> };
+	api: { getMe(): Promise<Me>; scan(body: ScanIn): Promise<AnalysisResult> };
+	/** Ouvre la popup de l'extension (`browser.action.openPopup()` en production). */
+	openPopup: () => Promise<void>;
 }
 
 export interface ExternalDeps {
@@ -54,6 +58,7 @@ function fail(code: string): BgResponse<never> {
 function errorCode(error: unknown): string {
 	if (error instanceof AuthError) return error.code;
 	if (error instanceof ApiRequestError) return error.body.error.code;
+	if (error instanceof ScanPayloadError) return error.code;
 	console.error("[radarnaque] erreur inattendue du service worker", error);
 	return "internal_error";
 }
@@ -68,7 +73,7 @@ function emailOf(value: unknown): string | null {
 export function createHandlers(
 	deps: HandlerDeps,
 ): (req: BgRequest) => Promise<BgResponse<unknown>> {
-	const { sessionToken, auth, jwt, api } = deps;
+	const { sessionToken, auth, jwt, api, openPopup } = deps;
 
 	async function storeSession(token: string | null): Promise<void> {
 		await sessionToken.setValue(token);
@@ -102,6 +107,28 @@ export function createHandlers(
 		return ok(me ? accessOf(me) : { status: "signedOut" });
 	}
 
+	/**
+	 * Scan IA demandé par le content script. La demande vient d'une page web : sa forme
+	 * est vérifiée avant `toScanIn`, qui retire l'identité du vendeur et applique les bornes.
+	 */
+	async function runScan(scan: unknown): Promise<BgResponse<AnalysisResult>> {
+		const listing = (scan as { listing?: unknown } | null)?.listing;
+		if (typeof scan !== "object" || typeof listing !== "object" || !listing) {
+			return fail("invalid_listing");
+		}
+		return ok(await api.scan(toScanIn(scan as ScanRequest)));
+	}
+
+	async function openPopupPage(): Promise<BgResponse<null>> {
+		try {
+			await openPopup();
+		} catch {
+			// Pas de fenêtre active, ou navigateur sans `action.openPopup`.
+			return fail("popup_unavailable");
+		}
+		return ok(null);
+	}
+
 	async function handle(req: BgRequest): Promise<BgResponse<unknown>> {
 		switch (req.type) {
 			case "auth/start": {
@@ -123,6 +150,10 @@ export function createHandlers(
 				return state();
 			case "content/access":
 				return contentAccess();
+			case "scan/run":
+				return runScan(req.scan);
+			case "ui/open-popup":
+				return openPopupPage();
 			case "auth/sign-out": {
 				const token = await sessionToken.getValue();
 				// La déconnexion locale a lieu même si la révocation distante échoue.
