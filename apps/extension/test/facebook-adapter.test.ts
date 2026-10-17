@@ -187,6 +187,30 @@ describe("facebookAdapter : grille et pages hors fiche", () => {
 		expect(adapter.extractListing(modal(), GRID_URL)).toBeNull();
 	});
 
+	test.each([
+		["https://www.facebook.com/", "facebook.com"],
+		["https://facebook.com/", "facebook.com"],
+		["https://web.facebook.com/", "facebook.com"],
+		["https://m.facebook.com/", null],
+		["https://evil.web.facebook.com/", null],
+	])("siteOf(%s) = %s", (url, site) => {
+		expect(adapter.siteOf(new URL(url))).toBe(site);
+	});
+
+	test("web.facebook.com : la fiche est extraite", () => {
+		const url = new URL(
+			`https://web.facebook.com/marketplace/item/${ITEM_ID}/`,
+		);
+		const { listing } = extract(modal(), url);
+		expect(listing.site).toBe("facebook.com");
+		expect(listing.externalId).toBe(ITEM_ID);
+		expect(listing.location).toEqual({
+			city: "Namur",
+			region: "WAL",
+			country: "BE",
+		});
+	});
+
 	test("un autre site donne null", () => {
 		const url = new URL("https://m.facebook.com/marketplace/item/1234567890/");
 		expect(adapter.extractListing(modal(), url)).toBeNull();
@@ -346,6 +370,36 @@ describe("facebookAdapter : champs absents", () => {
 		const { listing, missing } = extract(doc);
 		expect(listing.location).toEqual({ city: "Lille", region: "FR" });
 		expect(missing).toContain("location.country");
+	});
+
+	test.each([
+		"/marketplace/100000000000001/",
+		"https://web.facebook.com/marketplace/100000000000001/",
+		"https://facebook.com/marketplace/100000000000001",
+	])("lien de lieu %s : reconnu par son chemin", (href) => {
+		const doc = modal();
+		rootOf(doc)
+			.querySelector(
+				'a[href="https://www.facebook.com/marketplace/100000000000001/"]',
+			)
+			?.setAttribute("href", href);
+		const { listing } = extract(doc);
+		expect(listing.location).toEqual({
+			city: "Namur",
+			region: "WAL",
+			country: "BE",
+		});
+	});
+
+	test("lien de lieu vers un autre site : ignoré", () => {
+		const doc = modal();
+		rootOf(doc)
+			.querySelector(
+				'a[href="https://www.facebook.com/marketplace/100000000000001/"]',
+			)
+			?.setAttribute("href", "https://evil.com/marketplace/100000000000001/");
+		const { listing } = extract(doc);
+		expect(listing.location).toEqual({});
 	});
 
 	test("sans lieu : location vide et signalée", () => {
