@@ -177,6 +177,9 @@ export function createCardController(deps: CardControllerDeps): {
 
 	function leaveSearch() {
 		onSearch = false;
+		// Budget de remontage neuf au retour, même sur la page de résultats quittée.
+		remountsUrl = "";
+		remounts.clear();
 		unpin();
 		clearAll();
 	}
