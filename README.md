@@ -40,6 +40,32 @@ valeurs aléatoires (`openssl rand -hex 32`). Si un autre Postgres occupe déjà
 ### 2. Lancer la stack
 
 ```sh
+pnpm dev
+```
+
+Une seule commande, un seul terminal. Elle vérifie d'abord que les ports 3000, 8000 et
+3100 sont libres (sinon elle s'arrête en nommant le port et la commande
+`lsof -nP -iTCP:<port> -sTCP:LISTEN` pour trouver le processus). Elle démarre ensuite
+Postgres et Caddy (Docker, `http://localhost:8080`), puis, avec des logs préfixés et
+colorés :
+
+- `[auth]` : migrations Better Auth, puis service auth (port 3000) ;
+- `[api]` : `alembic upgrade head`, puis API (port 8000), lancée **seulement après** la
+  réponse 200 de `GET /auth/health` (attente de 120 s au plus, sinon l'API ne démarre pas) ;
+- `[site]` : `vite build --watch` vers `apps/site/dist` ;
+- `[ext]` : wxt, qui ouvre un Chrome avec l'extension (`Opened browser`).
+
+Un seul Ctrl+C arrête les 4 processus ; si l'un d'eux s'arrête en erreur, les autres sont
+arrêtés aussi et la commande sort avec un code non nul. Postgres et Caddy restent lancés ;
+`pnpm dev:stop` les arrête (les données Postgres sont conservées).
+
+Le service auth doit appliquer les migrations Better Auth (schéma `auth`) **avant**
+qu'Alembic ne tourne, car les tables du schéma `app` ont des clés étrangères vers
+`auth."user"` : c'est pourquoi `pnpm dev` attend `/auth/health` avant de lancer l'API.
+
+Alternative : lancer les services séparément, chacun dans son terminal.
+
+```sh
 pnpm db:up                                                   # Postgres, schémas auth et app
 docker compose -f infra/docker-compose.dev.yml up -d caddy   # http://localhost:8080
 pnpm dev:auth    # terminal 1 : migrations Better Auth, puis service auth (port 3000)
@@ -48,10 +74,8 @@ pnpm dev:site    # terminal 3 : vite build --watch vers apps/site/dist
 pnpm dev:ext     # terminal 4 : wxt (extension en mode dev)
 ```
 
-Ordre important : `pnpm dev:auth` applique les migrations Better Auth (schéma `auth`)
-**avant** que `pnpm dev:api` lance Alembic, car les tables du schéma `app` ont des clés
-étrangères vers `auth."user"`. Au tout premier démarrage, lancer `dev:auth` et attendre
-`[auth] migrations appliquées` avant `dev:api`.
+Dans ce mode, l'ordre est important : au tout premier démarrage, lancer `dev:auth` et
+attendre `[auth] migrations appliquées` avant `dev:api`.
 
 Les scripts lisent `infra/.env` (`node --env-file` / `tsx --env-file` pour auth et le
 site, `uv run --env-file` pour l'API). En dev, aucun email n'est envoyé : le service auth
