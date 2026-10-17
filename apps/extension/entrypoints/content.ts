@@ -1,73 +1,25 @@
 import "../components/badge.css";
 import type { Locale } from "@radarnaque/shared";
 import { createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import type { ContentScriptContext } from "wxt/utils/content-script-context";
-import {
-	createShadowRootUi,
-	type ShadowRootContentScriptUi,
-} from "wxt/utils/content-script-ui/shadow-root";
+import { createRoot } from "react-dom/client";
+import { createShadowRootUi } from "wxt/utils/content-script-ui/shadow-root";
 import { defineContentScript } from "wxt/utils/define-content-script";
 import { RiskBadge } from "../components/RiskBadge";
 import {
-	BADGE_HOST_TAG,
-	createController,
-	type Mounter,
-} from "../lib/content/controller";
+	type BadgeRenderer,
+	createBadgeMounter,
+} from "../lib/content/badge-mounter";
+import { createController } from "../lib/content/controller";
 import { resolveContentLocale } from "../lib/content-i18n";
 import type { Site } from "../lib/listing/types";
-import type { RiskReport } from "../lib/rules/score";
 import { localePref } from "../lib/storage";
 
-/**
- * Pastille dans un shadow root, insérée après l'ancre. `createShadowRootUi` est
- * asynchrone (chargement du CSS de l'extension) : un `unmount` arrivé avant la
- * fin de la création annule le montage.
- */
-function createBadgeMounter(ctx: ContentScriptContext): Mounter {
-	let ui: ShadowRootContentScriptUi<Root> | null = null;
-	let report: RiskReport | null = null;
-	let locale: Locale = "fr";
-	let generation = 0;
-
-	const render = (root: Root) => {
-		if (report) root.render(createElement(RiskBadge, { report, locale }));
-	};
-
+function createReactRenderer(container: HTMLElement): BadgeRenderer {
+	const root = createRoot(container);
 	return {
-		mount(anchor, nextReport, nextLocale) {
-			const current = ++generation;
-			report = nextReport;
-			locale = nextLocale;
-			void createShadowRootUi<Root>(ctx, {
-				name: BADGE_HOST_TAG,
-				position: "inline",
-				anchor,
-				append: "after",
-				onMount(container) {
-					const root = createRoot(container);
-					render(root);
-					return root;
-				},
-				onRemove(root) {
-					root?.unmount();
-				},
-			}).then((created) => {
-				if (current !== generation) return;
-				ui = created;
-				created.mount();
-			});
-		},
-		update(nextReport) {
-			report = nextReport;
-			if (ui?.mounted) render(ui.mounted);
-		},
-		unmount() {
-			generation++;
-			ui?.remove();
-			ui = null;
-			report = null;
-		},
+		render: (report, locale) =>
+			root.render(createElement(RiskBadge, { report, locale })),
+		unmount: () => root.unmount(),
 	};
 }
 
@@ -91,7 +43,10 @@ export default defineContentScript({
 		const controller = createController({
 			doc: document,
 			getUrl: () => new URL(location.href),
-			mounter: createBadgeMounter(ctx),
+			mounter: createBadgeMounter({
+				createUi: (options) => createShadowRootUi(ctx, options),
+				createRenderer: createReactRenderer,
+			}),
 			getLocale,
 		});
 		ctx.addEventListener(window, "wxt:locationchange", () => {
