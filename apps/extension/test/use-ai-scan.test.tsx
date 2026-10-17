@@ -1,6 +1,12 @@
 import type { AnalysisResult } from "@radarnaque/shared";
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
+import {
+	ACTIVE_TTL_MS,
+	type AccessCache,
+	createAccessCache,
+	RECHECK_MS,
+} from "../lib/content/access-policy";
 import type { AiClient } from "../lib/content/ai-client";
 import { type BadgeView, useAiScan } from "../lib/content/use-ai-scan";
 import type { Listing } from "../lib/listing/types";
@@ -88,11 +94,21 @@ function fakeClient() {
 
 function setup(initial: BadgeView = viewOf("m1")) {
 	const fake = fakeClient();
+	let clock = 1_000;
+	const cache: AccessCache = createAccessCache(() => clock);
 	const hook = renderHook(
-		({ view }: { view: BadgeView }) => useAiScan(fake.client, view, "fr"),
+		({ view }: { view: BadgeView }) =>
+			useAiScan(fake.client, view, "fr", cache),
 		{ initialProps: { view: initial } },
 	);
-	return { ...fake, ...hook };
+	return {
+		...fake,
+		...hook,
+		cache,
+		advance(ms: number) {
+			clock += ms;
+		},
+	};
 }
 
 /** Laisse les promesses déjà résolues propager leurs mises à jour d'état. */
@@ -169,22 +185,54 @@ describe("useAiScan : accès", () => {
 		expect(t.result.current.access).toEqual(active);
 	});
 
-	test("accès en erreur : loadAccess réessaie", async () => {
+	test.each([
+		["en erreur", fail("background_unavailable")],
+		["noSubscription", ok<ContentAccess>({ status: "noSubscription" })],
+	])(
+		"R8 : accès %s, loadAccess relit après 30 s, pas avant",
+		async (_, first) => {
+			const t = setup();
+			act(() => t.result.current.loadAccess());
+			t.accesses[0]?.resolve(first);
+			await settle();
+			t.advance(RECHECK_MS - 1);
+			act(() => t.result.current.loadAccess());
+			expect(t.client.access).toHaveBeenCalledTimes(1);
+			t.advance(1);
+			act(() => t.result.current.loadAccess());
+			expect(t.client.access).toHaveBeenCalledTimes(2);
+		},
+	);
+
+	test("R8 : accès actif, relu par loadAccess après 5 min seulement", async () => {
 		const t = setup();
 		act(() => t.result.current.loadAccess());
-		t.accesses[0]?.resolve(fail("background_unavailable"));
+		t.accesses[0]?.resolve(ok(active));
 		await settle();
+		t.advance(ACTIVE_TTL_MS - 1);
+		act(() => t.result.current.loadAccess());
+		expect(t.client.access).toHaveBeenCalledTimes(1);
+		t.advance(1);
 		act(() => t.result.current.loadAccess());
 		expect(t.client.access).toHaveBeenCalledTimes(2);
+		// L'accès reste affiché pendant la relecture.
+		expect(t.result.current.access).toEqual(active);
 	});
 
-	test("noSubscription : loadAccess relit aussi", async () => {
+	test("R8 : cache partagé, un accès lu ailleurs (cartes) est affiché sans lecture", async () => {
+		const t = setup();
+		t.cache.settle(t.cache.begin(), active);
+		act(() => t.result.current.loadAccess());
+		expect(t.client.access).not.toHaveBeenCalled();
+		expect(t.result.current.access).toEqual(active);
+	});
+
+	test("R8 : la lecture faite par la pastille remplit le cache partagé", async () => {
 		const t = setup();
 		act(() => t.result.current.loadAccess());
-		t.accesses[0]?.resolve(ok({ status: "noSubscription" }));
+		t.accesses[0]?.resolve(ok(active));
 		await settle();
-		act(() => t.result.current.loadAccess());
-		expect(t.client.access).toHaveBeenCalledTimes(2);
+		expect(t.cache.current()).toEqual(active);
 	});
 
 	test("pricingUrl pointe vers /pricing/ dans la langue active", () => {
@@ -242,14 +290,26 @@ describe("useAiScan : scans", () => {
 		expect(t.client.scan).toHaveBeenCalledTimes(2);
 	});
 
-	test("la clé change : l'accès revient à « non chargé » et loadAccess le relit", async () => {
+	test("R8 : la clé change, l'accès actif est gardé sans relecture", async () => {
 		const t = setup(viewOf("m1"));
 		act(() => t.result.current.loadAccess());
 		t.accesses[0]?.resolve(ok(active));
 		await settle();
 
 		t.rerender({ view: viewOf("m2") });
-		expect(t.result.current.access).toBe("loading");
+		expect(t.result.current.access).toEqual(active);
+		act(() => t.result.current.loadAccess());
+		expect(t.client.access).toHaveBeenCalledTimes(1);
+	});
+
+	test("R8 : la clé change, signedOut est affiché puis relu sans délai", async () => {
+		const t = setup(viewOf("m1"));
+		act(() => t.result.current.loadAccess());
+		t.accesses[0]?.resolve(ok({ status: "signedOut" }));
+		await settle();
+
+		t.rerender({ view: viewOf("m2") });
+		expect(t.result.current.access).toEqual({ status: "signedOut" });
 		act(() => t.result.current.loadAccess());
 		expect(t.client.access).toHaveBeenCalledTimes(2);
 	});
@@ -279,6 +339,8 @@ describe("useAiScan : scans", () => {
 			code: "session_expired",
 		});
 		expect(t.client.access).toHaveBeenCalledTimes(2);
+		// R8 : le cache partagé est invalidé, les icônes de cartes relisent aussi.
+		expect(t.cache.current()).toBeNull();
 
 		// R3 : l'accès relu dit signedOut, le panneau n'affichera que la connexion.
 		t.accesses[1]?.resolve(ok({ status: "signedOut" }));
@@ -296,6 +358,25 @@ describe("useAiScan : scans", () => {
 		await settle();
 		expect(t.client.access).toHaveBeenCalledTimes(2);
 		expect(t.result.current.access).toEqual(active);
+	});
+
+	test("R8 : relecture après un scan, malgré l'accès actif en cache ; remaining à jour", async () => {
+		const t = setup();
+		act(() => t.result.current.loadAccess());
+		t.accesses[0]?.resolve(ok(active));
+		await settle();
+		act(() => t.result.current.scan("text"));
+		t.scans[0]?.resolve(ok(sampleAnalysis));
+		await settle();
+		expect(t.client.access).toHaveBeenCalledTimes(2);
+		const after: ContentAccess = {
+			...active,
+			remaining: { text: 2, image: 3, total: null },
+		};
+		t.accesses[1]?.resolve(ok(after));
+		await settle();
+		expect(t.result.current.access).toEqual(after);
+		expect(t.cache.current()).toEqual(after);
 	});
 });
 

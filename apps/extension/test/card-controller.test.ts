@@ -1,6 +1,12 @@
 import type { AnalysisResult, Locale } from "@radarnaque/shared";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { CardRef } from "../lib/adapters/types";
+import {
+	ACTIVE_TTL_MS,
+	type AccessCache,
+	createAccessCache,
+	RECHECK_MS,
+} from "../lib/content/access-policy";
 import type { AiClient } from "../lib/content/ai-client";
 import {
 	CARD_HOST_TAG,
@@ -90,10 +96,17 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
+interface SetupOptions {
+	accessCache?: AccessCache;
+	/** Vrai : le vrai `scanCard`, qui appelle `ai.scan` (fiche illisible, repli sur la carte). */
+	realScan?: boolean;
+}
+
 function setup(
 	doc: Document,
 	initialUrl: string,
 	accesses: ContentAccess[] = [withCards],
+	options: SetupOptions = {},
 ) {
 	let url = new URL(initialUrl);
 	let locale: Locale = "fr";
@@ -103,7 +116,10 @@ function setup(
 			ok: true,
 			data: (queue.length > 1 ? queue.shift() : queue[0]) as ContentAccess,
 		})),
-		scan: vi.fn<AiClient["scan"]>(),
+		scan: vi.fn<AiClient["scan"]>(async () => ({
+			ok: true,
+			data: sampleAnalysis,
+		})),
 		openLogin: vi.fn<AiClient["openLogin"]>(),
 	};
 	const scan = vi.fn<typeof scanCard>(async () => ({
@@ -121,8 +137,9 @@ function setup(
 		mountCard: fake.mountCard,
 		getLocale,
 		win: window,
-		scan,
+		scan: options.realScan ? undefined : scan,
 		fetchPage,
+		accessCache: options.accessCache,
 		log: vi.fn(),
 	});
 	disposers.push(controller.dispose);
@@ -350,15 +367,59 @@ describe("createCardController — icônes", () => {
 		expect(t.live()).toHaveLength(0);
 	});
 
-	test("nouvelle page de recherche (locationchange) : l'accès est relu", async () => {
+	test("R8 : accès actif gardé 5 min d'une URL à l'autre, relu ensuite", async () => {
+		vi.useFakeTimers();
 		const doc = loadFixture("facebook/grid.html");
 		const t = setup(doc, FB_SEARCH);
 		await t.controller.refresh();
-		t.navigate(
-			"https://www.facebook.com/marketplace/brussels/search/?query=velo",
-		);
+		t.navigate(`${FB_SEARCH}search/?query=velo`);
+		await t.controller.refresh();
+		t.navigate(FB_ITEM);
+		await t.controller.refresh();
+		t.navigate(FB_SEARCH);
+		await t.controller.refresh();
+		expect(t.ai.access).toHaveBeenCalledTimes(1);
+		expect(t.live()).toHaveLength(6);
+
+		await vi.advanceTimersByTimeAsync(ACTIVE_TTL_MS);
+		// Même URL : pas une occasion de relire.
+		await t.controller.refresh();
+		expect(t.ai.access).toHaveBeenCalledTimes(1);
+		t.navigate(`${FB_SEARCH}search/?query=x`);
 		await t.controller.refresh();
 		expect(t.ai.access).toHaveBeenCalledTimes(2);
+	});
+
+	test("R8 : nouvelle URL, signedOut relu sans délai, noSubscription au plus toutes les 30 s", async () => {
+		vi.useFakeTimers();
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH, [signedOut]);
+		await t.controller.refresh();
+		t.navigate(`${FB_SEARCH}search/?query=a`);
+		await t.controller.refresh();
+		expect(t.ai.access).toHaveBeenCalledTimes(2);
+
+		t.setAccess({ status: "noSubscription" });
+		t.navigate(`${FB_SEARCH}search/?query=b`);
+		await t.controller.refresh();
+		expect(t.ai.access).toHaveBeenCalledTimes(3);
+		t.navigate(`${FB_SEARCH}search/?query=c`);
+		await t.controller.refresh();
+		expect(t.ai.access).toHaveBeenCalledTimes(3);
+		await vi.advanceTimersByTimeAsync(RECHECK_MS);
+		t.navigate(`${FB_SEARCH}search/?query=d`);
+		await t.controller.refresh();
+		expect(t.ai.access).toHaveBeenCalledTimes(4);
+	});
+
+	test("R8 : cache partagé, un accès actif déjà lu (pastille) évite la lecture", async () => {
+		const accessCache = createAccessCache();
+		accessCache.settle(accessCache.begin(), withCards);
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH, [withCards], { accessCache });
+		await t.controller.refresh();
+		expect(t.ai.access).not.toHaveBeenCalled();
+		expect(t.live()).toHaveLength(6);
 	});
 
 	test("langue changée : nouveau rendu sans remontage", async () => {
@@ -541,20 +602,56 @@ describe("createCardController — clic et scan", () => {
 	});
 
 	test.each(["session_expired", "unauthenticated"])(
-		"%s : l'accès est relu, signedOut retire toutes les icônes",
+		"R8 %s : accès relu ; l'icône cliquée reste en erreur, les autres sont retirées, puis elle l'est à la navigation suivante",
 		async (code) => {
+			const accessCache = createAccessCache();
 			const doc = loadFixture("facebook/grid.html");
-			const t = setup(doc, FB_SEARCH);
+			const t = setup(doc, FB_SEARCH, [withCards], { accessCache });
 			t.scan.mockResolvedValueOnce({ ok: false, error: { code } });
 			await t.controller.refresh();
 			t.setAccess(signedOut);
-			t.lastView(FB_IDS[0] as string).onActivate();
+			const id = FB_IDS[0] as string;
+			t.lastView(id).onActivate();
 			await vi.waitFor(() => expect(t.ai.access).toHaveBeenCalledTimes(2));
+			await t.controller.refresh();
+			expect(accessCache.current()).toEqual(signedOut);
+
+			expect(t.live().map((m) => m.card.externalId)).toEqual([id]);
+			expect(t.lastView(id).state).toEqual({ status: "error", code });
+			expect(doc.querySelectorAll(CARD_HOST_TAG)).toHaveLength(1);
+			expect(marked(doc)).toEqual([id]);
+			// D'autres passages sur la même page ne la retirent pas.
+			await t.controller.refresh();
+			expect(t.live().map((m) => m.card.externalId)).toEqual([id]);
+
+			t.navigate(`${FB_SEARCH}search/?query=velo`);
 			await t.controller.refresh();
 			expect(t.live()).toHaveLength(0);
 			expect(doc.querySelectorAll(CARD_HOST_TAG)).toHaveLength(0);
+			expect(marked(doc)).toEqual([]);
 		},
 	);
+
+	test("R8 : session expirée puis reconnexion (focus) : toutes les icônes, la carte cliquée revient à idle", async () => {
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH);
+		t.scan.mockResolvedValueOnce({
+			ok: false,
+			error: { code: "session_expired" },
+		});
+		await t.controller.refresh();
+		t.setAccess(signedOut);
+		const id = FB_IDS[0] as string;
+		t.lastView(id).onActivate();
+		await vi.waitFor(() => expect(t.ai.access).toHaveBeenCalledTimes(2));
+		await t.controller.refresh();
+		expect(t.live()).toHaveLength(1);
+
+		t.setAccess(withCards);
+		window.dispatchEvent(new Event("focus"));
+		await vi.waitFor(() => expect(t.live()).toHaveLength(6));
+		expect(t.lastView(id).state).toEqual({ status: "idle" });
+	});
 });
 
 describe("createCardController — accès inactif relu (R5)", () => {
@@ -627,13 +724,19 @@ describe("createCardController — accès inactif relu (R5)", () => {
 		expect(t.ai.access).toHaveBeenCalledTimes(4);
 	});
 
-	test("accès actif : focus ne relit pas l'accès", async () => {
+	test("R8 : accès actif, focus ne relit pas l'accès avant 5 min", async () => {
+		vi.useFakeTimers();
 		const doc = loadFixture("facebook/grid.html");
 		const t = setup(doc, FB_SEARCH);
 		await t.controller.refresh();
 		window.dispatchEvent(new Event("focus"));
 		await t.controller.refresh();
 		expect(t.ai.access).toHaveBeenCalledTimes(1);
+
+		await vi.advanceTimersByTimeAsync(ACTIVE_TTL_MS);
+		window.dispatchEvent(new Event("focus"));
+		await t.controller.refresh();
+		expect(t.ai.access).toHaveBeenCalledTimes(2);
 	});
 
 	test("hors page de recherche : focus ne lit pas l'accès", async () => {

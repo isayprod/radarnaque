@@ -7,6 +7,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import type { AccessCache } from "../lib/content/access-policy";
 import type { AiClient } from "../lib/content/ai-client";
 import { useAiScan } from "../lib/content/use-ai-scan";
 import { contentText, signalText } from "../lib/content-i18n";
@@ -67,12 +68,15 @@ export function RiskBadge({
 	listing,
 	locale,
 	ai,
+	accessCache,
 }: {
 	report: RiskReport;
 	listing: Listing;
 	locale: Locale;
 	/** Client IA injecté par le content script (`createAiClient()`). */
 	ai: AiClient;
+	/** Accès partagé avec les icônes de cartes (R8), un par content script. */
+	accessCache?: AccessCache;
 }) {
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -81,7 +85,7 @@ export function RiskBadge({
 	const close = useCallback(() => setOpen(false), []);
 	useDismiss(open, rootRef, close);
 	// L'état IA vit ici, pas dans le panneau : il survit à sa fermeture.
-	const scan = useAiScan(ai, { report, listing }, locale);
+	const scan = useAiScan(ai, { report, listing }, locale, accessCache);
 	const { loadAccess } = scan;
 	// Accès lu à l'ouverture du panneau, jamais avant. Panneau ouvert, il est relu
 	// au retour sur l'onglet (connexion faite dans la popup) ; `loadAccess` ne fait
