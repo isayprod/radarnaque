@@ -122,6 +122,13 @@ def _parse(raw: str) -> tuple[httpx.URL, str] | None:
     return (url, host) if host else None
 
 
+def is_allowed_url(raw: str, allowed_suffixes: list[str]) -> bool:
+    """Contrôle statique, sans résolution DNS, fait à la validation de l'annonce : schéma,
+    identifiants, port et hôte autorisé. Les adresses sont vérifiées au téléchargement."""
+    parsed = _parse(raw)
+    return parsed is not None and _host_allowed(parsed[1], allowed_suffixes)
+
+
 async def _checked(raw: str, suffixes: list[str], resolve: Resolver) -> httpx.URL:
     """URL à contacter, après vérification de l'hôte et de toutes ses adresses."""
     parsed = _parse(raw)

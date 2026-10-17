@@ -88,6 +88,40 @@ class ScanIn(CamelInModel):
     partial: bool = False
 
 
+RiskLevel = Literal["low", "medium", "high"]
+
+
+class LocalizedTextOut(CamelModel):
+    fr: str
+    nl: str
+
+
+class AnalysisReasonOut(CamelModel):
+    severity: Severity
+    text: LocalizedTextOut
+
+
+class RemainingOut(CamelModel):
+    """Scans restants après celui-ci ; `None` : illimité (admin) ou sans plafond."""
+
+    text: int | None
+    image: int | None
+    total: int | None
+
+
+class AnalysisResultOut(CamelModel):
+    analysis_id: int
+    score: int
+    level: RiskLevel
+    partial: bool
+    from_cache: bool
+    summary: LocalizedTextOut
+    advice: LocalizedTextOut
+    reasons: list[AnalysisReasonOut]
+    analyzed_at: datetime
+    remaining: RemainingOut
+
+
 class QuotaOut(CamelModel):
     scan_kind: str | None
     limit: int
