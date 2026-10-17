@@ -50,7 +50,8 @@ export interface paths {
         /**
          * Stripe Webhook
          * @description Sans authentification : l'appelant est Stripe, authentifié par sa signature. Le corps est
-         *     lu brut, sans être interprété ; ni lui ni la signature ne sont journalisés.
+         *     lu brut, sans être interprété, dans la limite de 1 Mio ; ni lui ni la signature ne sont
+         *     journalisés.
          */
         post: operations["stripe_webhook_api_billing_webhooks_stripe_post"];
         delete?: never;
