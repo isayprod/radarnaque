@@ -14,6 +14,10 @@ import { loadFixture, sampleAnalysis } from "./helpers";
 
 const FB_SEARCH = "https://www.facebook.com/marketplace/brussels/";
 const FB_ITEM = "https://www.facebook.com/marketplace/item/9000000000000001/";
+// item-modal.html : la fiche …07 en modale, deux cartes de la grille derrière.
+const FB_MODAL_ITEM =
+	"https://www.facebook.com/marketplace/item/9000000000000007/";
+const FB_MODAL_GRID_IDS = ["9000000000000002", "9000000000000004"];
 const TWH_SEARCH = "https://www.2ememain.be/q/iphone/";
 const FB_IDS = [1, 2, 3, 4, 5, 6].map((n) => `900000000000000${n}`);
 const TWH_IDS = [101, 102, 103, 104, 105, 106].map((n) => `m1000000${n}`);
@@ -308,6 +312,42 @@ describe("createCardController — icônes", () => {
 		expect(t.live()).toHaveLength(0);
 		expect(doc.querySelectorAll(CARD_HOST_TAG)).toHaveLength(0);
 		expect(marked(doc)).toEqual([]);
+	});
+
+	test("R7 : fiche ouverte en modale sur la grille : les icônes restent, aucun montage", async () => {
+		vi.useFakeTimers();
+		const doc = loadFixture("facebook/item-modal.html");
+		const t = setup(doc, FB_SEARCH);
+		await t.controller.refresh();
+		const before = t.live();
+		expect(before.map((m) => m.card.externalId)).toEqual(FB_MODAL_GRID_IDS);
+
+		t.navigate(FB_MODAL_ITEM);
+		await t.controller.refresh();
+		// Une mutation pendant la modale ne change rien non plus.
+		doc.querySelector('[role="dialog"]')?.append(doc.createElement("div"));
+		await vi.advanceTimersByTimeAsync(250);
+		expect(t.live()).toEqual(before);
+		expect(before.every((m) => m.host.isConnected)).toBe(true);
+		expect(marked(doc)).toEqual(FB_MODAL_GRID_IDS);
+		expect(t.mountCard).toHaveBeenCalledTimes(2);
+
+		// Modale fermée, retour à la grille : les mêmes icônes, aucun remontage.
+		t.navigate(FB_SEARCH);
+		await t.controller.refresh();
+		expect(t.live()).toEqual(before);
+		expect(t.mountCard).toHaveBeenCalledTimes(2);
+	});
+
+	test("R7 : fiche en modale sans grille derrière : les icônes sont retirées", async () => {
+		const doc = loadFixture("facebook/item-modal.html");
+		const t = setup(doc, FB_SEARCH);
+		await t.controller.refresh();
+		expect(t.live()).toHaveLength(2);
+		for (const m of t.live()) m.card.element.remove();
+		t.navigate(FB_MODAL_ITEM);
+		await t.controller.refresh();
+		expect(t.live()).toHaveLength(0);
 	});
 
 	test("nouvelle page de recherche (locationchange) : l'accès est relu", async () => {

@@ -660,6 +660,33 @@ describe("facebookAdapter : cartes de la grille (findCards)", () => {
 	});
 });
 
+describe("facebookAdapter : fiche en modale sur la grille (isOverlayListing)", () => {
+	test("item-modal, URL de la fiche : modale sur la grille", () => {
+		expect(adapter.isOverlayListing?.(modal(), ITEM_URL)).toBe(true);
+	});
+
+	test("fiche en page directe : pas une modale", () => {
+		expect(adapter.isOverlayListing?.(page(), ITEM_URL)).toBe(false);
+	});
+
+	test("URL de recherche : pas une fiche, donc pas une modale", () => {
+		expect(adapter.isOverlayListing?.(modal(), GRID_URL)).toBe(false);
+	});
+
+	test("dialogue d'une autre annonce : pas la modale de cette fiche", () => {
+		expect(adapter.isOverlayListing?.(modal(), OTHER_ITEM_URL)).toBe(false);
+	});
+
+	test("plus aucun lien de la grille hors du dialogue : pas une modale", () => {
+		const doc = modal();
+		for (const link of doc.querySelectorAll(
+			'[role="main"] a[href*="/marketplace/item/"]',
+		))
+			link.remove();
+		expect(adapter.isOverlayListing?.(doc, ITEM_URL)).toBe(false);
+	});
+});
+
 describe("facebookAdapter : ancre des cartes (cardAnchor)", () => {
 	test("jamais null pour les 6 cartes, dans la carte", () => {
 		const doc = grid();

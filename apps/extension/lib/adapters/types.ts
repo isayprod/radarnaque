@@ -24,6 +24,12 @@ export interface MarketplaceAdapter {
 	listingRoot(doc: Document, url: URL): Element | null;
 	/** L'UI est insérée APRÈS cet élément. */
 	badgeAnchor(root: Element): Element | null;
+	/**
+	 * Vrai si l'URL est une fiche ouverte en modale par-dessus la page de
+	 * résultats, toujours présente dessous (Facebook) : les icônes des cartes
+	 * restent en place.
+	 */
+	isOverlayListing?(doc: Document, url: URL): boolean;
 	/** Cartes sous `root`, dans l'ordre du document ; [] hors page de recherche. */
 	findCards(root: ParentNode, pageUrl: URL): CardRef[];
 	/** L'icône de la carte est insérée APRÈS cet élément. */

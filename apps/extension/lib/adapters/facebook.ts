@@ -399,6 +399,19 @@ function findCards(root: ParentNode, pageUrl: URL): CardRef[] {
 	return cards;
 }
 
+/**
+ * Fiche ouverte en modale par-dessus la grille : un `[role="dialog"]` contient
+ * la fiche de l'URL, et des liens de la grille restent hors de tout dialogue.
+ */
+function isOverlayListing(doc: Document, url: URL): boolean {
+	if (pageType(url) !== "listing") return false;
+	const root = findRoot(doc, url);
+	if (!root?.matches('[role="dialog"]')) return false;
+	return [...doc.querySelectorAll(ITEM_LINK)].some(
+		(link) => !link.closest('[role="dialog"]'),
+	);
+}
+
 /** Textes de premier niveau de la carte, non vides, dans l'ordre du document. */
 function cardTexts(card: Element): Element[] {
 	return [...card.querySelectorAll(TEXT)].filter((el) => {
@@ -477,6 +490,7 @@ export function createFacebookAdapter(
 		badgeAnchor(root) {
 			return listingHeading(root);
 		},
+		isOverlayListing,
 		findCards,
 		cardAnchor,
 		listingFromCard,
