@@ -6,6 +6,7 @@ consultatif. Toute erreur après la réservation enregistre un `scan_failures`, 
 l'utilisateur : ni un fournisseur en panne ni un bogue du serveur ne consomment son quota."""
 
 import asyncio
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -40,7 +41,7 @@ from radarnaque_api.models import (
     SiteImageHost,
     Subscription,
 )
-from radarnaque_api.schemas import AnalysisResultOut, ListingIn, RemainingOut, RiskLevel, ScanIn
+from radarnaque_api.schemas import AnalysisResultOut, RemainingOut, RiskLevel, ScanIn
 from radarnaque_api.services.hashing import input_hash
 from radarnaque_api.services.scan_store import (
     CacheKey,
@@ -57,6 +58,8 @@ RATE_WINDOW = timedelta(minutes=1)
 IMAGE_SCAN_FEATURE = "image_scan"
 CARD_ICONS_FEATURE = "card_icons"
 INTERNAL_FAILURE = "internal"
+
+logger = logging.getLogger(__name__)
 
 
 class ScanError(ApiError):
@@ -151,8 +154,12 @@ async def _check_rights(session: AsyncSession, user_id: str, scan: ScanIn) -> No
             )
 
 
-async def _validated_site(session: AsyncSession, listing: ListingIn) -> tuple[int, list[str]]:
-    """Identifiant du site et suffixes d'hôtes d'images autorisés ; chaque image est vérifiée."""
+async def _validated_site(session: AsyncSession, scan: ScanIn) -> tuple[int, list[str]]:
+    """Identifiant du site et suffixes d'hôtes d'images autorisés ; chaque image est vérifiée.
+    Un scan « image » sans aucune photo est refusé ici, avant toute réservation du quota."""
+    listing = scan.listing
+    if scan.scan_kind == "image" and not listing.images:
+        raise _invalid_listing("listing.images")
     site_id = await session.scalar(select(Site.id).where(Site.domain == listing.site))
     if site_id is None:
         raise _invalid_listing("listing.site")
@@ -222,7 +229,7 @@ async def _admit(
     await _check_rate_limit(session, user.id, rate_limit, now())
     if user.role != "admin":
         await _check_rights(session, user.id, scan)
-    site_id, suffixes = await _validated_site(session, scan.listing)
+    site_id, suffixes = await _validated_site(session, scan)
     snapshot_id = await upsert_snapshot(session, site_id, scan.listing, now())
     event_at = now()  # date de l'événement, et de l'analyse qu'il produira (règle R8)
     event_id = await _reserve(session, user, scan, event_at, rate_limit)
@@ -308,9 +315,19 @@ def _failure_code(exc: Exception) -> str:
 async def _record_failure(
     maker: async_sessionmaker[AsyncSession], event_id: int, code: str, at: datetime
 ) -> None:
-    """Rend le scan, dans une nouvelle transaction."""
-    async with maker() as session, session.begin():
-        session.add(ScanFailure(scan_event_id=event_id, error_code=code, created_at=at))
+    """Rend le scan, dans une nouvelle transaction.
+
+    Si l'écriture échoue, le scan reste décompté : une ligne ERROR le signale (l'identifiant de
+    l'événement et la classe de l'exception, jamais son message, qui peut porter des données),
+    puis l'erreur remonte comme avant. Le rapprochement automatique viendra en phase 4."""
+    try:
+        async with maker() as session, session.begin():
+            session.add(ScanFailure(scan_event_id=event_id, error_code=code, created_at=at))
+    except (Exception, asyncio.CancelledError) as exc:
+        logger.error(
+            "remboursement impossible pour scan_event_id=%s (%s)", event_id, type(exc).__name__
+        )
+        raise
 
 
 async def _give_back(
