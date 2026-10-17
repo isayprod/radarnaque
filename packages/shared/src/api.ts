@@ -4,6 +4,61 @@
  */
 
 export interface paths {
+    "/api/billing/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Checkout */
+        post: operations["checkout_api_billing_checkout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/billing/portal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Portal */
+        post: operations["portal_api_billing_portal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/billing/webhooks/stripe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stripe Webhook
+         * @description Sans authentification : l'appelant est Stripe, authentifié par sa signature. Le corps est
+         *     lu brut, sans être interprété ; ni lui ni la signature ne sont journalisés.
+         */
+        post: operations["stripe_webhook_api_billing_webhooks_stripe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -131,10 +186,34 @@ export interface components {
             score: number;
             summary: components["schemas"]["LocalizedTextOut"];
         };
+        /**
+         * BillingUrlOut
+         * @description Adresse vers laquelle rediriger l'utilisateur (paiement ou portail de gestion).
+         */
+        BillingUrlOut: {
+            /** Url */
+            url: string;
+        };
         /** BootstrapOut */
         BootstrapOut: {
             /** Created */
             created: boolean;
+        };
+        /**
+         * CheckoutIn
+         * @description Corps de `POST /api/billing/checkout` : l'offre payante et la périodicité choisies.
+         */
+        CheckoutIn: {
+            /**
+             * Interval
+             * @enum {string}
+             */
+            interval: "month" | "year";
+            /**
+             * Plan
+             * @enum {string}
+             */
+            plan: "standard" | "premium";
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -383,6 +462,90 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    checkout_api_billing_checkout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckoutIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingUrlOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    portal_api_billing_portal_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingUrlOut"];
+                };
+            };
+        };
+    };
+    stripe_webhook_api_billing_webhooks_stripe_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "stripe-signature"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     health_api_health_get: {
         parameters: {
             query?: never;

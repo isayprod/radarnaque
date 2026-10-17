@@ -8,12 +8,13 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from radarnaque_api.auth.jwt import JwksFetcher, JwtVerifier, http_jwks_fetcher
+from radarnaque_api.billing import ManualBillingProvider
 from radarnaque_api.config import Settings
 from radarnaque_api.db import make_engine
 from radarnaque_api.errors import install_error_handlers
 from radarnaque_api.llm.client import LLMClientFactory
 from radarnaque_api.llm.providers import ensure_models_use_known_providers, load_providers
-from radarnaque_api.routes import health, internal, me, scans
+from radarnaque_api.routes import billing, health, internal, me, scans
 
 # En DEBUG, ces bibliothèques journalisent les URL et les corps des requêtes : l'annonce, les
 # photos, et les réponses du fournisseur.
@@ -59,6 +60,7 @@ def create_app(
     app = FastAPI(title="Radarnaque API", lifespan=lifespan)
     app.state.settings = settings
     app.state.providers = providers
+    app.state.billing = ManualBillingProvider()
     app.state.jwt_verifier = JwtVerifier(
         jwks_fetcher or http_jwks_fetcher(settings.jwks_url),
         settings.jwt_issuer,
@@ -68,5 +70,6 @@ def create_app(
     app.include_router(health.router)
     app.include_router(me.router)
     app.include_router(scans.router)
+    app.include_router(billing.router)
     app.include_router(internal.router)
     return app

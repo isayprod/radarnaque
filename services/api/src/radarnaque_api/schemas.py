@@ -172,3 +172,16 @@ class MeOut(CamelModel):
 
 class BootstrapOut(BaseModel):
     created: bool
+
+
+class CheckoutIn(CamelInModel):
+    """Corps de `POST /api/billing/checkout` : l'offre payante et la périodicité choisies."""
+
+    plan: Literal["standard", "premium"]
+    interval: Literal["month", "year"]
+
+
+class BillingUrlOut(CamelModel):
+    """Adresse vers laquelle rediriger l'utilisateur (paiement ou portail de gestion)."""
+
+    url: str
