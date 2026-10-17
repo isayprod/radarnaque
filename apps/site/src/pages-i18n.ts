@@ -210,7 +210,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			trigger: {
 				heading: "Quand une analyse est lancée",
-				body: "Une analyse IA n'est lancée que si vous la demandez (clic sur le bouton d'analyse) ou, avec Premium, pour afficher les icônes sur les résultats de recherche.",
+				body: "Une analyse IA n'est faite que lorsque vous la demandez, par un clic (bouton sur l'annonce, ou icône sur les résultats de recherche avec Premium).",
 			},
 			seller: {
 				heading: "L'identité du vendeur n'est jamais envoyée",
@@ -255,11 +255,11 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			trigger: {
 				heading: "Wanneer een analyse wordt gestart",
-				body: "Een AI-analyse wordt alleen gestart als u erom vraagt (klik op de analyseknop) of, met Premium, om de iconen op de zoekresultaten te tonen.",
+				body: "Een AI-analyse gebeurt alleen wanneer u erom vraagt, met een klik (knop op de advertentie, of icoon op de zoekresultaten met Premium).",
 			},
 			seller: {
 				heading: "De identiteit van de verkoper wordt nooit verstuurd",
-				body: "Met een account wordt de inhoud van de advertentie voor analyse verstuurd. De naam en de identificatie van de verkoper, en de link naar zijn profiel, worden nooit verstuurd, noch naar onze server, noch naar de AI. Alleen gegevens waarmee hij niet te identificeren is, worden verstuurd: leeftijd van het account, aantal beoordelingen, score, andere advertenties, verificatie. Telefoonnummers en e-mailadressen in de advertentie worden gemaskeerd voordat ze naar de AI worden verstuurd.",
+				body: "Met een account wordt de inhoud van de advertentie voor analyse verstuurd. De naam en de identificatie van de verkoper, en de link naar zijn profiel, worden nooit verstuurd, noch naar onze server, noch naar de AI. Alleen gegevens die de verkoper niet identificeren, worden verstuurd: hoe lang het account al bestaat, aantal beoordelingen, score, andere advertenties, verificatie. Telefoonnummers en e-mailadressen in de advertentie worden gemaskeerd voordat ze naar de AI worden verstuurd.",
 			},
 			photos: {
 				heading: "Analyses met foto's (Premium)",
@@ -283,7 +283,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			erasure: {
 				heading: "Recht op gegevenswissing",
-				body: "Als u uw account verwijdert, worden uw gebruikersaccount, uw abonnementen en de geschiedenis van uw analyses gewist. Voor elke vraag kunt u mailen naar {email}.",
+				body: "Als u uw account verwijdert, worden uw gebruikersgegevens, uw abonnementen en de geschiedenis van uw analyses gewist. Voor elke vraag kunt u mailen naar {email}.",
 			},
 		},
 	},
