@@ -53,7 +53,10 @@ class Clock:
 class FakeLLM:
     """Faux client LLM : compte ses appels, et chaque appel rend un score différent."""
 
-    def __init__(self, *, delay: float = 0.0, error: Exception | None = None) -> None:
+    def __init__(
+        self, *, delay: float = 0.0, error: Exception | None = None, max_images: int | None = None
+    ) -> None:
+        self.max_images = max_images
         self.delay = delay
         self.error = error
         self.calls: list[dict] = []
@@ -633,6 +636,21 @@ async def test_image_scan_downloads_the_photos_and_sends_them(engine, http, mock
     assert [p["type"] for p in parts] == ["text", "image_url", "image_url"]
     assert parts[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
     assert result.remaining.image == 2
+
+
+async def test_image_scan_respects_the_provider_image_limit(engine, http, mock, clock):
+    routes = [
+        mock.get(url).respond(200, content=_png(), headers={"content-type": "image/png"})
+        for url in IMAGE_URLS
+    ]
+    llm = FakeLLM(max_images=1)
+    user = await _user(engine)
+
+    await _scan_once(engine, user, _scan(images=IMAGE_URLS, scanKind="image"), llm, http, clock)
+
+    parts = llm.calls[0]["messages"][0]["content"]
+    assert [p["type"] for p in parts] == ["text", "image_url"]
+    assert [r.call_count for r in routes] == [1, 0]
 
 
 @pytest.mark.parametrize(

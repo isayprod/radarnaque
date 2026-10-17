@@ -20,6 +20,7 @@ from sqlalchemy.orm import aliased
 
 from radarnaque_api.errors import ApiError
 from radarnaque_api.images import (
+    MAX_IMAGES,
     ImageFetchError,
     Resolver,
     default_resolve,
@@ -281,23 +282,32 @@ async def _serve(
         )
         analysis_id = await valid_analysis_id(session, key, admission.event_at, admission.cache_ttl)
         if analysis_id is None:
+            llm = llm_for(setup.provider)
             images = (
                 await fetch_images(
                     [str(url) for url in scan.listing.images],
                     admission.image_host_suffixes,
                     http=http,
                     resolve=resolve,
+                    limit=_image_limit(llm),
                 )
                 if scan.scan_kind == "image"
                 else []
             )
-            result = await llm_for(setup.provider).analyze(
+            result = await llm.analyze(
                 model=setup.slug,
                 system_prompt=setup.system_prompt,
                 messages=build_messages(scan.listing, scan.rules, images),
             )
             analysis_id = await save_analysis(session, key, scan, result, admission.event_at)
         _link(session, admission.event_id, analysis_id)
+
+
+def _image_limit(llm: LLMClient) -> int:
+    """Photos envoyées : la limite globale, réduite si le fournisseur en accepte moins (Groq :
+    3). Un client sans `max_images` (faux client des tests, par exemple) n'en a pas."""
+    provider_limit = getattr(llm, "max_images", None)
+    return MAX_IMAGES if provider_limit is None else min(MAX_IMAGES, provider_limit)
 
 
 def _failure_code(exc: Exception) -> str:

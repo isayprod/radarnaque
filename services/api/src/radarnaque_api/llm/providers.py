@@ -23,6 +23,7 @@ _KNOWN_KEYS = {
     "structured_output",
     "cost_source",
     "extra_body",
+    "max_images",
 }
 
 
@@ -63,6 +64,9 @@ class ProviderConfig:
     structured_output: StructuredOutput
     cost_source: CostSource
     extra_body: Mapping[str, Any] = field(hash=False)
+    # Nombre maximal d'images par requête accepté par le fournisseur (None : pas de limite
+    # propre, la limite globale des photos s'applique).
+    max_images: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "extra_body", _freeze(deepcopy(dict(self.extra_body))))
@@ -100,6 +104,16 @@ def _optional_str(code: str, raw: Mapping[str, Any], key: str) -> str | None:
     return value
 
 
+def _optional_positive_int(code: str, raw: Mapping[str, Any], key: str) -> int | None:
+    value = raw.get(key)
+    if value is None:
+        return None
+    # bool est un sous-type d'int : `true` serait accepté comme 1.
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ProviderError(f"providers.{code}.{key} : entier positif attendu")
+    return value
+
+
 def _choice[T: str](code: str, raw: Mapping[str, Any], key: str, literal: Any) -> T:
     allowed = get_args(literal)
     value = raw.get(key)
@@ -128,6 +142,7 @@ def _parse_provider(code: str, raw: object) -> ProviderConfig:
         structured_output=_choice(code, raw, "structured_output", StructuredOutput),
         cost_source=_choice(code, raw, "cost_source", CostSource),
         extra_body=extra_body,
+        max_images=_optional_positive_int(code, raw, "max_images"),
     )
 
 
