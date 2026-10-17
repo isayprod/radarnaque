@@ -107,10 +107,10 @@ function mountPointOf(
 }
 
 /**
- * Contrôleur des icônes de cartes sur une page de résultats : lit l'accès une
- * fois par page, pose une icône par carte et garde l'état du scan de chaque
- * annonce (par `externalId`), qui survit au remontage de son icône. Aucun scan
- * sans clic.
+ * Contrôleur des icônes de cartes sur une page de résultats : lit l'accès selon
+ * la politique R8 (cache partagé avec la pastille), pose une icône par carte et
+ * garde l'état du scan de chaque annonce (par `externalId`), qui survit au
+ * remontage de son icône. Aucun scan sans clic.
  */
 export function createCardController(deps: CardControllerDeps): {
 	refresh(): Promise<void>;
