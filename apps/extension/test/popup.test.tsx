@@ -181,9 +181,10 @@ describe("popup", () => {
 			{ type: "auth/verify-otp", email: "a@b.be", otp: "123456" },
 		]);
 		expect(screen.getByText("a@b.be")).toBeTruthy();
-		expect(within(rowOf("Analyses texte")).getByText("3")).toBeTruthy();
-		expect(within(rowOf("Analyses avec photos")).getByText("3")).toBeTruthy();
+		expect(screen.getAllByRole("listitem")).toHaveLength(1);
 		expect(within(rowOf("Scans d'essai restants")).getByText("3")).toBeTruthy();
+		expect(screen.queryByText("Analyses texte")).toBeNull();
+		expect(screen.queryByText("Analyses avec photos")).toBeNull();
 		expect(screen.getByRole("button", { name: "Se déconnecter" })).toBeTruthy();
 	});
 
@@ -522,6 +523,27 @@ describe("popup", () => {
 		expect(screen.queryByText("Scans d'essai restants")).toBeNull();
 	});
 
+	test("account view: premium-like (no total cap) shows the two per-kind rows", async () => {
+		background({
+			"auth/state": () =>
+				signedIn({
+					...trialMe,
+					plan: "premium",
+					totalCap: null,
+					quotas: [
+						{ scanKind: "text", limit: 1000, used: 0, remaining: 1000 },
+						{ scanKind: "image", limit: 100, used: 0, remaining: 100 },
+					],
+				}),
+		});
+		render(<App />);
+		expect(await screen.findByText("Analyses texte")).toBeTruthy();
+		expect(screen.getAllByRole("listitem")).toHaveLength(2);
+		expect(within(rowOf("Analyses texte")).getByText("1000")).toBeTruthy();
+		expect(within(rowOf("Analyses avec photos")).getByText("100")).toBeTruthy();
+		expect(screen.queryByText("Scans d'essai restants")).toBeNull();
+	});
+
 	test("NL locale renders Dutch labels", async () => {
 		await localePref.setValue("nl");
 		background({ "auth/state": () => signedOut });
@@ -539,8 +561,8 @@ describe("popup", () => {
 		render(<App />);
 
 		expect(await screen.findByText("Proef")).toBeTruthy();
-		expect(screen.getByText("Tekstanalyses")).toBeTruthy();
-		expect(screen.getByText("Analyses met foto's")).toBeTruthy();
+		expect(screen.queryByText("Tekstanalyses")).toBeNull();
+		expect(screen.queryByText("Analyses met foto's")).toBeNull();
 		expect(screen.getByText("Resterende proefscans")).toBeTruthy();
 		expect(screen.getByRole("button", { name: "Afmelden" })).toBeTruthy();
 	});
