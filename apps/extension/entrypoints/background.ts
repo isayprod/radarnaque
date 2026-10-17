@@ -1,5 +1,6 @@
 import { type Browser, browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
+import { adapterFor } from "../lib/adapters/registry";
 import { createApiClient } from "../lib/api-client";
 import {
 	fetchJwt,
@@ -10,7 +11,7 @@ import {
 import {
 	createHandlers,
 	createMessageListener,
-	guardInternalSender,
+	guardSender,
 	handleExternal,
 } from "../lib/background-handlers";
 import { PUBLIC_URL } from "../lib/config";
@@ -38,12 +39,13 @@ export default defineBackground(() => {
 		api,
 	});
 
-	// Messages internes : uniquement depuis les pages de l'extension (popup), jamais
-	// depuis un script de contenu ou un onglet.
-	const handleInternal = guardInternalSender(handle, {
-		id: browser.runtime.id,
-		baseUrl: browser.runtime.getURL("/"),
-	});
+	// Messages internes : tout depuis les pages de l'extension (popup) ; depuis un
+	// content script, uniquement la liste blanche, et seulement sur un site pris en charge.
+	const handleInternal = guardSender(
+		handle,
+		{ id: browser.runtime.id, baseUrl: browser.runtime.getURL("/") },
+		(url) => adapterFor(url) !== null,
+	);
 	browser.runtime.onMessage.addListener(
 		createMessageListener(
 			(message: BgRequest, sender: Browser.runtime.MessageSender) =>
