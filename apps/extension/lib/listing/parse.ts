@@ -2,9 +2,12 @@ import type { Listing } from "./types";
 
 export type MonthRange = { min: number; max: number };
 
+// U+00A0 (insécable), U+202F (fine insécable), U+2009 (fine) écrits en échappements.
+const SPACES_RE = /[\s\u00a0\u202f\u2009]+/g;
+
 /** Réduit les espaces (dont U+00A0, U+202F, U+2009) à un seul espace ordinaire, puis rogne. */
 export function normalizeText(s: string): string {
-	return s.replace(/[\s   ]+/g, " ").trim();
+	return s.replace(SPACES_RE, " ").trim();
 }
 
 const FREE_RE = /^(gratuit|gratis|free)$/i;
@@ -38,9 +41,9 @@ const AGE_RE =
 	/(\d+)\s*(ans?|jaar|jaren|mois|maanden?|semaines?|weken|week|jours?|dagen|dag)\b/i;
 
 /**
- * Ancienneté affichée (« 10 ans », « 6 maanden »). Une durée en années ne donne
- * que l'année entière : fourchette de 12 mois. Les durées plus courtes que
- * 1 mois valent 0.
+ * Ancienneté affichée (« 10 ans », « 6 maanden », « 16 semaines »). Une durée en
+ * années ne donne que l'année entière : fourchette de 12 mois. Mois, semaines et
+ * jours sont convertis en mois entiers (semaine = 7 j, mois = 30 j).
  */
 export function parseAccountAge(text: string): MonthRange | null {
 	const m = AGE_RE.exec(normalizeText(text));
@@ -50,7 +53,10 @@ export function parseAccountAge(text: string): MonthRange | null {
 	if (/^(an|ans|jaar|jaren)$/.test(unit))
 		return { min: n * 12, max: n * 12 + 11 };
 	if (/^(mois|maand|maanden)$/.test(unit)) return { min: n, max: n };
-	return { min: 0, max: 0 };
+	const months = /^(semaine|semaines|week|weken)$/.test(unit)
+		? Math.floor((n * 7) / 30)
+		: Math.floor(n / 30);
+	return { min: months, max: months };
 }
 
 function fullMonthsBetween(from: Date, to: Date): number {

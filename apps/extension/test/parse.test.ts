@@ -13,11 +13,11 @@ describe("parsePriceText", () => {
 			{ price: { amountCents: 6000, currency: "EUR" }, priceType: "fixed" },
 		],
 		[
-			"8 500 €",
+			"8\u00a0500 €",
 			{ price: { amountCents: 850000, currency: "EUR" }, priceType: "fixed" },
 		],
 		[
-			"€ 23 500",
+			"€ 23\u202f500",
 			{ price: { amountCents: 2350000, currency: "EUR" }, priceType: "fixed" },
 		],
 		[
@@ -69,6 +69,10 @@ describe("parseAccountAge", () => {
 		["10 jaar", { min: 120, max: 131 }],
 		["6 maanden", { min: 6, max: 6 }],
 		["3 weken", { min: 0, max: 0 }],
+		["12 semaines", { min: 2, max: 2 }],
+		["16 semaines", { min: 3, max: 3 }],
+		["45 jours", { min: 1, max: 1 }],
+		["14 dagen", { min: 0, max: 0 }],
 	])("parseAccountAge(%j)", (input, expected) => {
 		expect(parseAccountAge(input)).toEqual(expected);
 	});
@@ -100,6 +104,8 @@ describe("parseFacebookJoinYear", () => {
 
 describe("normalizeText", () => {
 	test("collapses whitespace and maps special spaces", () => {
-		expect(normalizeText("  8 500 €   net \n ")).toBe("8 500 € net");
+		expect(normalizeText("  8\u00a0500\u202f€ \u2009 net \n ")).toBe(
+			"8 500 € net",
+		);
 	});
 });
