@@ -22,6 +22,11 @@ def error_body(code: str, message: str, details: dict[str, Any] | None = None) -
     return {"error": {"code": code, "message": message, "details": details or {}}}
 
 
+def validation_issues(exc: RequestValidationError) -> list[dict[str, Any]]:
+    """Emplacement, message et type de chaque erreur, jamais la valeur reçue."""
+    return [{"loc": list(e["loc"]), "message": e["msg"], "type": e["type"]} for e in exc.errors()]
+
+
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api_error(_request: Request, exc: ApiError) -> JSONResponse:
@@ -31,10 +36,9 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
-        issues = [
-            {"loc": list(e["loc"]), "message": e["msg"], "type": e["type"]} for e in exc.errors()
-        ]
         return JSONResponse(
             status_code=422,
-            content=error_body("invalid_request", "Requête invalide.", {"errors": issues}),
+            content=error_body(
+                "invalid_request", "Requête invalide.", {"errors": validation_issues(exc)}
+            ),
         )

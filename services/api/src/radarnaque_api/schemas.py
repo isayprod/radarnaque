@@ -80,11 +80,15 @@ class RulesIn(CamelInModel):
     signals: list[SignalIn] = Field(max_length=20)
 
 
+ScanKindCode = Literal["text", "image"]
+TriggerCode = Literal["button", "card"]
+
+
 class ScanIn(CamelInModel):
     listing: ListingIn
     rules: RulesIn
-    scan_kind: Literal["text", "image"]
-    trigger: Literal["button", "card"]
+    scan_kind: ScanKindCode
+    trigger: TriggerCode
     partial: bool = False
 
 
@@ -120,6 +124,31 @@ class AnalysisResultOut(CamelModel):
     reasons: list[AnalysisReasonOut]
     analyzed_at: datetime
     remaining: RemainingOut
+
+
+class ScanHistoryItemOut(CamelModel):
+    """Un scan de l'historique. `site` et `title` viennent du snapshot de l'analyse servie :
+    `None` pour un scan sans résultat (échec ou en cours), qui n'est relié à aucun snapshot.
+    `score` et `level` sont `None` dans le même cas."""
+
+    scan_event_id: int
+    created_at: datetime
+    scan_kind: ScanKindCode
+    trigger: TriggerCode
+    site: str | None
+    title: str | None
+    score: int | None
+    level: RiskLevel | None
+    from_cache: bool
+    failed: bool
+
+
+class ScanHistoryOut(CamelModel):
+    """Page de l'historique, du plus récent au plus ancien ; `next_before` est à passer en
+    `before` pour la page suivante (`None` : plus rien)."""
+
+    items: list[ScanHistoryItemOut]
+    next_before: int | None
 
 
 class QuotaOut(CamelModel):

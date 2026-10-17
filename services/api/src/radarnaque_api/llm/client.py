@@ -177,6 +177,12 @@ class OpenAICompatibleClient:
     def _error(self, code: LLMErrorCode) -> LLMError:
         return LLMError(code, self._provider.code)
 
+    async def aclose(self) -> None:
+        """Ferme le client du SDK (et le client HTTP qu'il utilise), s'il a été créé."""
+        if self._client is not None:
+            client, self._client = self._client, None
+            await client.close()
+
     def _openai(self) -> AsyncOpenAI:
         # Résolu au premier appel : une clé absente fait échouer l'analyse, pas la construction.
         if self._client is None:
@@ -282,3 +288,29 @@ class OpenAICompatibleClient:
             if fatal is not None:
                 raise self._error(fatal)
         raise self._error(code)
+
+
+class LLMClientFactory:
+    """`factory(code)` : le client du fournisseur `code`, créé au premier appel puis réutilisé.
+    Chaque client a son propre client HTTP, celui du SDK : jamais celui des photos. Un code
+    absent de `providers.toml` lève `ProviderError`."""
+
+    def __init__(self, providers: Mapping[str, ProviderConfig], env: Mapping[str, str]) -> None:
+        self._providers = providers
+        self._env = env
+        self._clients: dict[str, OpenAICompatibleClient] = {}
+
+    def __call__(self, code: str) -> OpenAICompatibleClient:
+        client = self._clients.get(code)
+        if client is None:
+            provider = self._providers.get(code)
+            if provider is None:
+                raise ProviderError(f"fournisseur inconnu dans providers.toml : {code}")
+            client = self._clients[code] = OpenAICompatibleClient(provider, self._env)
+        return client
+
+    async def aclose(self) -> None:
+        """Ferme les clients créés (arrêt de l'application)."""
+        clients, self._clients = list(self._clients.values()), {}
+        for client in clients:
+            await client.aclose()
