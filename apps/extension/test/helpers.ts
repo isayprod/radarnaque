@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Me } from "@radarnaque/shared";
+import type { AnalysisResult, Me, ScanIn } from "@radarnaque/shared";
 import { vi } from "vitest";
 
 const FIXTURES_DIR = resolve(
@@ -73,4 +73,37 @@ export const trialMe: Me = {
 		{ scanKind: "image", limit: 3, used: 0, remaining: 3 },
 	],
 	totalCap: { scanKind: null, limit: 3, used: 0, remaining: 3 },
+};
+
+export const sampleAnalysis: AnalysisResult = {
+	analysisId: 42,
+	analyzedAt: "2026-10-18T10:00:00Z",
+	fromCache: false,
+	level: "medium",
+	partial: false,
+	score: 55,
+	summary: { fr: "Prudence.", nl: "Voorzichtig." },
+	advice: { fr: "Payez à la remise.", nl: "Betaal bij overhandiging." },
+	reasons: [],
+	remaining: { text: 2, image: 3, total: 2 },
+};
+
+/** Corps de scan minimal, déjà nettoyé (sortie de `toScanIn`). */
+export const sampleScanIn: ScanIn = {
+	listing: {
+		site: "2ememain.be",
+		externalId: "m123",
+		url: "https://www.2ememain.be/v/velo/m123",
+		title: "Vélo",
+		description: "Bon état.",
+		price: { amountCents: 15000, currency: "EUR" },
+		priceType: "fixed",
+		location: { city: "Namur" },
+		images: [],
+		seller: { reviewCount: 4 },
+	},
+	rules: { version: 2, signals: [] },
+	scanKind: "text",
+	trigger: "button",
+	partial: false,
 };

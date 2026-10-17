@@ -7,6 +7,8 @@ import {
 	fetchSequence,
 	jsonResponse,
 	requestOf,
+	sampleAnalysis,
+	sampleScanIn,
 	trialMe,
 } from "./helpers";
 
@@ -116,5 +118,70 @@ describe("api client", () => {
 		await expect(api.getMe()).rejects.toMatchObject({ code: "network" });
 		expect(onUnauthenticated).not.toHaveBeenCalled();
 		expect(jwt.invalidate).not.toHaveBeenCalled();
+	});
+
+	test("scan posts the JSON body with the JWT and returns the analysis", async () => {
+		const jwt = fakeJwt("jwt-1");
+		const fetch = fetchSequence(jsonResponse(200, sampleAnalysis));
+		const api = createApiClient({ jwt, fetch, onUnauthenticated: vi.fn() });
+		expect(await api.scan(sampleScanIn)).toEqual(sampleAnalysis);
+		const req = requestOf(fetch);
+		expect(req.url).toBe("http://localhost:8080/api/scans");
+		expect(req.method).toBe("POST");
+		expect(req.headers.get("authorization")).toBe("Bearer jwt-1");
+		expect(req.headers.get("content-type")).toBe("application/json");
+		expect(req.credentials).toBe("omit");
+		expect(req.body).toEqual(sampleScanIn);
+	});
+
+	test("scan: 401 then 200 renews the JWT once and resends the same body", async () => {
+		const jwt = fakeJwt("old", "new");
+		const fetch = fetchSequence(
+			errorResponse(401, "unauthenticated"),
+			jsonResponse(200, sampleAnalysis),
+		);
+		const onUnauthenticated = vi.fn();
+		const api = createApiClient({ jwt, fetch, onUnauthenticated });
+		expect(await api.scan(sampleScanIn)).toEqual(sampleAnalysis);
+		expect(jwt.invalidate).toHaveBeenCalledTimes(1);
+		const retry = requestOf(fetch, 1);
+		expect(retry.method).toBe("POST");
+		expect(retry.headers.get("authorization")).toBe("Bearer new");
+		expect(retry.body).toEqual(sampleScanIn);
+		expect(onUnauthenticated).not.toHaveBeenCalled();
+	});
+
+	test("scan: two 401 → onUnauthenticated and session_expired", async () => {
+		const jwt = fakeJwt("old", "new");
+		const fetch = fetchSequence(
+			errorResponse(401, "unauthenticated"),
+			errorResponse(401, "unauthenticated"),
+		);
+		const onUnauthenticated = vi.fn();
+		const api = createApiClient({ jwt, fetch, onUnauthenticated });
+		const error = await api.scan(sampleScanIn).catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(AuthError);
+		expect((error as AuthError).code).toBe("session_expired");
+		expect(fetch).toHaveBeenCalledTimes(2);
+		expect(onUnauthenticated).toHaveBeenCalledTimes(1);
+	});
+
+	test("scan: 402 quota_exhausted keeps error details intact", async () => {
+		const details = { scanKind: "text", limit: 3, used: 3 };
+		const jwt = fakeJwt("jwt-1");
+		const fetch = fetchSequence(
+			jsonResponse(402, {
+				error: { code: "quota_exhausted", message: "Quota épuisé", details },
+			}),
+		);
+		const onUnauthenticated = vi.fn();
+		const api = createApiClient({ jwt, fetch, onUnauthenticated });
+		const error = await api.scan(sampleScanIn).catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(ApiRequestError);
+		expect((error as ApiRequestError).status).toBe(402);
+		expect((error as ApiRequestError).body.error.code).toBe("quota_exhausted");
+		expect((error as ApiRequestError).body.error.details).toEqual(details);
+		expect(fetch).toHaveBeenCalledTimes(1);
+		expect(onUnauthenticated).not.toHaveBeenCalled();
 	});
 });

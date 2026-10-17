@@ -1,4 +1,9 @@
-import type { ApiErrorBody, Me } from "@radarnaque/shared";
+import type {
+	AnalysisResult,
+	ApiErrorBody,
+	Me,
+	ScanIn,
+} from "@radarnaque/shared";
 import { AuthError } from "./auth-client";
 import { PUBLIC_URL } from "./config";
 import type { JwtProvider } from "./jwt-provider";
@@ -25,6 +30,8 @@ export interface ApiClientOptions {
 
 export interface ApiClient {
 	getMe(): Promise<Me>;
+	/** `POST /api/scans` : le corps doit sortir de `toScanIn` (identité retirée, bornes). */
+	scan(body: ScanIn): Promise<AnalysisResult>;
 }
 
 async function errorBody(res: Response): Promise<ApiErrorBody> {
@@ -33,6 +40,12 @@ async function errorBody(res: Response): Promise<ApiErrorBody> {
 	return {
 		error: { code: `http_${res.status}`, message: res.statusText, details: {} },
 	};
+}
+
+/** Méthode et corps JSON d'une requête ; les en-têtes sont fixés par `send`. */
+interface SendInit {
+	method?: "GET" | "POST";
+	body?: string;
 }
 
 export function createApiClient({
@@ -45,7 +58,7 @@ export function createApiClient({
 		throw new AuthError("session_expired");
 	}
 
-	async function send(path: string): Promise<Response> {
+	async function send(path: string, init: SendInit = {}): Promise<Response> {
 		let token: string;
 		try {
 			token = await jwt.get();
@@ -57,8 +70,13 @@ export function createApiClient({
 			throw error;
 		}
 		try {
+			const headers: Record<string, string> = {
+				authorization: `Bearer ${token}`,
+			};
+			if (init.body !== undefined) headers["content-type"] = "application/json";
 			return await fetch(`${PUBLIC_URL}${path}`, {
-				headers: { authorization: `Bearer ${token}` },
+				...init,
+				headers,
 				credentials: "omit",
 			});
 		} catch {
@@ -70,11 +88,11 @@ export function createApiClient({
 	 * Un 401 déclenche **un** renouvellement du JWT ; un second 401 déconnecte.
 	 * Les 5xx (dont 503 `auth_unavailable`) ne touchent jamais à la session.
 	 */
-	async function getJson<T>(path: string): Promise<T> {
-		let res = await send(path);
+	async function requestJson<T>(path: string, init?: SendInit): Promise<T> {
+		let res = await send(path, init);
 		if (res.status === 401) {
 			jwt.invalidate();
-			res = await send(path);
+			res = await send(path, init);
 			if (res.status === 401) return sessionExpired();
 		}
 		if (!res.ok) throw new ApiRequestError(res.status, await errorBody(res));
@@ -82,6 +100,11 @@ export function createApiClient({
 	}
 
 	return {
-		getMe: () => getJson<Me>("/api/me"),
+		getMe: () => requestJson<Me>("/api/me"),
+		scan: (body) =>
+			requestJson<AnalysisResult>("/api/scans", {
+				method: "POST",
+				body: JSON.stringify(body),
+			}),
 	};
 }
