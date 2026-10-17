@@ -105,6 +105,19 @@ describe("createCardMounter", () => {
 		expect(mount.isMounted()).toBe(false);
 	});
 
+	test("isVisible suit checkVisibility de l'hôte (variante de mise en page cachée)", async () => {
+		const t = setup();
+		const mount = t.mountCard(t.anchor, t.card, view("idle"));
+		expect(mount.isVisible()).toBe(true);
+		t.calls[0]?.resolve();
+		await vi.waitFor(() => expect(t.renders).toHaveLength(1));
+		const host = t.anchor.nextElementSibling as HTMLElement;
+		host.checkVisibility = () => false;
+		expect(mount.isVisible()).toBe(false);
+		host.checkVisibility = () => true;
+		expect(mount.isVisible()).toBe(true);
+	});
+
 	test("hôte retiré par le site : isMounted devient faux", async () => {
 		const t = setup();
 		const mount = t.mountCard(t.anchor, t.card, view("idle"));

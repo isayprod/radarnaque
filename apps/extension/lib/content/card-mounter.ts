@@ -91,6 +91,13 @@ export function createCardMounter(
 			isMounted() {
 				return pending || (ui?.shadowHost.isConnected ?? false);
 			},
+			isVisible() {
+				// Sans `checkVisibility` (navigateur ancien), l'hôte est supposé visible.
+				const host = ui?.shadowHost;
+				return !host || typeof host.checkVisibility !== "function"
+					? true
+					: host.checkVisibility();
+			},
 		};
 	};
 }

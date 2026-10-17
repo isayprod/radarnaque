@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { twhAdapter } from "../lib/adapters/twh";
 import { parseAccountAge } from "../lib/listing/parse";
 import { loadFixture } from "./helpers";
@@ -534,6 +534,20 @@ describe("twhAdapter — page de résultats", () => {
 		expect(
 			twhAdapter.pageType(new URL("https://www.2dehands.be/q/iphone/"), doc),
 		).toBe("search");
+	});
+
+	test("coût par passage : pageType s'arrête à la première carte", () => {
+		const doc = search();
+		const closest = vi.spyOn(Element.prototype, "closest");
+		const cardLookups = () =>
+			closest.mock.calls.filter(([sel]) => sel === 'li, [role="listitem"]')
+				.length;
+		twhAdapter.findCards(doc, SEARCH_URL);
+		const full = cardLookups();
+		closest.mockClear();
+		expect(twhAdapter.pageType(SEARCH_URL, doc)).toBe("search");
+		expect(full).toBe(6);
+		expect(cardLookups()).toBe(1);
 	});
 
 	test("pageType vaut other hors /l/ et /q/, ou sans carte", () => {

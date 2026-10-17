@@ -1,5 +1,7 @@
 import type { AnalysisResult, Locale } from "@radarnaque/shared";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { facebookAdapter } from "../lib/adapters/facebook";
+import { twhAdapter } from "../lib/adapters/twh";
 import type { CardRef } from "../lib/adapters/types";
 import {
 	ACTIVE_TTL_MS,
@@ -67,6 +69,14 @@ function fakeMounts() {
 					host.remove();
 				},
 				isMounted: () => host.isConnected,
+				// Comme `checkVisibility` : faux sous un ancêtre masqué (variante de
+				// mise en page cachée, simulée par un `checkVisibility` propre).
+				isVisible: () => {
+					for (let el = host.parentElement; el; el = el.parentElement)
+						if (Object.hasOwn(el, "checkVisibility") && !el.checkVisibility())
+							return false;
+					return true;
+				},
 			};
 		},
 	);
@@ -523,6 +533,50 @@ describe("createCardController — remontage (R4)", () => {
 		});
 		expect(second.card.element.getAttribute("data-radarnaque-card")).toBe(id);
 	});
+});
+
+describe("createCardController — coût par passage", () => {
+	test("2ememain : les cartes sont cherchées une seule fois par passage", async () => {
+		const doc = loadFixture("twh/search.html");
+		const t = setup(doc, TWH_SEARCH);
+		const closest = vi.spyOn(Element.prototype, "closest");
+		const cardLookups = () =>
+			closest.mock.calls.filter(([sel]) => sel === 'li, [role="listitem"]')
+				.length;
+		twhAdapter.findCards(doc, new URL(TWH_SEARCH));
+		const once = cardLookups();
+		closest.mockClear();
+		await t.controller.refresh();
+		expect(t.live()).toHaveLength(6);
+		// Une recherche complète, plus la première carte vue par pageType.
+		expect(cardLookups()).toBe(once + 1);
+	});
+
+	test.each([
+		["Facebook", "facebook/grid.html", FB_SEARCH, facebookAdapter],
+		["2ememain", "twh/search.html", TWH_SEARCH, twhAdapter],
+	] as const)(
+		"%s : ancre recalculée seulement pour une icône perdue ou une carte recréée",
+		async (_, fixture, url, adapter) => {
+			const doc = loadFixture(fixture);
+			const t = setup(doc, url);
+			const cardAnchor = vi.spyOn(adapter, "cardAnchor");
+			await t.controller.refresh();
+			expect(cardAnchor).toHaveBeenCalledTimes(6);
+
+			cardAnchor.mockClear();
+			await t.controller.refresh();
+			await t.controller.refresh();
+			expect(cardAnchor).not.toHaveBeenCalled();
+
+			const lost = t.live()[0] as FakeMount;
+			lost.host.remove();
+			await t.controller.refresh();
+			expect(cardAnchor).toHaveBeenCalledTimes(1);
+			expect(cardAnchor.mock.calls[0]?.[0]).toBe(lost.card.element);
+			expect(t.live()).toHaveLength(6);
+		},
+	);
 });
 
 describe("createCardController — clic et scan", () => {

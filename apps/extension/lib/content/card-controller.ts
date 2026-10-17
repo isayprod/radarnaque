@@ -40,6 +40,8 @@ export interface CardMount {
 	unmount(): void;
 	/** Vrai tant que l'hôte est dans le document (ou en cours de montage). */
 	isMounted(): boolean;
+	/** Faux si l'hôte est masqué (variante de mise en page de la carte cachée). */
+	isVisible(): boolean;
 }
 
 export interface CardControllerDeps {
@@ -282,8 +284,21 @@ export function createCardController(deps: CardControllerDeps): {
 		for (const card of adapter.findCards(doc, url)) {
 			const id = card.externalId;
 			seen.add(id);
-			const anchor = mountPointOf(adapter, card.element);
 			const entry = tracked.get(id);
+			// Icône montée et visible sur la même carte : l'ancre n'est pas
+			// recalculée (coût par passage). Une icône masquée, dans une variante
+			// de mise en page cachée après un redimensionnement (R4), est revue au
+			// passage suivant, déclenché par une mutation.
+			if (
+				entry?.card.element === card.element &&
+				entry.mount.isMounted() &&
+				entry.mount.isVisible()
+			) {
+				entry.card = card;
+				if (localeChanged) entry.mount.update(viewOf(id));
+				continue;
+			}
+			const anchor = mountPointOf(adapter, card.element);
 			const samePlace =
 				entry?.card.element === card.element && entry.anchor === anchor;
 			if (entry && samePlace && entry.mount.isMounted()) {
