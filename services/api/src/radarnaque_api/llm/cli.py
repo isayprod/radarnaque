@@ -68,18 +68,20 @@ def _list(session: Session, providers: dict[str, ProviderConfig]) -> int:
 
 
 def _use(session: Session, providers: dict[str, ProviderConfig], args: argparse.Namespace) -> int:
-    if not args.slug.strip():
+    # Espaces de début et de fin retirés avant toute validation : `"  auto "` donne `auto`.
+    provider, slug = args.provider.strip(), args.slug.strip()
+    if not slug:
         return _fail("slug de modèle vide")
-    if args.provider not in providers:
+    if provider not in providers:
         known = ", ".join(providers)
-        return _fail(f"fournisseur inconnu : {args.provider} (connus : {known})")
+        return _fail(f"fournisseur inconnu : {provider} (connus : {known})")
     session.execute(
         insert(Model)
-        .values(provider=args.provider, slug=args.slug)
+        .values(provider=provider, slug=slug)
         .on_conflict_do_nothing(index_elements=["provider", "slug"])
     )
     model_id = session.scalars(
-        select(Model.id).where(Model.provider == args.provider, Model.slug == args.slug)
+        select(Model.id).where(Model.provider == provider, Model.slug == slug)
     ).one()
     updated = session.execute(
         update(ScanKind).where(ScanKind.code == args.kind).values(active_model_id=model_id)
@@ -88,7 +90,7 @@ def _use(session: Session, providers: dict[str, ProviderConfig], args: argparse.
         session.rollback()
         return _fail(f"type de scan absent de la base : {args.kind}")
     session.commit()
-    print(f"Modèle actif ({args.kind}) : {args.provider}/{args.slug}")
+    print(f"Modèle actif ({args.kind}) : {provider}/{slug}")
     return EXIT_OK
 
 
