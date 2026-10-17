@@ -121,7 +121,7 @@ describe("createBadgeMounter", () => {
 	test("update avant la création de l'UI : le dernier rapport est rendu", async () => {
 		const t = setup();
 		t.mounter.mount(t.anchor, low, "nl");
-		t.mounter.update(medium);
+		t.mounter.update(medium, "nl");
 		t.ui.calls[0]?.resolve();
 		await flush();
 
@@ -133,12 +133,37 @@ describe("createBadgeMounter", () => {
 		t.mounter.mount(t.anchor, low, "fr");
 		t.ui.calls[0]?.resolve();
 		await flush();
-		t.mounter.update(medium);
+		t.mounter.update(medium, "fr");
 
 		expect(t.renderer.renders).toEqual([
 			{ report: low, locale: "fr" },
 			{ report: medium, locale: "fr" },
 		]);
+	});
+
+	test("update avec une autre locale : nouveau rendu dans cette locale, sans remontage", async () => {
+		const t = setup();
+		t.mounter.mount(t.anchor, low, "fr");
+		const ui = t.ui.calls[0]?.resolve();
+		await flush();
+		t.mounter.update(low, "nl");
+
+		expect(t.renderer.renders).toEqual([
+			{ report: low, locale: "fr" },
+			{ report: low, locale: "nl" },
+		]);
+		expect(t.ui.createUi).toHaveBeenCalledTimes(1);
+		expect(ui?.remove).not.toHaveBeenCalled();
+	});
+
+	test("update avec une autre locale avant la création de l'UI : rendue au montage", async () => {
+		const t = setup();
+		t.mounter.mount(t.anchor, low, "nl");
+		t.mounter.update(low, "fr");
+		t.ui.calls[0]?.resolve();
+		await flush();
+
+		expect(t.renderer.renders).toEqual([{ report: low, locale: "fr" }]);
 	});
 
 	test("isMounted() suit la présence de l'hôte dans le document", async () => {

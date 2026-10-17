@@ -21,7 +21,7 @@ const FB_GRID_URL = "https://www.facebook.com/marketplace/";
 
 type Op =
 	| { op: "mount"; anchor: Element; report: RiskReport; locale: Locale }
-	| { op: "update"; report: RiskReport }
+	| { op: "update"; report: RiskReport; locale: Locale }
 	| { op: "unmount" };
 
 /**
@@ -37,7 +37,7 @@ function fakeMounter() {
 			host = anchor.ownerDocument.createElement(BADGE_HOST_TAG);
 			anchor.after(host);
 		},
-		update: (report) => ops.push({ op: "update", report }),
+		update: (report, locale) => ops.push({ op: "update", report, locale }),
 		unmount: () => {
 			ops.push({ op: "unmount" });
 			host?.remove();
@@ -154,6 +154,21 @@ describe("createController — 2ememain", () => {
 		);
 	});
 
+	test("langue changée dans la popup : update avec la nouvelle locale, sans remount", async () => {
+		const doc = loadFixture("twh/listing-fixed.html");
+		let locale: Locale = "fr";
+		const t = setup(doc, FIXED_URL, async () => locale);
+		await t.controller.refresh();
+		locale = "nl";
+		await t.controller.refresh();
+		await t.controller.refresh();
+
+		expect(t.ops.map((o) => o.op)).toEqual(["mount", "update"]);
+		const [update] = t.of("update");
+		expect(update?.locale).toBe("nl");
+		expect(update?.report).toEqual(t.of("mount")[0]?.report);
+	});
+
 	test("ancre déjà marquée pour cette annonce (autre instance) : pas de second mount", async () => {
 		const doc = loadFixture("twh/listing-fixed.html");
 		doc
@@ -230,13 +245,16 @@ describe("createController — observateur et cycle de vie", () => {
 		removeSidebarReviews(doc);
 		const t = setup(doc, BIDDING_URL);
 		await t.controller.refresh();
+		// Appels à getUrl pour un passage (avant et après la lecture de la locale).
 		const callsAfterStart = t.getUrl.mock.calls.length;
+		const perRefresh = callsAfterStart;
 
 		for (let i = 0; i < 5; i++) doc.body.append(doc.createElement("div"));
 		await vi.advanceTimersByTimeAsync(249);
 		expect(t.getUrl.mock.calls.length).toBe(callsAfterStart);
 		await vi.advanceTimersByTimeAsync(1);
-		expect(t.getUrl.mock.calls.length).toBe(callsAfterStart + 1);
+		expect(t.getUrl.mock.calls.length).toBe(callsAfterStart + perRefresh);
+		expect(t.getLocale).toHaveBeenCalledTimes(2);
 
 		// Appel final garanti : la mutation qui apporte les avis arrive après.
 		const row = doc.createElement("div");

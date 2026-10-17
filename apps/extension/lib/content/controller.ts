@@ -19,7 +19,8 @@ const UNKNOWN_FIELDS: ReadonlySet<string> = new Set<UnknownField>([
 
 export interface Mounter {
 	mount(anchor: Element, report: RiskReport, locale: Locale): void;
-	update(report: RiskReport): void;
+	/** Nouveau rendu de la pastille montée (rapport ou langue changés), sans remontage. */
+	update(report: RiskReport, locale: Locale): void;
 	unmount(): void;
 	/** Vrai tant que la pastille est montée (ou en cours de montage) dans le document. */
 	isMounted(): boolean;
@@ -36,12 +37,12 @@ export interface ControllerDeps {
 interface Mounted {
 	anchor: Element;
 	externalId: string;
-	/** Score et identifiants des signaux : un changement entraîne `update`. */
+	/** Score, identifiants des signaux et locale : un changement entraîne `update`. */
 	key: string;
 }
 
-const reportKey = (report: RiskReport) =>
-	`${report.score}|${report.signals.map((s) => s.id).join(",")}`;
+const mountedKey = (report: RiskReport, locale: Locale) =>
+	`${report.score}|${report.signals.map((s) => s.id).join(",")}|${locale}`;
 
 const isOwnUi = (node: Node) =>
 	node.nodeType === Node.ELEMENT_NODE &&
@@ -117,13 +118,19 @@ export function createController(deps: ControllerDeps): {
 		);
 		const report = evaluate(result.listing, { unknown });
 		const { externalId, site } = result.listing;
-		const key = reportKey(report);
+		// Lue à chaque passage : un changement de langue dans la popup doit
+		// atteindre une pastille déjà montée.
+		const locale = await deps.getLocale(site);
+		// Pendant l'attente, la page a pu passer à une autre annonce.
+		if (disposed || deps.getUrl().href !== url.href || !anchor.isConnected)
+			return;
+		const key = mountedKey(report, locale);
 
 		if (current?.anchor === anchor && current.externalId === externalId) {
 			if (mounter.isMounted()) {
 				if (current.key !== key) {
 					current.key = key;
-					mounter.update(report);
+					mounter.update(report, locale);
 				}
 				return;
 			}
@@ -136,10 +143,6 @@ export function createController(deps: ControllerDeps): {
 		clear();
 		// Déjà montée pour cette annonce par une autre instance du script.
 		if (anchor.getAttribute(MARK_ATTR) === externalId) return;
-		const locale = await deps.getLocale(site);
-		// Pendant l'attente, la page a pu passer à une autre annonce.
-		if (disposed || deps.getUrl().href !== url.href || !anchor.isConnected)
-			return;
 		anchor.setAttribute(MARK_ATTR, externalId);
 		current = { anchor, externalId, key };
 		mounter.mount(anchor, report, locale);
