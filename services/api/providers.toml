@@ -1,0 +1,27 @@
+[providers.openrouter]
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+structured_output = "json_schema"
+cost_source = "usage_cost"
+[providers.openrouter.extra_body]
+provider = { data_collection = "deny" }
+usage = { include = true }
+reasoning = { enabled = false }
+
+[providers.omniroute]
+base_url = "http://localhost:20128/v1"
+base_url_env = "OMNIROUTE_BASE_URL"
+api_key_env = "OMNIROUTE_API_KEY"
+structured_output = "json_object"
+cost_source = "omniroute_headers"
+
+[providers.ollama]
+base_url = "http://localhost:11434/v1"
+base_url_env = "OLLAMA_BASE_URL"
+structured_output = "json_object"
+cost_source = "none"
+
+[providers.stub]          # faux fournisseur local pour les tests de bout en bout (tâche 9)
+base_url = "http://localhost:20199/v1"
+structured_output = "json_schema"
+cost_source = "none"
