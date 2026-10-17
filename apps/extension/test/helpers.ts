@@ -1,5 +1,19 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Me } from "@radarnaque/shared";
 import { vi } from "vitest";
+
+const FIXTURES_DIR = resolve(
+	dirname(fileURLToPath(import.meta.url)),
+	"fixtures",
+);
+
+/** Charge `test/fixtures/<relPath>` et l'analyse comme une page HTML. */
+export function loadFixture(relPath: string): Document {
+	const html = readFileSync(resolve(FIXTURES_DIR, relPath), "utf8");
+	return new DOMParser().parseFromString(html, "text/html");
+}
 
 function base64url(value: unknown): string {
 	return Buffer.from(JSON.stringify(value)).toString("base64url");
