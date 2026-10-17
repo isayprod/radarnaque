@@ -27,8 +27,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"level.high": "Risque élevé",
 		"panel.title": "Analyse Radarnaque",
 		"panel.none": "Aucun signal d'alerte détecté.",
-		"panel.footer":
-			"Analyse locale, sans IA. Pour une analyse approfondie, cliquez sur l'icône Radarnaque de votre navigateur.",
+		"panel.footer": "Analyse locale, sans IA.",
 		"badge.aria": "Ouvrir l'analyse Radarnaque",
 		"severity.danger": "Grave",
 		"severity.warning": "Attention",
@@ -51,8 +50,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"level.high": "Hoog risico",
 		"panel.title": "Radarnaque-analyse",
 		"panel.none": "Geen waarschuwingssignalen gevonden.",
-		"panel.footer":
-			"Lokale analyse, zonder AI. Voor een grondige analyse klikt u op het Radarnaque-pictogram in uw browser.",
+		"panel.footer": "Lokale analyse, zonder AI.",
 		"badge.aria": "Radarnaque-analyse openen",
 		"severity.danger": "Ernstig",
 		"severity.warning": "Let op",

@@ -36,6 +36,10 @@ describe("contentText", () => {
 		expect(contentText("nl", "level.high")).toBe("Hoog risico");
 		expect(contentText("fr", "badge.aria")).toBe("Ouvrir l'analyse Radarnaque");
 		expect(contentText("nl", "panel.title")).toBe("Radarnaque-analyse");
+		expect(contentText("fr", "panel.footer")).toBe("Analyse locale, sans IA.");
+		expect(contentText("nl", "panel.footer")).toBe(
+			"Lokale analyse, zonder AI.",
+		);
 	});
 });
 
