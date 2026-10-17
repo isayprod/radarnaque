@@ -25,3 +25,13 @@ export const MESSAGES: Record<PageState, Record<Locale, string>> = {
 export function pickLocale(language: string | undefined | null): Locale {
 	return language?.toLowerCase().startsWith("nl") ? "nl" : "fr";
 }
+
+/** `?lang=fr|nl` wins (language switch link); otherwise the browser language. */
+export function detectLocale(
+	search: string,
+	language: string | undefined | null,
+): Locale {
+	const requested = new URLSearchParams(search).get("lang");
+	if (requested === "fr" || requested === "nl") return requested;
+	return pickLocale(language);
+}

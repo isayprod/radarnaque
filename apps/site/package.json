@@ -12,6 +12,7 @@
 		"@radarnaque/shared": "workspace:*"
 	},
 	"devDependencies": {
+		"happy-dom": "^21.0.3",
 		"typescript": "~6.0.3",
 		"vite": "^8.0.0",
 		"vitest": "^5.0.5"

@@ -11,6 +11,8 @@ export default defineConfig({
 					import.meta.dirname,
 					"auth/callback/index.html",
 				),
+				pricing: resolve(import.meta.dirname, "pricing/index.html"),
+				privacy: resolve(import.meta.dirname, "privacy/index.html"),
 			},
 		},
 	},

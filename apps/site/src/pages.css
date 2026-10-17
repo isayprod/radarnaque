@@ -1,0 +1,42 @@
+body {
+	font-family: system-ui, sans-serif;
+	line-height: 1.5;
+	margin: 0;
+	padding: 16px;
+	color: #1a1a1a;
+	background: #fff;
+}
+main {
+	max-width: 60rem;
+	margin: 0 auto;
+}
+.lang {
+	text-align: right;
+}
+section h2 {
+	font-size: 1.125rem;
+}
+.plans {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+	gap: 16px;
+}
+.plan {
+	border: 1px solid #ccc;
+	border-radius: 8px;
+	padding: 16px;
+}
+.plan h2 {
+	margin-top: 0;
+}
+.tagline {
+	color: #555;
+}
+.price {
+	font-weight: 600;
+	margin: 0.25rem 0;
+}
+.soon {
+	margin-top: 24px;
+	font-weight: 600;
+}
