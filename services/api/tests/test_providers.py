@@ -59,6 +59,24 @@ def test_repo_file_groq_and_openai_oauth():
     assert oauth.api_key_env is None  # le proxy local utilise la session Codex, pas de clé
     assert oauth.structured_output == "json_object"  # le proxy ignore response_format
     assert oauth.cost_source == "none"
+    # Les modèles de raisonnement du service Codex refusent `temperature` (400, que le proxy
+    # transforme en 500).
+    assert oauth.omit_params == ("temperature",)
+    assert providers["openrouter"].omit_params == ()
+
+
+def test_omit_params_is_read(tmp_path):
+    path = _write(tmp_path, VALID + 'omit_params = ["temperature", "max_tokens"]\n')
+    assert load_providers(path)["p"].omit_params == ("temperature", "max_tokens")
+
+
+@pytest.mark.parametrize(
+    "value", ['"temperature"', '["model"]', '["messages"]', "[1]", '["temperature", "top_p"]']
+)
+def test_omit_params_only_accepts_known_sampling_params(tmp_path, value):
+    path = _write(tmp_path, VALID + f"omit_params = {value}\n")
+    with pytest.raises(ProviderError, match=r"providers\.p\.omit_params"):
+        load_providers(path)
 
 
 def test_max_images_is_read(tmp_path):

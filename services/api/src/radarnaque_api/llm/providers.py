@@ -15,6 +15,8 @@ from radarnaque_api.models.reference import Model
 
 StructuredOutput = Literal["json_schema", "json_object"]
 CostSource = Literal["usage_cost", "omniroute_headers", "none"]
+# Paramètres d'appel qu'un fournisseur peut refuser (modèles de raisonnement, par exemple).
+OmittableParam = Literal["temperature", "max_tokens"]
 
 _KNOWN_KEYS = {
     "base_url",
@@ -24,6 +26,7 @@ _KNOWN_KEYS = {
     "cost_source",
     "extra_body",
     "max_images",
+    "omit_params",
 }
 
 
@@ -67,6 +70,8 @@ class ProviderConfig:
     # Nombre maximal d'images par requête accepté par le fournisseur (None : pas de limite
     # propre, la limite globale des photos s'applique).
     max_images: int | None = None
+    # Paramètres d'appel à ne pas envoyer à ce fournisseur.
+    omit_params: tuple[OmittableParam, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "extra_body", _freeze(deepcopy(dict(self.extra_body))))
@@ -114,6 +119,16 @@ def _optional_positive_int(code: str, raw: Mapping[str, Any], key: str) -> int |
     return value
 
 
+def _omit_params(code: str, raw: Mapping[str, Any]) -> tuple[OmittableParam, ...]:
+    value = raw.get("omit_params", [])
+    allowed = get_args(OmittableParam)
+    if not isinstance(value, list) or any(item not in allowed for item in value):
+        raise ProviderError(
+            f"providers.{code}.omit_params : liste de valeurs parmi {', '.join(allowed)} attendue"
+        )
+    return tuple(value)
+
+
 def _choice[T: str](code: str, raw: Mapping[str, Any], key: str, literal: Any) -> T:
     allowed = get_args(literal)
     value = raw.get(key)
@@ -143,6 +158,7 @@ def _parse_provider(code: str, raw: object) -> ProviderConfig:
         cost_source=_choice(code, raw, "cost_source", CostSource),
         extra_body=extra_body,
         max_images=_optional_positive_int(code, raw, "max_images"),
+        omit_params=_omit_params(code, raw),
     )
 
 

@@ -272,6 +272,8 @@ class OpenAICompatibleClient:
             "response_format": self._response_format(),
             "extra_body": extra_body or None,
         }
+        for param in self._provider.omit_params:
+            del request[param]
         # Chaque `except` ne fait que noter le code ; l'erreur est levée après le bloc, pour
         # qu'aucune exception d'origine (corps, requête, Authorization) ne lui soit chaînée.
         code: LLMErrorCode = "transport"
