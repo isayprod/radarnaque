@@ -162,3 +162,16 @@ def test_database_unreachable_exits_2_without_leaking_url(cli_env, monkeypatch, 
     err = capsys.readouterr().err
     assert "hunter2" not in err and "127.0.0.1" not in err
     assert "Traceback" not in err
+
+
+def test_use_strips_the_provider_and_the_slug(cli_env, pg_url, capsys):
+    assert main(["use", " omniroute ", "  auto ", "--kind", "text"]) == 0
+    assert _active(pg_url, "text") == ("omniroute", "auto")
+    assert "omniroute/auto" in capsys.readouterr().out
+    raw = pg_url.replace("postgresql+psycopg://", "postgresql://", 1)
+    with psycopg.connect(raw) as conn:
+        padded = conn.execute(
+            "select count(*) from app.models"
+            " where slug <> btrim(slug) or provider <> btrim(provider)"
+        ).fetchone()
+    assert padded == (0,)
