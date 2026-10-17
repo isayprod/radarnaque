@@ -449,10 +449,13 @@ Corps de la requête : `{ listing: ListingIn, rules: { version, signals: SignalI
   - le **nom** de la variable d'environnement qui contient la clé (la clé elle-même n'est jamais dans le fichier ni en base) ;
   - le mode de sortie structurée (`json_schema` strict ou `json_object`) ;
   - la source du coût (`usage.cost`, en-têtes `X-OmniRoute-*`, ou aucune) ;
-  - les paramètres propres au fournisseur.
+  - les paramètres propres au fournisseur ;
+  - au besoin, le nombre maximal d'images par requête (`max_images`), quand le fournisseur en accepte moins que les 4 photos envoyées.
 - **Fournisseurs préconfigurés :**
   - **OpenRouter**, pour la production : `https://openrouter.ai/api/v1`, `OPENROUTER_API_KEY`, `provider: { data_collection: "deny" }`, `usage: { include: true }` ;
-  - **OmniRoute**, pour les tests gratuits en dev : `http://localhost:20128/v1`, `OMNIROUTE_API_KEY`, modèle `auto` ou `fournisseur/modèle` ;
+  - **Groq**, fournisseur de dev par défaut (offre gratuite) : `https://api.groq.com/openai/v1`, `GROQ_API_KEY`, `json_object`, coût nul, 3 images par requête au plus ;
+  - **openai-oauth**, proxy local non officiel qui passe par l'abonnement ChatGPT/Codex, **en local uniquement** : `http://127.0.0.1:10531/v1`, sans clé, `json_object` (le proxy ignore `response_format`), coût nul ;
+  - **OmniRoute**, alternative pour les tests gratuits en dev : `http://localhost:20128/v1`, `OMNIROUTE_API_KEY`, modèle `auto` ou `fournisseur/modèle` ;
   - **Ollama**, en local : `http://localhost:11434/v1`, sans clé, coût nul.
 - **Implémentation :** un seul `OpenAICompatibleClient` (SDK `openai`), paramétré par la configuration du fournisseur.
 - **Ajouter un fournisseur** compatible OpenAI demande une entrée dans `providers.toml` et une variable d'environnement, sans code.
@@ -466,7 +469,7 @@ Corps de la requête : `{ listing: ListingIn, rules: { version, signals: SignalI
   - paramètres propres au fournisseur (pour OpenRouter : `provider: { data_collection: "deny" }` et `usage: { include: true }`).
 - **Contenu envoyé :** le prompt système de la version active, puis l'annonce, où les téléphones et emails de la description sont **masqués** (`[téléphone]`, `[email]`). S'y ajoutent les informations du vendeur **sans son identité**, les signaux des règles et les images éventuelles.
 - **Sortie attendue :** `{ score, summary{fr, nl}, advice{fr, nl}, reasons[{severity, fr, nl}] }`, validée par Pydantic.
-- **Le coût réel** est relevé selon la source déclarée par le fournisseur (`usage.cost` pour OpenRouter, en-têtes `X-OmniRoute-*` pour OmniRoute, 0 pour Ollama), puis converti en micro-dollars.
+- **Le coût réel** est relevé selon la source déclarée par le fournisseur (`usage.cost` pour OpenRouter, en-têtes `X-OmniRoute-*` pour OmniRoute, 0 pour Groq, openai-oauth et Ollama), puis converti en micro-dollars.
 
 ### 7.4 Photos
 
