@@ -37,6 +37,7 @@ def _provider(
     extra_body: dict | None = None,
     api_key_env: str | None = "TEST_LLM_KEY",
     max_images: int | None = None,
+    omit_params: tuple[str, ...] = (),
 ) -> ProviderConfig:
     return ProviderConfig(
         code="testprov",
@@ -47,6 +48,7 @@ def _provider(
         cost_source=cost_source,  # type: ignore[arg-type]
         extra_body=extra_body or {},
         max_images=max_images,
+        omit_params=omit_params,  # type: ignore[arg-type]
     )
 
 
@@ -281,6 +283,25 @@ async def test_missing_api_key_is_configuration_error_without_any_call(mock, htt
     assert info.value.code == "configuration"
     assert route.call_count == 0
     _assert_not_chained(info.value)
+
+
+async def test_omitted_params_are_not_sent(mock, http):
+    route = mock.post("/chat/completions").mock(return_value=_ok())
+    await _analyze(_provider(omit_params=("temperature",)), http)
+
+    body = json.loads(route.calls.last.request.content)
+    assert "temperature" not in body
+    assert body["max_tokens"] == 800
+
+
+async def test_all_omittable_params_can_be_dropped(mock, http):
+    route = mock.post("/chat/completions").mock(return_value=_ok())
+    await _analyze(_provider(omit_params=("temperature", "max_tokens")), http)
+
+    body = json.loads(route.calls.last.request.content)
+    assert "temperature" not in body
+    assert "max_tokens" not in body
+    assert body["response_format"]["type"] == "json_schema"
 
 
 def test_client_exposes_the_provider_image_limit():

@@ -20,12 +20,14 @@ max_images = 3
 
 # openai-oauth (github.com/EvanZhouDev/openai-oauth) : proxy local qui passe par l'abonnement
 # ChatGPT/Codex (`npx openai-oauth`). Pour le dev en local uniquement : non officiel, et tout
-# appel est facturé sur l'abonnement. Pas de clé ; le proxy ignore `response_format`.
+# appel est facturé sur l'abonnement. Pas de clé ; le proxy ignore `response_format`. Les
+# modèles de raisonnement du service Codex (gpt-6-luna…) refusent `temperature`.
 [providers.openai-oauth]
 base_url = "http://127.0.0.1:10531/v1"
 base_url_env = "OPENAI_OAUTH_BASE_URL"
 structured_output = "json_object"
 cost_source = "none"
+omit_params = ["temperature"]
 
 [providers.omniroute]
 base_url = "http://localhost:20128/v1"
