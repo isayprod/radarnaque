@@ -451,10 +451,11 @@ Corps de la requête : `{ listing: ListingIn, rules: { version, signals: SignalI
   - la source du coût (`usage.cost`, en-têtes `X-OmniRoute-*`, ou aucune) ;
   - les paramètres propres au fournisseur ;
   - au besoin, le nombre maximal d'images par requête (`max_images`), quand le fournisseur en accepte moins que les 4 photos envoyées.
+  - au besoin, les paramètres d'appel à ne pas envoyer (`omit_params`, parmi `temperature` et `max_tokens`), quand le fournisseur les refuse.
 - **Fournisseurs préconfigurés :**
   - **OpenRouter**, pour la production : `https://openrouter.ai/api/v1`, `OPENROUTER_API_KEY`, `provider: { data_collection: "deny" }`, `usage: { include: true }` ;
   - **Groq**, fournisseur de dev par défaut (offre gratuite) : `https://api.groq.com/openai/v1`, `GROQ_API_KEY`, `json_object`, coût nul, 3 images par requête au plus ;
-  - **openai-oauth**, proxy local non officiel qui passe par l'abonnement ChatGPT/Codex, **en local uniquement** : `http://127.0.0.1:10531/v1`, sans clé, modèle de dev par défaut `gpt-6-luna`, `json_object` (le proxy ignore `response_format`), coût nul ;
+  - **openai-oauth**, proxy local non officiel qui passe par l'abonnement ChatGPT/Codex, **en local uniquement** : `http://127.0.0.1:10531/v1`, sans clé, modèle de dev par défaut `gpt-6-luna`, `json_object` (le proxy ignore `response_format`), sans `temperature` (refusée par les modèles de raisonnement du service Codex), coût nul ;
   - **OmniRoute**, alternative pour les tests gratuits en dev : `http://localhost:20128/v1`, `OMNIROUTE_API_KEY`, modèle `auto` ou `fournisseur/modèle` ;
   - **Ollama**, en local : `http://localhost:11434/v1`, sans clé, coût nul.
 - **Implémentation :** un seul `OpenAICompatibleClient` (SDK `openai`), paramétré par la configuration du fournisseur.
