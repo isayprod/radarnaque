@@ -6,6 +6,14 @@ export interface ExtractResult {
 	missing: string[];
 }
 
+/** Carte d'une page de résultats. */
+export interface CardRef {
+	element: Element;
+	externalId: string;
+	/** URL absolue de la fiche, sans paramètres de suivi. */
+	url: string;
+}
+
 export interface MarketplaceAdapter {
 	id: "twh" | "facebook";
 	sites: Site[];
@@ -16,4 +24,10 @@ export interface MarketplaceAdapter {
 	listingRoot(doc: Document, url: URL): Element | null;
 	/** L'UI est insérée APRÈS cet élément. */
 	badgeAnchor(root: Element): Element | null;
+	/** Cartes sous `root`, dans l'ordre du document ; [] hors page de recherche. */
+	findCards(root: ParentNode, pageUrl: URL): CardRef[];
+	/** L'icône de la carte est insérée APRÈS cet élément. */
+	cardAnchor(card: Element): Element | null;
+	/** Annonce lue sur la carte seule : repli `partial` quand la fiche est illisible. */
+	listingFromCard?(card: Element, pageUrl: URL): Listing | null;
 }

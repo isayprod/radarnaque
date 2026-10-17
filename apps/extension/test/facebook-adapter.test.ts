@@ -524,3 +524,285 @@ describe("facebookAdapter : champs absents", () => {
 		expect(missing).toContain("seller.name");
 	});
 });
+
+const SEARCH_URL = new URL("https://www.facebook.com/marketplace/brussels/");
+const GRID_IDS = [1, 2, 3, 4, 5, 6].map((n) => `900000000000000${n}`);
+
+function grid(): Document {
+	return loadFixture("facebook/grid.html");
+}
+
+/** Carte de `doc` dont l'id est `id`, telle que la renvoie `findCards`. */
+function cardOf(doc: Document, id: string, url: URL = SEARCH_URL): Element {
+	const card = adapter.findCards(doc, url).find((c) => c.externalId === id);
+	if (!card) throw new Error(`no card ${id}`);
+	return card.element;
+}
+
+function cardListing(doc: Document, id: string) {
+	const listing = adapter.listingFromCard?.(cardOf(doc, id), SEARCH_URL);
+	if (!listing) throw new Error(`listingFromCard(${id}) returned null`);
+	return listing;
+}
+
+function appendLink(parent: Element, href: string): HTMLAnchorElement {
+	const a = parent.ownerDocument.createElement("a");
+	a.setAttribute("href", href);
+	a.textContent = "lien";
+	parent.append(a);
+	return a;
+}
+
+describe("facebookAdapter : cartes de la grille (findCards)", () => {
+	test("les 6 cartes, dans l'ordre du document", () => {
+		const cards = adapter.findCards(grid(), SEARCH_URL);
+		expect(cards.map((c) => c.externalId)).toEqual(GRID_IDS);
+		for (const card of cards) {
+			expect(card.element.matches('a[href*="/marketplace/item/"]')).toBe(true);
+		}
+	});
+
+	test("url absolue de la fiche, sans paramètres", () => {
+		for (const card of adapter.findCards(grid(), SEARCH_URL)) {
+			expect(new URL(card.url).href).toBe(card.url);
+			expect(card.url.endsWith(`/marketplace/item/${card.externalId}/`)).toBe(
+				true,
+			);
+			expect(card.url).toBe(
+				`https://www.facebook.com/marketplace/item/${card.externalId}/`,
+			);
+		}
+	});
+
+	test("lien relatif avec paramètres de suivi : url nettoyée", () => {
+		const doc = grid();
+		cardOf(doc, GRID_IDS[0] as string).setAttribute(
+			"href",
+			"/marketplace/item/9000000000000001/?ref=search&referral_code=abc#x",
+		);
+		const card = adapter.findCards(doc, SEARCH_URL)[0];
+		expect(card?.url).toBe(
+			"https://www.facebook.com/marketplace/item/9000000000000001/",
+		);
+	});
+
+	test("doublons dédupliqués par id, première occurrence gardée", () => {
+		const doc = grid();
+		const main = doc.querySelector('[role="main"]') as Element;
+		const dup = appendLink(
+			main,
+			"https://www.facebook.com/marketplace/item/9000000000000002/?ref=x",
+		);
+		const cards = adapter.findCards(doc, SEARCH_URL);
+		expect(cards.map((c) => c.externalId)).toEqual(GRID_IDS);
+		expect(cards[1]?.element).not.toBe(dup);
+	});
+
+	test("liens hors Facebook ou hors chemin de fiche : ignorés", () => {
+		const doc = grid();
+		const main = doc.querySelector('[role="main"]') as Element;
+		appendLink(main, "https://evil.com/marketplace/item/9000000000000099/");
+		appendLink(
+			main,
+			"https://www.facebook.com/l.php?u=https://www.facebook.com/marketplace/item/9000000000000098/",
+		);
+		appendLink(
+			main,
+			"https://m.facebook.com/marketplace/item/9000000000000097/",
+		);
+		const ids = adapter.findCards(doc, SEARCH_URL).map((c) => c.externalId);
+		expect(ids).toEqual(GRID_IDS);
+	});
+
+	test("item-modal, URL de la fiche : aucune carte sous le dialogue", () => {
+		const cards = adapter.findCards(modal(), ITEM_URL);
+		expect(cards.some((c) => c.element.closest('[role="dialog"]'))).toBe(false);
+		// Une URL de fiche n'est pas une page de recherche.
+		expect(cards).toEqual([]);
+	});
+
+	test("cartes sous un [role=dialog] ignorées, la grille derrière gardée", () => {
+		const doc = modal();
+		const dialog = doc.querySelector('[role="dialog"]') as Element;
+		appendLink(
+			dialog,
+			"https://www.facebook.com/marketplace/item/9000000000000009/",
+		);
+		const cards = adapter.findCards(doc, SEARCH_URL);
+		expect(cards.map((c) => c.externalId)).toEqual([
+			"9000000000000002",
+			"9000000000000004",
+		]);
+	});
+
+	test("racine limitée : seules les cartes sous la racine", () => {
+		const doc = grid();
+		const first = doc.querySelector('[data-virtualized="false"]') as Element;
+		const cards = adapter.findCards(first, SEARCH_URL);
+		expect(cards.map((c) => c.externalId)).toEqual([GRID_IDS[0]]);
+	});
+
+	test.each([
+		"https://www.facebook.com/marketplace/profile/10000001/",
+		"https://www.facebook.com/marketplace/inbox/",
+		"https://www.facebook.com/",
+		"https://m.facebook.com/marketplace/brussels/",
+	])("hors page de recherche (%s) : aucune carte", (url) => {
+		expect(adapter.findCards(grid(), new URL(url))).toEqual([]);
+	});
+
+	test("web.facebook.com : l'url des cartes suit l'hôte de la page", () => {
+		const url = new URL("https://web.facebook.com/marketplace/brussels/");
+		const cards = adapter.findCards(grid(), url);
+		expect(cards.map((c) => c.url)).toEqual(
+			GRID_IDS.map((id) => `https://web.facebook.com/marketplace/item/${id}/`),
+		);
+	});
+});
+
+describe("facebookAdapter : ancre des cartes (cardAnchor)", () => {
+	test("jamais null pour les 6 cartes, dans la carte", () => {
+		const doc = grid();
+		for (const card of adapter.findCards(doc, SEARCH_URL)) {
+			const anchor = adapter.cardAnchor(card.element);
+			expect(anchor).not.toBeNull();
+			expect(card.element.contains(anchor)).toBe(true);
+		}
+	});
+
+	test.each([
+		["9000000000000001", "Canapé cuir De Sede comme neuf"],
+		["9000000000000003", "A donner"],
+		[
+			"9000000000000004",
+			"Golf GTI 8 clubsport 2021 full option 122350km prix fixe pas d’échange",
+		],
+		["9000000000000006", "À vendre plusieurs jeux Wii"],
+	])("carte %s : dernier élément du titre", (id, title) => {
+		const anchor = adapter.cardAnchor(cardOf(grid(), id));
+		expect(anchor?.children.length).toBe(0);
+		expect(anchor?.textContent?.replace(/\s+/g, " ").trim()).toBe(title);
+	});
+
+	test("carte sans texte : la carte elle-même", () => {
+		const card = cardOf(grid(), GRID_IDS[0] as string);
+		for (const span of card.querySelectorAll('span[dir="auto"]')) span.remove();
+		expect(adapter.cardAnchor(card)).toBe(card);
+	});
+});
+
+describe("facebookAdapter : annonce d'une carte (listingFromCard)", () => {
+	test("carte complète : titre, prix, lieu, première image", () => {
+		expect(cardListing(grid(), "9000000000000001")).toEqual({
+			site: "facebook.com",
+			externalId: "9000000000000001",
+			url: "https://www.facebook.com/marketplace/item/9000000000000001/",
+			title: "Canapé cuir De Sede comme neuf",
+			description: "",
+			price: { amountCents: 850000, currency: "EUR" },
+			priceType: "fixed",
+			location: { city: "Bruxelles", region: "BRU", country: "BE" },
+			images: ["https://images.example/fb/11.jpg"],
+			seller: {},
+		});
+	});
+
+	test("GRATUIT : free, sans montant", () => {
+		const listing = cardListing(grid(), "9000000000000003");
+		expect(listing.priceType).toBe("free");
+		expect(listing.price).toBeNull();
+	});
+
+	test("€ 1 234 : 123400 centimes", () => {
+		const listing = cardListing(grid(), "9000000000000006");
+		expect(listing.price?.amountCents).toBe(123400);
+		expect(listing.priceType).toBe("fixed");
+		expect(listing.location).toEqual({
+			city: "Antwerpen",
+			region: "VLG",
+			country: "BE",
+		});
+	});
+
+	test("€ 0 : prix fixe à 0, comme sur la fiche", () => {
+		expect(cardListing(grid(), "9000000000000005")).toMatchObject({
+			price: { amountCents: 0, currency: "EUR" },
+			priceType: "fixed",
+		});
+	});
+
+	test("prix barré : le prix actuel, pas l'ancien", () => {
+		const listing = cardListing(grid(), "9000000000000004");
+		expect(listing.price?.amountCents).toBe(2350000);
+		expect(listing.title).toBe(
+			"Golf GTI 8 clubsport 2021 full option 122350km prix fixe pas d’échange",
+		);
+		expect(listing.images).toEqual(["https://images.example/fb/14.jpg"]);
+	});
+
+	test("les 6 cartes : description vide, vendeur vide", () => {
+		const doc = grid();
+		for (const id of GRID_IDS) {
+			const listing = cardListing(doc, id);
+			expect(listing.description).toBe("");
+			expect(listing.seller).toEqual({});
+		}
+	});
+
+	test("prix illisible : unknown, sans montant", () => {
+		const doc = grid();
+		const card = cardOf(doc, "9000000000000002");
+		const price = card.querySelector('span[dir="auto"]') as Element;
+		price.textContent = "Prix sur demande";
+		const listing = adapter.listingFromCard?.(card, SEARCH_URL);
+		expect(listing?.price).toBeNull();
+		expect(listing?.priceType).toBe("unknown");
+		// La ligne illisible reste celle du prix : le titre ne glisse pas.
+		expect(listing?.title).toBe("Garmin Forerunner 945");
+		expect(listing?.location).toEqual({
+			city: "Liège",
+			region: "WAL",
+			country: "BE",
+		});
+	});
+
+	test("sans ligne de prix : titre et lieu lus, prix inconnu", () => {
+		const doc = grid();
+		const card = cardOf(doc, "9000000000000002");
+		card.querySelector('span[dir="auto"]')?.remove();
+		expect(adapter.listingFromCard?.(card, SEARCH_URL)).toMatchObject({
+			title: "Garmin Forerunner 945",
+			price: null,
+			priceType: "unknown",
+			location: { city: "Liège", region: "WAL", country: "BE" },
+		});
+	});
+
+	test("sans image http(s) : aucune image", () => {
+		const doc = grid();
+		const card = cardOf(doc, "9000000000000002");
+		card.querySelector("img")?.setAttribute("src", "data:image/gif;base64,R0");
+		expect(adapter.listingFromCard?.(card, SEARCH_URL)?.images).toEqual([]);
+	});
+
+	test("sans titre : null", () => {
+		const doc = grid();
+		const card = cardOf(doc, "9000000000000002");
+		const texts = [...card.querySelectorAll('span[dir="auto"]')];
+		for (const span of texts.slice(1)) span.remove();
+		expect(adapter.listingFromCard?.(card, SEARCH_URL)).toBeNull();
+	});
+
+	test("lien hors fiche ou site inconnu : null", () => {
+		const doc = grid();
+		const card = cardOf(doc, "9000000000000002");
+		expect(
+			adapter.listingFromCard?.(
+				card,
+				new URL("https://m.facebook.com/marketplace/brussels/"),
+			),
+		).toBeNull();
+		card.setAttribute("href", "https://www.facebook.com/marketplace/brussels/");
+		expect(adapter.listingFromCard?.(card, SEARCH_URL)).toBeNull();
+	});
+});

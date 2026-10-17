@@ -381,4 +381,11 @@ export const twhAdapter: MarketplaceAdapter = {
 	badgeAnchor(root) {
 		return sidebarTitle(root) ?? root.querySelector("h1");
 	},
+	// Cartes des résultats : tâche 6.
+	findCards() {
+		return [];
+	},
+	cardAnchor() {
+		return null;
+	},
 };

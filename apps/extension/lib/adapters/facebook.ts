@@ -4,7 +4,7 @@ import {
 	parsePriceText,
 } from "../listing/parse";
 import type { Listing, PageType, Site } from "../listing/types";
-import type { ExtractResult, MarketplaceAdapter } from "./types";
+import type { CardRef, ExtractResult, MarketplaceAdapter } from "./types";
 
 const SITES: Site[] = ["facebook.com"];
 
@@ -19,6 +19,7 @@ const NON_SEARCH_SECTIONS = new Set([
 	"create",
 ]);
 
+const ITEM_LINK = 'a[href*="/marketplace/item/"]';
 const PROFILE_LINK = 'a[href*="/marketplace/profile/"]';
 const PROFILE_ID_RE = /\/marketplace\/profile\/(\d+)/;
 // h1 de la navigation du site ou d'un panneau, jamais le titre d'une annonce.
@@ -191,15 +192,30 @@ function lineValue(label: Element, root: Element): Element | undefined {
 		: undefined;
 }
 
+type PriceInfo = ReturnType<typeof parsePriceText>;
+
+/** Texte propre à `el`, sans celui de ses éléments enfants. */
+function ownText(el: Element): string {
+	return [...el.childNodes]
+		.filter((n) => n.nodeType === Node.TEXT_NODE)
+		.map((n) => n.textContent ?? "")
+		.join("");
+}
+
+/**
+ * Prix affiché dans `el`. Un prix barré (« € 23 500 » suivi de l'ancien
+ * « € 25 000 » dans un enfant) se lit sur le texte propre de l'élément.
+ */
+function priceOf(el: Element | null | undefined): PriceInfo {
+	if (!el) return null;
+	return parsePriceText(el.textContent ?? "") ?? parsePriceText(ownText(el));
+}
+
 /** Bloc du prix : le premier frère qui suit le `h1` (ou un de ses ancêtres). */
-function readPrice(
-	h1: Element,
-	root: Element,
-): ReturnType<typeof parsePriceText> {
+function readPrice(h1: Element, root: Element): PriceInfo {
 	for (let el: Element | null = h1; el && el !== root; el = el.parentElement) {
 		const block = el.nextElementSibling;
-		if (block)
-			return parsePriceText(block.querySelector(TEXT)?.textContent ?? "");
+		if (block) return priceOf(block.querySelector(TEXT));
 	}
 	return null;
 }
@@ -215,7 +231,11 @@ function readLocation(root: Element): Listing["location"] {
 				POSTED_LINE_RE.test(textOf(line) ?? ""))
 		);
 	});
-	const text = textOf(link);
+	return locationFromText(textOf(link));
+}
+
+/** « Namur, WAL » : ville, région, et pays pour une région belge. */
+function locationFromText(text: string | undefined): Listing["location"] {
 	if (!text) return {};
 	const comma = text.lastIndexOf(",");
 	const city = str(comma < 0 ? text : text.slice(0, comma));
@@ -251,12 +271,18 @@ function readDetails(root: Element): {
 	return { condition, description };
 }
 
+/** `src` de l'image, seulement s'il est absolu en http(s). */
+function httpSrc(img: Element): string | undefined {
+	const src = img.getAttribute("src") ?? "";
+	return /^https?:\/\//i.test(src) ? src : undefined;
+}
+
 function readImages(root: Element): string[] {
 	const selector = PHOTO_ALT_PREFIXES.map((p) => `img[alt^="${p}"]`).join(",");
 	const images: string[] = [];
 	for (const img of root.querySelectorAll(selector)) {
-		const src = img.getAttribute("src") ?? "";
-		if (!/^https?:\/\//i.test(src) || images.includes(src)) continue;
+		const src = httpSrc(img);
+		if (!src || images.includes(src)) continue;
 		images.push(src);
 	}
 	return images;
@@ -339,6 +365,98 @@ function extract(doc: Document, url: URL, now: Date): ExtractResult | null {
 	return { listing, missing };
 }
 
+/** Id de l'annonce visée par `href`, si le lien reste sur un hôte Facebook. */
+function itemIdOfHref(href: string | null): string | null {
+	if (!href) return null;
+	try {
+		const url = new URL(href, "https://www.facebook.com");
+		return siteOf(url) ? idOf(url) : null;
+	} catch {
+		return null;
+	}
+}
+
+/** URL de la fiche sur l'hôte de la page : `fetch` reste de même origine. */
+function cardUrl(pageUrl: URL, id: string): string {
+	return `${pageUrl.origin}/marketplace/item/${id}/`;
+}
+
+/**
+ * Une carte est un lien de fiche hors dialogue (la fiche en modale et ses
+ * suggestions), dédupliqué par id. Rien hors page de recherche.
+ */
+function findCards(root: ParentNode, pageUrl: URL): CardRef[] {
+	if (!siteOf(pageUrl) || pageType(pageUrl) !== "search") return [];
+	const seen = new Set<string>();
+	const cards: CardRef[] = [];
+	for (const link of root.querySelectorAll(ITEM_LINK)) {
+		if (link.closest('[role="dialog"]')) continue;
+		const id = itemIdOfHref(link.getAttribute("href"));
+		if (!id || seen.has(id)) continue;
+		seen.add(id);
+		cards.push({ element: link, externalId: id, url: cardUrl(pageUrl, id) });
+	}
+	return cards;
+}
+
+/** Textes de premier niveau de la carte, non vides, dans l'ordre du document. */
+function cardTexts(card: Element): Element[] {
+	return [...card.querySelectorAll(TEXT)].filter((el) => {
+		const outer = el.parentElement?.closest(TEXT);
+		return (!outer || !card.contains(outer)) && textOf(el) !== undefined;
+	});
+}
+
+/**
+ * Une carte affiche le prix, puis le titre, puis le lieu. Les lignes de prix
+ * en tête sont sautées ; un prix illisible occupe quand même la première
+ * ligne dès qu'il y en a trois.
+ */
+function cardParts(card: Element): {
+	priceInfo: PriceInfo;
+	title?: Element;
+	location?: Element;
+} {
+	const texts = cardTexts(card);
+	let i = 0;
+	while (i < texts.length && priceOf(texts[i])) i++;
+	const priceInfo = i > 0 ? priceOf(texts[0]) : null;
+	if (i === 0 && texts.length >= 3) i = 1;
+	return { priceInfo, title: texts[i], location: texts[i + 1] };
+}
+
+/** Dernier élément du titre de la carte (le plus profond), ou la carte. */
+function cardAnchor(card: Element): Element {
+	let leaf = cardParts(card).title;
+	while (leaf?.lastElementChild) leaf = leaf.lastElementChild;
+	return leaf ?? card;
+}
+
+/** Annonce lue sur la carte : ni description ni vendeur, une seule image. */
+function listingFromCard(card: Element, pageUrl: URL): Listing | null {
+	const site = siteOf(pageUrl);
+	const externalId = itemIdOfHref(card.getAttribute("href"));
+	if (!site || !externalId) return null;
+	const { priceInfo, title, location } = cardParts(card);
+	const titleText = textOf(title);
+	if (!titleText) return null;
+	const image = [...card.querySelectorAll("img")]
+		.map(httpSrc)
+		.find((src) => src !== undefined);
+	return {
+		site,
+		externalId,
+		url: cardUrl(pageUrl, externalId),
+		title: titleText,
+		description: "",
+		price: priceInfo?.price ?? null,
+		priceType: priceInfo?.priceType ?? "unknown",
+		location: locationFromText(textOf(location)),
+		images: image ? [image] : [],
+		seller: {},
+	};
+}
+
 /** `clock` donne la date du jour pour l'ancienneté « A rejoint Facebook en AAAA ». */
 export function createFacebookAdapter(
 	clock: () => Date = () => new Date(),
@@ -359,6 +477,9 @@ export function createFacebookAdapter(
 		badgeAnchor(root) {
 			return listingHeading(root);
 		},
+		findCards,
+		cardAnchor,
+		listingFromCard,
 	};
 }
 
