@@ -165,16 +165,18 @@ type Listing = {
   category?: string;
   condition?: string;
   postedAt?: string;            // ISO 8601
-  location: { city?: string; postalCode?: string; country?: string };
+  location: { city?: string; region?: string; postalCode?: string; country?: string };
   images: string[];             // URLs absolues, dans l'ordre d'affichage
   seller: {
     id?: string; name?: string; profileUrl?: string;  // utilisés côté client uniquement
-    memberSince?: string; reviewCount?: number; rating?: number;
+    accountAgeMonths?: { min: number; max: number };  // fourchette en mois
+    reviewCount?: number; rating?: number;
     otherListingsCount?: number; verified?: boolean;
   };
 };
 ```
 
+- **Ancienneté du compte :** les sites donnent une durée (« 10 ans ») ou une année (« A rejoint Facebook en 2007 »), jamais une date. `seller.accountAgeMonths` est donc une fourchette `{ min, max }` en mois.
 - Un champ absent vaut `undefined`. **« Inconnu » n'est jamais un signal de risque.**
 - `seller.id`, `seller.name` et `seller.profileUrl` ne quittent **jamais** le navigateur. Le client les retire avant tout envoi à l'API.
 
@@ -205,20 +207,20 @@ interface MarketplaceAdapter {
 
 **Règles du MVP :**
 
-| id | Condition |
-|---|---|
-| `few_photos` | 0 ou 1 photo |
-| `new_account` | `memberSince` date de moins de 3 mois |
-| `no_reviews` | `reviewCount === 0` |
-| `foreign_location` | pays connu et différent de BE |
-| `short_description` | moins de 30 caractères |
-| `contact_outside` | téléphone, email, WhatsApp ou Telegram dans le texte |
-| `shipping_only` | « envoi uniquement », « verzending enkel », etc. |
-| `offsite_payment` | lien de paiement, Western Union, « paiement à l'avance », etc. (FR/NL) |
-| `symbolic_price` | prix entre 0 et 1 € alors que le type n'est pas « gratuit » |
-| `price_anomaly` | **désactivée**, en attente de la base de prix |
+| id | Poids | Gravité | Condition (vraie ⇒ signal) |
+|---|---|---|---|
+| `few_photos` | 15 | warning | `images.length <= 1` |
+| `new_account` | 25 | danger | `seller.accountAgeMonths` défini **et** `max < 3` |
+| `no_reviews` | 10 | warning | `seller.reviewCount === 0` |
+| `foreign_location` | 20 | warning | `location.country` défini **et** différent de `"BE"` |
+| `short_description` | 10 | info | `description.trim().length < 30` |
+| `contact_outside` | 25 | danger | titre et description contiennent un téléphone, un email, `whatsapp`, `telegram` ou `signal` |
+| `shipping_only` | 15 | warning | mots-clés « envoi uniquement », « pas de remise en main propre », « alleen verzenden », « geen ophalen », « shipping only » |
+| `offsite_payment` | 35 | danger | « western union », « moneygram », « paiement à l'avance », « vooraf betalen », « lien de paiement », « betaallink », « paypal amis », « paypal vrienden », « friends and family », « payconiq vooraf » |
+| `symbolic_price` | 20 | warning | `priceType` différent de `"free"` **et** `price` vaut `0` à `100` cents (0 à 1 €) |
+| `price_anomaly` | — | — | **désactivée** : présente dans le registre avec `enabled: false`, jamais évaluée (en attente de la base de prix) |
 
-Les poids initiaux sont fixés à l'implémentation, puis ajustés en testant sur des annonces réelles.
+Les poids ci-dessus sont les poids initiaux du MVP ; ils pourront être ajustés en testant sur des annonces réelles (chaque ajustement incrémente `RULES_VERSION`).
 
 ### 4.5 Intégration dans les pages
 
