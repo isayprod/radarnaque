@@ -1,11 +1,10 @@
 import type { Locale } from "@radarnaque/shared";
 import type { ShadowRootContentScriptUiOptions } from "wxt/utils/content-script-ui/shadow-root";
-import type { RiskReport } from "../rules/score";
-import { BADGE_HOST_TAG, type Mounter } from "./controller";
+import { BADGE_HOST_TAG, type BadgeView, type Mounter } from "./controller";
 
 /** Rendu de la pastille dans le conteneur du shadow root (React en production). */
 export interface BadgeRenderer {
-	render(report: RiskReport, locale: Locale): void;
+	render(view: BadgeView, locale: Locale): void;
 	unmount(): void;
 }
 
@@ -29,13 +28,13 @@ export interface BadgeMounterDeps {
  * Pastille dans un shadow root, insérée après l'ancre. La création de l'UI est
  * asynchrone (chargement du CSS de l'extension) : un `unmount` ou un nouveau
  * `mount` arrivé entre-temps annule le montage en attente, et un `update`
- * arrivé entre-temps (rapport et locale) est rendu au montage.
+ * arrivé entre-temps (vue et locale) est rendu au montage.
  */
 export function createBadgeMounter(deps: BadgeMounterDeps): Mounter {
 	const log = deps.log ?? ((msg: string) => console.debug(msg));
 	let ui: BadgeUi | null = null;
 	let renderer: BadgeRenderer | null = null;
-	let report: RiskReport | null = null;
+	let view: BadgeView | null = null;
 	let locale: Locale = "fr";
 	let pending = false;
 	let generation = 0;
@@ -43,9 +42,9 @@ export function createBadgeMounter(deps: BadgeMounterDeps): Mounter {
 	let failureLogged = false;
 
 	return {
-		mount(anchor, nextReport, nextLocale) {
+		mount(anchor, nextView, nextLocale) {
 			const current = ++generation;
-			report = nextReport;
+			view = nextView;
 			locale = nextLocale;
 			pending = true;
 			deps
@@ -56,7 +55,7 @@ export function createBadgeMounter(deps: BadgeMounterDeps): Mounter {
 					append: "after",
 					onMount(container) {
 						const created = deps.createRenderer(container);
-						if (report) created.render(report, locale);
+						if (view) created.render(view, locale);
 						renderer = created;
 						return created;
 					},
@@ -79,10 +78,10 @@ export function createBadgeMounter(deps: BadgeMounterDeps): Mounter {
 					log(`radarnaque: affichage impossible (${String(error)})`);
 				});
 		},
-		update(nextReport, nextLocale) {
-			report = nextReport;
+		update(nextView, nextLocale) {
+			view = nextView;
 			locale = nextLocale;
-			renderer?.render(nextReport, nextLocale);
+			renderer?.render(nextView, nextLocale);
 		},
 		unmount() {
 			generation++;
@@ -90,7 +89,7 @@ export function createBadgeMounter(deps: BadgeMounterDeps): Mounter {
 			ui?.remove();
 			ui = null;
 			renderer = null;
-			report = null;
+			view = null;
 		},
 		isMounted() {
 			return pending || (ui?.shadowHost.isConnected ?? false);

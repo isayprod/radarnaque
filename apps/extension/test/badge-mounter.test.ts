@@ -7,6 +7,8 @@ import {
 	createBadgeMounter,
 } from "../lib/content/badge-mounter";
 import { BADGE_HOST_TAG } from "../lib/content/controller";
+import type { BadgeView } from "../lib/content/use-ai-scan";
+import type { Listing } from "../lib/listing/types";
 import type { RiskReport } from "../lib/rules/score";
 
 const low: RiskReport = {
@@ -21,6 +23,21 @@ const medium: RiskReport = {
 	rulesVersion: 1,
 	signals: [{ id: "offsite_payment", weight: 35, severity: "danger" }],
 };
+
+const listing: Listing = {
+	site: "2ememain.be",
+	externalId: "m123",
+	url: "https://www.2ememain.be/v/velo/m123",
+	title: "Vélo",
+	description: "Bon état.",
+	price: null,
+	priceType: "unknown",
+	location: {},
+	images: [],
+	seller: {},
+};
+const lowView: BadgeView = { report: low, listing };
+const mediumView: BadgeView = { report: medium, listing };
 
 /**
  * `createShadowRootUi` simulé : chaque appel renvoie une promesse résolue (ou
@@ -67,11 +84,11 @@ function fakeUiFactory() {
 }
 
 function fakeRenderer() {
-	const renders: Array<{ report: RiskReport; locale: Locale }> = [];
+	const renders: Array<{ view: BadgeView; locale: Locale }> = [];
 	const unmount = vi.fn();
 	const createRenderer = vi.fn(
 		(_container: HTMLElement): BadgeRenderer => ({
-			render: (report, locale) => renders.push({ report, locale }),
+			render: (view, locale) => renders.push({ view, locale }),
 			unmount,
 		}),
 	);
@@ -97,7 +114,7 @@ const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 describe("createBadgeMounter", () => {
 	test("options du shadow root : hôte nommé, inline, après l'ancre", () => {
 		const t = setup();
-		t.mounter.mount(t.anchor, low, "fr");
+		t.mounter.mount(t.anchor, lowView, "fr");
 		const options = t.ui.calls[0]?.options;
 		expect(options?.name).toBe(BADGE_HOST_TAG);
 		expect(options?.position).toBe("inline");
@@ -107,7 +124,7 @@ describe("createBadgeMounter", () => {
 
 	test("mount puis unmount avant la création de l'UI : rien n'est monté", async () => {
 		const t = setup();
-		t.mounter.mount(t.anchor, low, "fr");
+		t.mounter.mount(t.anchor, lowView, "fr");
 		t.mounter.unmount();
 		const ui = t.ui.calls[0]?.resolve();
 		await flush();
@@ -120,37 +137,37 @@ describe("createBadgeMounter", () => {
 
 	test("update avant la création de l'UI : le dernier rapport est rendu", async () => {
 		const t = setup();
-		t.mounter.mount(t.anchor, low, "nl");
-		t.mounter.update(medium, "nl");
+		t.mounter.mount(t.anchor, lowView, "nl");
+		t.mounter.update(mediumView, "nl");
 		t.ui.calls[0]?.resolve();
 		await flush();
 
-		expect(t.renderer.renders).toEqual([{ report: medium, locale: "nl" }]);
+		expect(t.renderer.renders).toEqual([{ view: mediumView, locale: "nl" }]);
 	});
 
 	test("update après le montage : nouveau rendu, même locale", async () => {
 		const t = setup();
-		t.mounter.mount(t.anchor, low, "fr");
+		t.mounter.mount(t.anchor, lowView, "fr");
 		t.ui.calls[0]?.resolve();
 		await flush();
-		t.mounter.update(medium, "fr");
+		t.mounter.update(mediumView, "fr");
 
 		expect(t.renderer.renders).toEqual([
-			{ report: low, locale: "fr" },
-			{ report: medium, locale: "fr" },
+			{ view: lowView, locale: "fr" },
+			{ view: mediumView, locale: "fr" },
 		]);
 	});
 
 	test("update avec une autre locale : nouveau rendu dans cette locale, sans remontage", async () => {
 		const t = setup();
-		t.mounter.mount(t.anchor, low, "fr");
+		t.mounter.mount(t.anchor, lowView, "fr");
 		const ui = t.ui.calls[0]?.resolve();
 		await flush();
-		t.mounter.update(low, "nl");
+		t.mounter.update(lowView, "nl");
 
 		expect(t.renderer.renders).toEqual([
-			{ report: low, locale: "fr" },
-			{ report: low, locale: "nl" },
+			{ view: lowView, locale: "fr" },
+			{ view: lowView, locale: "nl" },
 		]);
 		expect(t.ui.createUi).toHaveBeenCalledTimes(1);
 		expect(ui?.remove).not.toHaveBeenCalled();
@@ -158,18 +175,18 @@ describe("createBadgeMounter", () => {
 
 	test("update avec une autre locale avant la création de l'UI : rendue au montage", async () => {
 		const t = setup();
-		t.mounter.mount(t.anchor, low, "nl");
-		t.mounter.update(low, "fr");
+		t.mounter.mount(t.anchor, lowView, "nl");
+		t.mounter.update(lowView, "fr");
 		t.ui.calls[0]?.resolve();
 		await flush();
 
-		expect(t.renderer.renders).toEqual([{ report: low, locale: "fr" }]);
+		expect(t.renderer.renders).toEqual([{ view: lowView, locale: "fr" }]);
 	});
 
 	test("isMounted() suit la présence de l'hôte dans le document", async () => {
 		const t = setup();
 		expect(t.mounter.isMounted()).toBe(false);
-		t.mounter.mount(t.anchor, low, "fr");
+		t.mounter.mount(t.anchor, lowView, "fr");
 		expect(t.mounter.isMounted()).toBe(true); // création en cours
 		t.ui.calls[0]?.resolve();
 		await flush();
@@ -182,7 +199,7 @@ describe("createBadgeMounter", () => {
 
 	test("unmount après le montage : UI retirée et racine React démontée", async () => {
 		const t = setup();
-		t.mounter.mount(t.anchor, low, "fr");
+		t.mounter.mount(t.anchor, lowView, "fr");
 		const ui = t.ui.calls[0]?.resolve();
 		await flush();
 		t.mounter.unmount();
@@ -195,13 +212,13 @@ describe("createBadgeMounter", () => {
 
 	test("échec de création : pas monté, une seule ligne de log", async () => {
 		const t = setup();
-		t.mounter.mount(t.anchor, low, "fr");
+		t.mounter.mount(t.anchor, lowView, "fr");
 		t.ui.calls[0]?.reject(new Error("CSS introuvable"));
 		await flush();
 		expect(t.mounter.isMounted()).toBe(false);
 
 		t.mounter.unmount();
-		t.mounter.mount(t.anchor, low, "fr");
+		t.mounter.mount(t.anchor, lowView, "fr");
 		t.ui.calls[1]?.reject(new Error("CSS introuvable"));
 		await flush();
 

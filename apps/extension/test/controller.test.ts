@@ -5,6 +5,7 @@ import {
 	createController,
 	type Mounter,
 } from "../lib/content/controller";
+import type { BadgeView } from "../lib/content/use-ai-scan";
 import type { Site } from "../lib/listing/types";
 import type { RiskReport } from "../lib/rules/score";
 import { loadFixture } from "./helpers";
@@ -20,8 +21,14 @@ const fbItemUrl = (id: string) =>
 const FB_GRID_URL = "https://www.facebook.com/marketplace/";
 
 type Op =
-	| { op: "mount"; anchor: Element; report: RiskReport; locale: Locale }
-	| { op: "update"; report: RiskReport; locale: Locale }
+	| {
+			op: "mount";
+			anchor: Element;
+			view: BadgeView;
+			report: RiskReport;
+			locale: Locale;
+	  }
+	| { op: "update"; view: BadgeView; report: RiskReport; locale: Locale }
 	| { op: "unmount" };
 
 /**
@@ -32,12 +39,13 @@ function fakeMounter() {
 	const ops: Op[] = [];
 	let host: Element | null = null;
 	const mounter: Mounter = {
-		mount: (anchor, report, locale) => {
-			ops.push({ op: "mount", anchor, report, locale });
+		mount: (anchor, view, locale) => {
+			ops.push({ op: "mount", anchor, view, report: view.report, locale });
 			host = anchor.ownerDocument.createElement(BADGE_HOST_TAG);
 			anchor.after(host);
 		},
-		update: (report, locale) => ops.push({ op: "update", report, locale }),
+		update: (view, locale) =>
+			ops.push({ op: "update", view, report: view.report, locale }),
 		unmount: () => {
 			ops.push({ op: "unmount" });
 			host?.remove();
@@ -167,6 +175,33 @@ describe("createController — 2ememain", () => {
 		const [update] = t.of("update");
 		expect(update?.locale).toBe("nl");
 		expect(update?.report).toEqual(t.of("mount")[0]?.report);
+	});
+
+	test("la vue montée porte l'annonce extraite", async () => {
+		const doc = loadFixture("twh/listing-fixed.html");
+		const t = setup(doc, FIXED_URL);
+		await t.controller.refresh();
+		const listing = t.of("mount")[0]?.view.listing;
+		expect(listing?.site).toBe("2ememain.be");
+		expect(listing?.externalId).toBe("m1000000001");
+		expect(listing?.title).toBeTruthy();
+	});
+
+	test("description modifiée par le site : update avec la nouvelle annonce, sans remontage", async () => {
+		const doc = loadFixture("twh/listing-fixed.html");
+		const t = setup(doc, FIXED_URL);
+		await t.controller.refresh();
+		const before = t.of("mount")[0]?.view.listing.description ?? "";
+
+		const description = doc.querySelector('[data-collapsable="description"]');
+		const node = description?.querySelector("p, div") ?? description;
+		node?.append(doc.createTextNode(" Texte ajouté par le vendeur."));
+		await t.controller.refresh();
+
+		expect(t.ops.map((o) => o.op)).toEqual(["mount", "update"]);
+		const after = t.of("update")[0]?.view.listing.description;
+		expect(after).not.toBe(before);
+		expect(after).toContain("Texte ajouté par le vendeur.");
 	});
 
 	test("ancre déjà marquée pour cette annonce (autre instance) : pas de second mount", async () => {

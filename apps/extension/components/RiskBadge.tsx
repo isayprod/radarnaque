@@ -7,9 +7,13 @@ import {
 	useRef,
 	useState,
 } from "react";
+import type { AiClient } from "../lib/content/ai-client";
+import { useAiScan } from "../lib/content/use-ai-scan";
 import { contentText, signalText } from "../lib/content-i18n";
+import type { Listing } from "../lib/listing/types";
 import type { Severity, Signal } from "../lib/rules/rules";
 import type { RiskReport } from "../lib/rules/score";
+import { AiSection } from "./AiSection";
 import { LEVEL_KEY, LEVEL_STYLE, SEVERITY_STYLE } from "./risk-styles";
 
 const SEVERITY_ORDER: Record<Severity, number> = {
@@ -60,10 +64,15 @@ function useDismiss(
 
 export function RiskBadge({
 	report,
+	listing,
 	locale,
+	ai,
 }: {
 	report: RiskReport;
+	listing: Listing;
 	locale: Locale;
+	/** Client IA injecté par le content script (`createAiClient()`). */
+	ai: AiClient;
 }) {
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -71,6 +80,13 @@ export function RiskBadge({
 	const scoreId = useId();
 	const close = useCallback(() => setOpen(false), []);
 	useDismiss(open, rootRef, close);
+	// L'état IA vit ici, pas dans le panneau : il survit à sa fermeture.
+	const scan = useAiScan(ai, { report, listing }, locale);
+	const { loadAccess } = scan;
+	// Accès chargé à la première ouverture du panneau, jamais avant.
+	useEffect(() => {
+		if (open) loadAccess();
+	}, [open, loadAccess]);
 
 	const style = LEVEL_STYLE[report.level];
 	const signals = [...report.signals].sort(byGravity);
@@ -125,6 +141,17 @@ export function RiskBadge({
 							))}
 						</ul>
 					)}
+					<AiSection
+						locale={locale}
+						access={scan.access}
+						hasPhotos={listing.images.length > 0}
+						text={scan.text}
+						image={scan.image}
+						onScan={scan.scan}
+						onLogin={scan.login}
+						loginUnavailable={scan.loginUnavailable}
+						pricingUrl={scan.pricingUrl}
+					/>
 					<p className="m-0 mt-3 border-t border-slate-200 pt-2 text-[12px] text-slate-600">
 						{contentText(locale, "panel.footer")}
 					</p>
