@@ -22,6 +22,9 @@ function publicOrigin(): string {
 
 export default defineConfig({
 	modules: ["@wxt-dev/module-react"],
+	// Port fixe, hors de ceux de la stack (3000 auth, 8000 api, 8080 Caddy) : par défaut WXT
+	// prend 3000 et masque le service auth sur localhost.
+	dev: { server: { port: 3100, strictPort: true } },
 	vite: () => ({ plugins: [tailwindcss()] }),
 	manifest: () => {
 		const origin = publicOrigin();
