@@ -94,7 +94,12 @@ services:
       JWT_ISSUER: ${PUBLIC_URL:?PUBLIC_URL manquante}
       JWT_AUDIENCE: ${PUBLIC_URL:?PUBLIC_URL manquante}
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET manquante}
+      # Fournisseurs LLM (services/api/providers.toml) : tous facultatifs ; une valeur vide est
+      # ignorée (URL de providers.toml) ou fait échouer les analyses de ce fournisseur (clé).
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
     depends_on:
       migrate-api:
         condition: service_completed_successfully
