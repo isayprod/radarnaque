@@ -52,3 +52,6 @@ logs/
 
 # Pages de marketplaces enregistrées (données personnelles, jetons de session)
 web-pages/
+
+# Historiques R
+.Rhistory
