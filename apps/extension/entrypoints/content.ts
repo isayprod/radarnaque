@@ -52,7 +52,14 @@ export default defineContentScript({
 		ctx.addEventListener(window, "wxt:locationchange", () => {
 			void controller.refresh();
 		});
-		ctx.onInvalidated(controller.dispose);
+		// Langue changée dans la popup : nouveau rendu de la pastille montée.
+		const unwatchLocale = localePref.watch(() => {
+			void controller.refresh();
+		});
+		ctx.onInvalidated(() => {
+			unwatchLocale();
+			controller.dispose();
+		});
 		void controller.refresh();
 	},
 });

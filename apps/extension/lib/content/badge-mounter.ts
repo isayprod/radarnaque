@@ -29,7 +29,7 @@ export interface BadgeMounterDeps {
  * Pastille dans un shadow root, insérée après l'ancre. La création de l'UI est
  * asynchrone (chargement du CSS de l'extension) : un `unmount` ou un nouveau
  * `mount` arrivé entre-temps annule le montage en attente, et un `update`
- * arrivé entre-temps est rendu au montage.
+ * arrivé entre-temps (rapport et locale) est rendu au montage.
  */
 export function createBadgeMounter(deps: BadgeMounterDeps): Mounter {
 	const log = deps.log ?? ((msg: string) => console.debug(msg));
@@ -79,9 +79,10 @@ export function createBadgeMounter(deps: BadgeMounterDeps): Mounter {
 					log(`radarnaque: affichage impossible (${String(error)})`);
 				});
 		},
-		update(nextReport) {
+		update(nextReport, nextLocale) {
 			report = nextReport;
-			renderer?.render(nextReport, locale);
+			locale = nextLocale;
+			renderer?.render(nextReport, nextLocale);
 		},
 		unmount() {
 			generation++;
