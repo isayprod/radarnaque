@@ -42,6 +42,11 @@
 	}
 
 	handle /api/* {
+		# Corps plafonné à 1 Mo (règle R14) : un scan pèse quelques Ko. L'API plafonne aussi
+		# le webhook Stripe (1 Mio), sans dépendre de ce proxy.
+		request_body {
+			max_size 1MB
+		}
 		reverse_proxy api:8000
 	}
 
