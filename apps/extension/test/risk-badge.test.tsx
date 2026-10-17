@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -150,5 +153,59 @@ describe("RiskBadge", () => {
 		expect(screen.getByRole("dialog")).toBeTruthy();
 		expect(fetchSpy).not.toHaveBeenCalled();
 		expect(sendMessage).not.toHaveBeenCalled();
+	});
+
+	test("Escape ouvert est consommé : un écouteur document ultérieur ne le reçoit pas", async () => {
+		const user = userEvent.setup();
+		render(<RiskBadge report={high} locale="fr" />);
+		await user.click(toggle());
+		const bubble = vi.fn();
+		const capture = vi.fn();
+		document.addEventListener("keydown", bubble);
+		document.addEventListener("keydown", capture, true);
+		await user.keyboard("{Escape}");
+		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(bubble).not.toHaveBeenCalled();
+		expect(capture).not.toHaveBeenCalled();
+		// Panneau fermé : Escape n'est plus intercepté.
+		await user.keyboard("{Escape}");
+		expect(bubble).toHaveBeenCalledTimes(1);
+		document.removeEventListener("keydown", bubble);
+		document.removeEventListener("keydown", capture, true);
+	});
+
+	test("le bouton est décrit par le niveau et le score visibles", () => {
+		render(<RiskBadge report={low} locale="fr" />);
+		const ids = (toggle().getAttribute("aria-describedby") ?? "").split(" ");
+		const described = ids.map((id) => document.getElementById(id)?.textContent);
+		expect(described).toEqual(["Risque faible", "0/100"]);
+	});
+});
+
+describe("badge.css", () => {
+	const css = readFileSync(
+		resolve(dirname(fileURLToPath(import.meta.url)), "../components/badge.css"),
+		"utf8",
+	);
+	const blockOf = (selector: string) =>
+		css.match(new RegExp(`${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+
+	test("les variables Tailwind issues de @property sont redéfinies sur :host et sur la racine", () => {
+		const vars = [
+			"--tw-border-style: solid",
+			"--tw-outline-style: solid",
+			"--tw-inset-shadow: 0 0 #0000",
+			"--tw-inset-ring-shadow: 0 0 #0000",
+			"--tw-ring-offset-shadow: 0 0 #0000",
+			"--tw-ring-shadow: 0 0 #0000",
+		];
+		const shared = css.match(/:host,\s*\.radarnaque-root\s*\{([^}]*)\}/)?.[1];
+		expect(shared).toBeDefined();
+		for (const declaration of vars) expect(shared).toContain(declaration);
+		expect(blockOf(":host")).not.toBe("");
+	});
+
+	test("les espacements sont en px", () => {
+		expect(css).toMatch(/@theme\s*\{[^}]*--spacing:\s*4px/);
 	});
 });
