@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+	aiErrorText,
 	CONTENT_TEXTS,
 	contentText,
 	resolveContentLocale,
@@ -111,5 +112,96 @@ describe("resolveContentLocale", () => {
 		expect(resolveContentLocale("facebook.com", null, "NL")).toBe("nl");
 		expect(resolveContentLocale("facebook.com", null, "en-US")).toBe("fr");
 		expect(resolveContentLocale("facebook.com", null, "")).toBe("fr");
+	});
+});
+
+describe("textes de la section IA", () => {
+	const aiKeys = (locale: "fr" | "nl") =>
+		Object.keys(CONTENT_TEXTS[locale])
+			.filter((key) => key.startsWith("ai."))
+			.sort();
+
+	test("parité exacte des clés ai.* entre FR et NL", () => {
+		expect(aiKeys("fr").length).toBeGreaterThan(0);
+		expect(aiKeys("nl")).toEqual(aiKeys("fr"));
+	});
+
+	test("les textes FR imposés", () => {
+		const expected: Record<string, string> = {
+			"ai.title": "Analyse IA",
+			"ai.run": "Lancer une analyse IA",
+			"ai.runPhotos": "Analyse avec photos",
+			"ai.loading": "Analyse en cours…",
+			"ai.accessLoading": "Chargement…",
+			"ai.login": "Se connecter",
+			"ai.loginHint": "Connectez-vous pour lancer une analyse IA.",
+			"ai.loginFallback":
+				"Cliquez sur l'icône Radarnaque dans la barre d'outils du navigateur pour vous connecter.",
+			"ai.pricing": "Voir les formules",
+			"ai.fromCache": "Résultat déjà disponible : servi depuis le cache.",
+			"ai.partial":
+				"Analyse partielle : seules les informations de la carte étaient disponibles.",
+			"ai.remaining": "Analyses restantes : {count}",
+			"ai.advice": "Conseil",
+			"ai.reasons": "Pourquoi",
+			"ai.error.session_expired": "Session expirée, reconnectez-vous.",
+			"ai.error.unauthenticated": "Session expirée, reconnectez-vous.",
+			"ai.error.no_active_subscription":
+				"Un abonnement est nécessaire pour lancer une analyse IA.",
+			"ai.error.quota_exhausted":
+				"Vous avez utilisé toutes vos analyses de ce type pour cette période.",
+			"ai.error.feature_not_in_plan":
+				"Cette analyse n'est pas comprise dans votre formule.",
+			"ai.error.invalid_listing":
+				"Cette annonce ne peut pas être analysée (données illisibles).",
+			"ai.error.rate_limited":
+				"Trop d'analyses en peu de temps. Réessayez dans une minute.",
+			"ai.error.analysis_failed":
+				"L'analyse a échoué. Elle ne vous a pas été décomptée. Réessayez plus tard.",
+			"ai.error.network": "Connexion impossible. Vérifiez votre réseau.",
+			"ai.error.background_unavailable":
+				"Connexion impossible. Vérifiez votre réseau.",
+			"ai.error.default": "Une erreur est survenue. Réessayez plus tard.",
+		};
+		const fr = CONTENT_TEXTS.fr as Record<string, string>;
+		for (const [key, text] of Object.entries(expected)) {
+			expect(fr[key], key).toBe(text);
+		}
+		expect(aiKeys("fr")).toEqual(Object.keys(expected).sort());
+	});
+
+	test("ai.remaining garde {count} dans les deux langues", () => {
+		expect(contentText("fr", "ai.remaining")).toContain("{count}");
+		expect(contentText("nl", "ai.remaining")).toContain("{count}");
+	});
+});
+
+describe("aiErrorText", () => {
+	test("un code connu renvoie son texte dans la langue active", () => {
+		expect(aiErrorText("fr", "quota_exhausted")).toBe(
+			contentText("fr", "ai.error.quota_exhausted"),
+		);
+		expect(aiErrorText("nl", "rate_limited")).toBe(
+			contentText("nl", "ai.error.rate_limited"),
+		);
+	});
+
+	test("un code inconnu renvoie ai.error.default", () => {
+		expect(aiErrorText("fr", "teapot")).toBe(
+			"Une erreur est survenue. Réessayez plus tard.",
+		);
+		expect(aiErrorText("nl", "teapot")).toBe(
+			contentText("nl", "ai.error.default"),
+		);
+	});
+
+	test("un code qui ressemble à une clé non-erreur n'est pas résolu", () => {
+		// `ai.error.` + code : jamais un accès à une clé hors du préfixe.
+		expect(aiErrorText("fr", "../title")).toBe(
+			contentText("fr", "ai.error.default"),
+		);
+		expect(aiErrorText("fr", "toString")).toBe(
+			contentText("fr", "ai.error.default"),
+		);
 	});
 });
