@@ -580,3 +580,21 @@ async def test_default_resolve_failure_is_http_error(monkeypatch):
     with pytest.raises(ImageFetchError) as caught:
         await default_resolve("cdn.example")
     _assert_clean(caught.value, "http_error")
+
+
+@pytest.mark.parametrize(
+    ("url", "allowed"),
+    [
+        (URL, True),
+        ("https://cdn.images.2dehands.com/a.jpg", True),
+        ("https://scontent-bru2-1.xx.fbcdn.net/a.jpg", True),
+        ("https://evilimages.2dehands.com/a.jpg", False),
+        ("https://images.2dehands.com.evil.test/a.jpg", False),
+        ("ftp://images.2dehands.com/a.jpg", False),
+        ("https://user:pw@images.2dehands.com/a.jpg", False),
+        ("https://images.2dehands.com:8443/a.jpg", False),
+        ("https://93.184.216.34/a.jpg", False),
+    ],
+)
+def test_is_allowed_url_is_a_static_host_check(url, allowed):
+    assert images.is_allowed_url(url, SUFFIXES) is allowed
