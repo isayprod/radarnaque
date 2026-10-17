@@ -1,15 +1,17 @@
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
 import httpx
 import pytest
 import respx
+from pydantic import BaseModel
 
 from radarnaque_api.llm.client import (
     LLMAnalysis,
     LLMError,
     OpenAICompatibleClient,
     strict_analysis_schema,
+    strict_json_schema,
 )
 from radarnaque_api.llm.providers import ProviderConfig
 
@@ -83,9 +85,15 @@ async def http() -> AsyncIterator[httpx.AsyncClient]:
 
 
 @pytest.fixture
-def mock() -> AsyncIterator[respx.MockRouter]:
+def mock() -> Iterator[respx.MockRouter]:
     with respx.mock(base_url=BASE, assert_all_called=False) as router:
         yield router
+
+
+def _assert_not_chained(error: BaseException) -> None:
+    # Ni cause ni contexte : l'exception d'origine porte le corps et la requête (Authorization).
+    assert error.__cause__ is None
+    assert error.__context__ is None
 
 
 async def _analyze(provider: ProviderConfig, http: httpx.AsyncClient, env=ENV):
@@ -158,6 +166,28 @@ def test_strict_schema_is_self_contained_and_closed():
     assert strict_analysis_schema()["properties"]
 
 
+class _Titled(BaseModel):
+    title: str
+    maxLength: int  # nom de champ volontairement identique à un mot-clé
+
+
+class _WithTitled(BaseModel):
+    title: _Titled
+    items: list[_Titled]
+
+
+def test_strict_schema_keeps_fields_named_like_keywords():
+    schema = strict_json_schema(_WithTitled)
+    assert sorted(schema["properties"]) == ["items", "title"]
+    assert sorted(schema["required"]) == ["items", "title"]
+    titled = schema["properties"]["title"]
+    assert sorted(titled["properties"]) == ["maxLength", "title"]
+    assert titled["properties"]["title"] == {"type": "string"}
+    assert sorted(schema["properties"]["items"]["items"]["properties"]) == ["maxLength", "title"]
+    # Les mots-clés `title` des nœuds de schéma, eux, sont bien retirés.
+    assert "title" not in titled["properties"]["maxLength"]
+
+
 async def test_invalid_then_valid_response_succeeds_with_two_calls(mock, http):
     route = mock.post("/chat/completions").mock(
         side_effect=[httpx.Response(200, json=_completion("pas du json")), _ok()]
@@ -175,6 +205,7 @@ async def test_two_invalid_responses_raise_invalid_response(mock, http):
         await _analyze(_provider(), http)
     assert info.value.code == "invalid_response"
     assert route.call_count == 2
+    _assert_not_chained(info.value)
 
 
 @pytest.mark.parametrize(
@@ -236,8 +267,7 @@ async def test_auth_rejection_is_configuration_error_without_retry_or_leak(mock,
         assert KEY not in text
         assert BODY_MARKER not in text
         assert BASE not in text
-    assert error.__cause__ is None
-    assert error.__suppress_context__ is True
+    _assert_not_chained(error)
 
 
 async def test_missing_api_key_is_configuration_error_without_any_call(mock, http):
@@ -246,6 +276,13 @@ async def test_missing_api_key_is_configuration_error_without_any_call(mock, htt
         await _analyze(_provider(), http, env={})
     assert info.value.code == "configuration"
     assert route.call_count == 0
+    _assert_not_chained(info.value)
+
+
+def test_llm_error_provider_is_optional():
+    error = LLMError("transport")
+    assert error.code == "transport"
+    assert "injoignable" in str(error)
 
 
 async def test_provider_without_key_sends_placeholder(mock, http):
@@ -260,6 +297,37 @@ async def test_timeout_twice_raises_transport(mock, http):
         await _analyze(_provider(), http)
     assert info.value.code == "transport"
     assert route.call_count == 2
+    _assert_not_chained(info.value)
+
+
+async def test_server_error_twice_raises_transport_after_two_calls(mock, http):
+    route = mock.post("/chat/completions").mock(
+        return_value=httpx.Response(502, json={"error": {"message": BODY_MARKER}})
+    )
+    with pytest.raises(LLMError) as info:
+        await _analyze(_provider(), http)
+    assert info.value.code == "transport"
+    assert route.call_count == 2
+    assert BODY_MARKER not in str(info.value)
+    _assert_not_chained(info.value)
+
+
+async def test_rate_limited_is_transport_without_retry(mock, http):
+    route = mock.post("/chat/completions").mock(
+        return_value=httpx.Response(429, json={"error": {"message": BODY_MARKER}})
+    )
+    with pytest.raises(LLMError) as info:
+        await _analyze(_provider(), http)
+    assert info.value.code == "transport"
+    assert route.call_count == 1
+    _assert_not_chained(info.value)
+
+
+async def test_timeout_of_30_seconds_reaches_the_request(mock, http):
+    route = mock.post("/chat/completions").mock(return_value=_ok())
+    await _analyze(_provider(), http)
+    timeout = route.calls.last.request.extensions["timeout"]
+    assert timeout == {"connect": 30, "read": 30, "write": 30, "pool": 30}
 
 
 async def test_server_error_then_success_retries_once(mock, http):
@@ -289,6 +357,7 @@ async def test_other_client_error_is_transport_without_retry(mock, http):
     assert info.value.code == "transport"
     assert route.call_count == 1
     assert BODY_MARKER not in str(info.value)
+    _assert_not_chained(info.value)
 
 
 async def test_openrouter_usage_cost_in_micro_dollars(mock, http):

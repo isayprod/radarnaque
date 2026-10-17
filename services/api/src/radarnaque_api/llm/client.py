@@ -70,11 +70,13 @@ _MESSAGES: dict[str, str] = {
 
 class LLMError(Exception):
     """Le message ne contient que le code du fournisseur et un texte fixe, jamais de secret ni
-    de corps de réponse. Toujours levée avec `from None` : l'exception d'origine (qui peut
-    citer le corps renvoyé) n'est pas chaînée."""
+    de corps de réponse. Elle est toujours levée **hors** du bloc `except` qui a intercepté
+    l'erreur d'origine : ni `__cause__` ni `__context__` ne la rattachent à cette exception, qui
+    peut porter le corps renvoyé et la requête (en-tête Authorization compris)."""
 
-    def __init__(self, code: LLMErrorCode, provider: str) -> None:
-        super().__init__(f"fournisseur {provider} : {_MESSAGES[code]}")
+    def __init__(self, code: LLMErrorCode, provider: str | None = None) -> None:
+        prefix = f"fournisseur {provider} : " if provider else ""
+        super().__init__(prefix + _MESSAGES[code])
         self.code: LLMErrorCode = code
 
 
@@ -89,25 +91,44 @@ class LLMClient(Protocol):
 _UNSUPPORTED_KEYWORDS = {"title", "minLength", "maxLength"}
 
 
-def _strict(node: Any, defs: Mapping[str, Any]) -> Any:
-    if isinstance(node, list):
-        return [_strict(item, defs) for item in node]
-    if not isinstance(node, dict):
-        return node
+_SUBSCHEMA_KEYS = {"items", "additionalProperties", "not"}
+_SUBSCHEMA_LIST_KEYS = {"anyOf", "allOf", "oneOf", "prefixItems"}
+_SUBSCHEMA_MAP_KEYS = {"properties", "patternProperties"}
+
+
+def _strict(node: dict[str, Any], defs: Mapping[str, Any]) -> dict[str, Any]:
+    """Transforme un nœud de schéma. Les mots-clés ne sont filtrés que sur les nœuds : les clés
+    d'une table `properties` sont des noms de champs (un champ `title` reste)."""
     if "$ref" in node:
         return _strict(defs[node["$ref"].removeprefix("#/$defs/")], defs)
-    out = {k: _strict(v, defs) for k, v in node.items() if k not in _UNSUPPORTED_KEYWORDS}
+    out: dict[str, Any] = {}
+    for key, value in node.items():
+        if key in _UNSUPPORTED_KEYWORDS:
+            continue
+        if key in _SUBSCHEMA_MAP_KEYS:
+            out[key] = {name: _strict(sub, defs) for name, sub in value.items()}
+        elif key in _SUBSCHEMA_KEYS and isinstance(value, dict):
+            out[key] = _strict(value, defs)
+        elif key in _SUBSCHEMA_LIST_KEYS:
+            out[key] = [_strict(sub, defs) for sub in value]
+        else:
+            out[key] = deepcopy(value)
     if out.get("type") == "object":
         out["additionalProperties"] = False
         out["required"] = list(out.get("properties", {}))
     return out
 
 
-@cache
-def _strict_schema_cached() -> dict[str, Any]:
-    schema = LLMAnalysis.model_json_schema()
+def strict_json_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """Schéma JSON de `model`, autonome (sans `$ref`) et fermé, accepté en mode strict."""
+    schema = model.model_json_schema()
     defs = schema.pop("$defs", {})
     return _strict(schema, defs)
+
+
+@cache
+def _strict_schema_cached() -> dict[str, Any]:
+    return strict_json_schema(LLMAnalysis)
 
 
 def strict_analysis_schema() -> dict[str, Any]:
@@ -161,9 +182,11 @@ class OpenAICompatibleClient:
         if self._client is None:
             try:
                 base_url = self._provider.resolved_base_url(self._env)
-                api_key = self._provider.api_key(self._env)
+                api_key: str | None = self._provider.api_key(self._env)
             except ProviderError:
-                raise self._error("configuration") from None
+                api_key = None
+            if api_key is None:  # levée hors du `except` : aucun contexte chaîné
+                raise self._error("configuration")
             self._client = AsyncOpenAI(
                 base_url=base_url,
                 api_key=api_key or "unused",
@@ -238,19 +261,24 @@ class OpenAICompatibleClient:
             "response_format": self._response_format(),
             "extra_body": extra_body or None,
         }
+        # Chaque `except` ne fait que noter le code ; l'erreur est levée après le bloc, pour
+        # qu'aucune exception d'origine (corps, requête, Authorization) ne lui soit chaînée.
         code: LLMErrorCode = "transport"
         for _ in range(ATTEMPTS):
+            fatal: LLMErrorCode | None = None
             try:
                 return await self._attempt(client, request)
             except _Invalid:
                 code = "invalid_response"
             except openai.APIStatusError as exc:
-                status = exc.status_code
-                if status in (401, 403):
-                    raise self._error("configuration") from None
-                if status < 500:  # requête refusée : la répéter ne changerait rien
-                    raise self._error("transport") from None
-                code = "transport"
+                if exc.status_code in (401, 403):
+                    fatal = "configuration"
+                elif exc.status_code < 500:  # requête refusée : la répéter ne changerait rien
+                    fatal = "transport"
+                else:
+                    code = "transport"
             except openai.APIConnectionError:  # connexion impossible ou délai dépassé
                 code = "transport"
-        raise self._error(code) from None
+            if fatal is not None:
+                raise self._error(fatal)
+        raise self._error(code)
