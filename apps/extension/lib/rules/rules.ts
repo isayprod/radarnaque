@@ -7,7 +7,7 @@ import {
 	SHIPPING_ONLY_KEYWORDS,
 } from "./keywords";
 
-export const RULES_VERSION = 1;
+export const RULES_VERSION = 2;
 
 export type Severity = "info" | "warning" | "danger";
 export type RuleId =
@@ -129,7 +129,7 @@ export const RULES: readonly Rule[] = [
 		20,
 		"warning",
 		(l) =>
-			l.priceType !== "free" &&
+			l.priceType === "fixed" &&
 			l.price !== null &&
 			l.price.amountCents >= 0 &&
 			l.price.amountCents <= 100,

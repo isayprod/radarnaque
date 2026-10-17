@@ -61,7 +61,7 @@ describe("registry", () => {
 			"symbolic_price",
 			"price_anomaly",
 		]);
-		expect(RULES_VERSION).toBe(1);
+		expect(RULES_VERSION).toBe(2);
 	});
 
 	test("weights and severities match the table", () => {
@@ -387,15 +387,37 @@ describe("offsite_payment", () => {
 });
 
 describe("symbolic_price", () => {
-	test("positive from 0 to 100 cents", () => {
+	test("fixed price positive from 0 to 100 cents", () => {
 		for (const amountCents of [0, 1, 100]) {
-			const l = makeListing({ price: { amountCents, currency: "EUR" } });
+			const l = makeListing({
+				price: { amountCents, currency: "EUR" },
+				priceType: "fixed",
+			});
 			expect(ids(l)).toEqual(["symbolic_price"]);
 		}
 	});
 
-	test("negative above 1 euro", () => {
-		const l = makeListing({ price: { amountCents: 101, currency: "EUR" } });
+	test("fixed price negative above 1 euro", () => {
+		const l = makeListing({
+			price: { amountCents: 101, currency: "EUR" },
+			priceType: "fixed",
+		});
+		expect(ids(l)).toEqual([]);
+	});
+
+	test("not triggered when priceType is bidding", () => {
+		const l = makeListing({
+			price: { amountCents: 100, currency: "EUR" },
+			priceType: "bidding",
+		});
+		expect(ids(l)).toEqual([]);
+	});
+
+	test("not triggered when priceType is unknown", () => {
+		const l = makeListing({
+			price: { amountCents: 0, currency: "EUR" },
+			priceType: "unknown",
+		});
 		expect(ids(l)).toEqual([]);
 	});
 

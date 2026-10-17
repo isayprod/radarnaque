@@ -217,7 +217,7 @@ interface MarketplaceAdapter {
 | `contact_outside` | 25 | danger | titre et description contiennent un téléphone, un email, `whatsapp`, `telegram` ou `signal` |
 | `shipping_only` | 15 | warning | mots-clés « envoi uniquement », « pas de remise en main propre », « alleen verzenden », « geen ophalen », « shipping only » |
 | `offsite_payment` | 35 | danger | « western union », « moneygram », « paiement à l'avance », « vooraf betalen », « lien de paiement », « betaallink », « paypal amis », « paypal vrienden », « friends and family », « payconiq vooraf » |
-| `symbolic_price` | 20 | warning | `priceType` différent de `"free"` **et** `price` vaut `0` à `100` cents (0 à 1 €) |
+| `symbolic_price` | 20 | warning | `priceType` vaut `"fixed"` **et** `price` n'est pas nul et vaut `0` à `100` cents (0 à 1 €) ; jamais pour `bidding`, `unknown` ni `free` |
 | `price_anomaly` | — | — | **désactivée** : présente dans le registre avec `enabled: false`, jamais évaluée (en attente de la base de prix) |
 
 Les poids ci-dessus sont les poids initiaux du MVP ; ils pourront être ajustés en testant sur des annonces réelles (chaque ajustement incrémente `RULES_VERSION`).
