@@ -315,7 +315,7 @@ scan_triggers(code PK)                   -- 'button', 'card'
 severities(code PK)                      -- 'info', 'warning', 'danger'
 subscription_statuses(code PK)           -- 'active', 'canceled', 'past_due', 'expired'
 billing_providers(code PK)               -- 'manual', 'stripe'
-models(id PK, provider, slug, UNIQUE(provider, slug))
+models(id PK, provider, slug, UNIQUE(provider, slug))   -- provider = code défini dans providers.toml (§7.3)
 scan_kinds(code PK,                      -- 'text', 'image'
            active_model_id FK→models,
            active_prompt_version_id FK→prompt_versions NULL)   -- FK différée
@@ -443,18 +443,29 @@ Corps de la requête : `{ listing: ListingIn, rules: { version, signals: SignalI
 ### 7.3 Relais LLM
 
 - **Interface :** `LLMClient.analyze(prompt: PromptVersion, payload, images) -> LLMAnalysis`.
-- **Implémentation :** `OpenAICompatibleClient`, avec le SDK `openai`, `base_url = https://openrouter.ai/api/v1` et la clé `OPENROUTER_API_KEY`.
+- **Fournisseurs interchangeables, décrits dans un fichier versionné** `services/api/providers.toml` (pas de table, pour éviter une lecture en base à chaque appel ; une table pourra venir plus tard). Pour chaque fournisseur, le fichier donne :
+  - `base_url` ;
+  - le **nom** de la variable d'environnement qui contient la clé (la clé elle-même n'est jamais dans le fichier ni en base) ;
+  - le mode de sortie structurée (`json_schema` strict ou `json_object`) ;
+  - la source du coût (`usage.cost`, en-têtes `X-OmniRoute-*`, ou aucune) ;
+  - les paramètres propres au fournisseur.
+- **Fournisseurs préconfigurés :**
+  - **OpenRouter**, pour la production : `https://openrouter.ai/api/v1`, `OPENROUTER_API_KEY`, `provider: { data_collection: "deny" }`, `usage: { include: true }` ;
+  - **OmniRoute**, pour les tests gratuits en dev : `http://localhost:20128/v1`, `OMNIROUTE_API_KEY`, modèle `auto` ou `fournisseur/modèle` ;
+  - **Ollama**, en local : `http://localhost:11434/v1`, sans clé, coût nul.
+- **Implémentation :** un seul `OpenAICompatibleClient` (SDK `openai`), paramétré par la configuration du fournisseur.
+- **Ajouter un fournisseur** compatible OpenAI demande une entrée dans `providers.toml` et une variable d'environnement, sans code.
+- **Choix du modèle :** `models.provider` contient un code de fournisseur défini dans `providers.toml`, validé au démarrage de l'API. Le modèle actif de chaque type de scan reste `scan_kinds.active_model_id`. On le change sans code avec `uv run radarnaque-llm use <fournisseur> <modèle> --kind text|image`, puis depuis l'admin en phase 4.
 - **Paramètres d'appel :**
-  - `response_format` de type `json_schema` en mode strict ;
+  - `response_format` selon le fournisseur (`json_schema` strict ou `json_object`) ; la réponse est **toujours** validée par Pydantic, et une réponse invalide déclenche une nouvelle tentative ;
   - `temperature = 0.2` ;
   - raisonnement désactivé ;
   - `max_tokens = 800` ;
   - délai de 30 s et **une** nouvelle tentative ;
-  - `provider: { data_collection: "deny" }` ;
-  - `usage: { include: true }`.
+  - paramètres propres au fournisseur (pour OpenRouter : `provider: { data_collection: "deny" }` et `usage: { include: true }`).
 - **Contenu envoyé :** le prompt système de la version active, puis l'annonce, où les téléphones et emails de la description sont **masqués** (`[téléphone]`, `[email]`). S'y ajoutent les informations du vendeur **sans son identité**, les signaux des règles et les images éventuelles.
 - **Sortie attendue :** `{ score, summary{fr, nl}, advice{fr, nl}, reasons[{severity, fr, nl}] }`, validée par Pydantic.
-- **Le coût réel** est relevé dans `usage.cost`, puis converti en micro-dollars.
+- **Le coût réel** est relevé selon la source déclarée par le fournisseur (`usage.cost` pour OpenRouter, en-têtes `X-OmniRoute-*` pour OmniRoute, 0 pour Ollama), puis converti en micro-dollars.
 
 ### 7.4 Photos
 
@@ -524,7 +535,7 @@ Le format est `{ "error": { "code": "...", "message": "...", "details": {} } }`.
   - `postgres:17`, avec un volume ;
   - `migrate`, exécuté une seule fois : migrations Better Auth, puis `alembic upgrade head` ;
   - `backup` : `pg_dump` quotidien et chiffré vers un stockage externe, avec une rétention de 14 jours.
-- **Secrets** dans `.env`, jamais versionné, avec un `.env.example` documenté : `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `RESEND_API_KEY`, `OPENROUTER_API_KEY`, `INTERNAL_API_SECRET`, `EXTENSION_ID`, `JWT_ISSUER`, `JWT_AUDIENCE`.
+- **Secrets** dans `.env`, jamais versionné, avec un `.env.example` documenté : `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `RESEND_API_KEY`, `OPENROUTER_API_KEY` (et, en dev, `OMNIROUTE_API_KEY`), `INTERNAL_API_SECRET`, `EXTENSION_ID`, `JWT_ISSUER`, `JWT_AUDIENCE`.
 - **Développement :**
   - `docker compose -f docker-compose.dev.yml up` lance Postgres, auth et api avec rechargement automatique ;
   - `pnpm --filter extension dev` lance WXT ;
