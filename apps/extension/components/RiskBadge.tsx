@@ -3,6 +3,7 @@ import {
 	type RefObject,
 	useCallback,
 	useEffect,
+	useId,
 	useRef,
 	useState,
 } from "react";
@@ -59,14 +60,19 @@ function useDismiss(
 			if (path.includes(element) || (host && path.includes(host))) return;
 			close();
 		};
+		// Escape est consommé ici, en tout premier (window, capture) : la modale de
+		// l'annonce Facebook, dessous, ne doit pas se fermer en même temps.
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key === "Escape") close();
+			if (event.key !== "Escape") return;
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			close();
 		};
 		document.addEventListener("pointerdown", onPointerDown, true);
-		document.addEventListener("keydown", onKeyDown, true);
+		window.addEventListener("keydown", onKeyDown, true);
 		return () => {
 			document.removeEventListener("pointerdown", onPointerDown, true);
-			document.removeEventListener("keydown", onKeyDown, true);
+			window.removeEventListener("keydown", onKeyDown, true);
 		};
 	}, [open, ref, close]);
 }
@@ -80,6 +86,8 @@ export function RiskBadge({
 }) {
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
+	const levelId = useId();
+	const scoreId = useId();
 	const close = useCallback(() => setOpen(false), []);
 	useDismiss(open, rootRef, close);
 
@@ -90,12 +98,13 @@ export function RiskBadge({
 	return (
 		<div
 			ref={rootRef}
-			className="relative ml-2 inline-block align-middle text-[13px] leading-[1.4] font-normal"
+			className="radarnaque-root relative ml-2 inline-block align-middle text-[13px] leading-[1.4] font-normal"
 		>
 			<button
 				type="button"
 				aria-expanded={open}
 				aria-label={contentText(locale, "badge.aria")}
+				aria-describedby={`${levelId} ${scoreId}`}
 				onClick={() => setOpen((value) => !value)}
 				className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[13px] leading-[1.4] font-semibold shadow-sm hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700"
 			>
@@ -103,16 +112,18 @@ export function RiskBadge({
 					aria-hidden="true"
 					className={`inline-block size-2.5 rounded-full ${style.dot}`}
 				/>
-				<span className={style.text}>
+				<span id={levelId} className={style.text}>
 					{contentText(locale, LEVEL_KEY[report.level])}
 				</span>
-				<span className="text-slate-600">{report.score}/100</span>
+				<span id={scoreId} className="text-slate-600">
+					{report.score}/100
+				</span>
 			</button>
 			{open && (
 				<div
 					role="dialog"
 					aria-label={contentText(locale, "panel.title")}
-					className="absolute top-full left-0 z-[2147483647] mt-1.5 w-[320px] max-w-[90vw] rounded-lg border border-slate-300 bg-white p-3 text-[13px] leading-[1.4] text-slate-900 shadow-lg"
+					className="absolute top-full left-0 z-[2147483647] mt-1.5 w-[320px] max-w-[90vw] rounded-[8px] border border-slate-300 bg-white p-3 text-[13px] leading-[1.4] text-slate-900 shadow-lg"
 				>
 					<h2 className="m-0 mb-2 text-[14px] font-bold">
 						{contentText(locale, "panel.title")}
@@ -124,7 +135,7 @@ export function RiskBadge({
 							{signals.map((signal) => (
 								<li key={signal.id} className="flex items-start gap-2">
 									<span
-										className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold ${SEVERITY_STYLE[signal.severity]}`}
+										className={`shrink-0 rounded-[4px] px-1.5 py-0.5 text-[11px] font-semibold ${SEVERITY_STYLE[signal.severity]}`}
 									>
 										{contentText(locale, `severity.${signal.severity}`)}
 									</span>
