@@ -90,6 +90,29 @@ pnpm test:api    # tests de l'API (cd services/api && uv run pytest ; Docker req
 pnpm test:all    # les deux
 ```
 
+### 6. Tester sur les vrais sites
+
+La pastille de risque est calculée localement, sans appel réseau : la stack n'est pas
+nécessaire, seul `apps/extension/.env` doit exister (voir « 1. Configuration »).
+
+1. Lancer `pnpm dev:ext`.
+2. Dans le Chrome ouvert, afficher une annonce 2ememain (`https://www.2ememain.be/v/…`),
+   une annonce 2dehands (`https://www.2dehands.be/v/…`) et une annonce Facebook
+   Marketplace (`https://www.facebook.com/marketplace/item/…`, compte Facebook requis).
+3. Vérifier, sur chacune :
+   - la pastille apparaît juste après le titre de l'annonce, une seule fois ;
+   - un clic ouvre le panneau des signaux ; Escape ou un clic ailleurs le ferme ;
+   - la langue : français sur 2ememain, néerlandais sur 2dehands, langue du navigateur
+     sur Facebook, sauf si une langue a été choisie dans la popup ;
+   - sur 2ememain, la pastille se met à jour quand la section vendeur finit de charger,
+     sans se dupliquer.
+4. Sur Facebook, ouvrir une annonce depuis la grille (modale), puis passer à une autre
+   annonce et revenir à la grille : la pastille est remplacée à chaque annonce, jamais
+   empilée, et disparaît sur la grille.
+
+Si une fiche n'est pas reconnue, rien ne s'affiche et la console de la page (niveau
+« Verbose ») contient une seule ligne `radarnaque: extraction impossible (<adaptateur>)`.
+
 ## Déployer
 
 Production : un serveur (Allemagne) avec Docker et Docker Compose, un enregistrement DNS
