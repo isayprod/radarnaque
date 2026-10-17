@@ -13,6 +13,9 @@ type TextKey =
 	| "panel.none"
 	| "panel.footer"
 	| "badge.aria"
+	| "severity.danger"
+	| "severity.warning"
+	| "severity.info"
 	| Exclude<RuleId, "price_anomaly">;
 
 export type ContentKey = Exclude<TextKey, RuleId>;
@@ -27,6 +30,9 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"panel.footer":
 			"Analyse locale, sans IA. Pour une analyse approfondie, cliquez sur l'icône Radarnaque de votre navigateur.",
 		"badge.aria": "Ouvrir l'analyse Radarnaque",
+		"severity.danger": "Grave",
+		"severity.warning": "Attention",
+		"severity.info": "Info",
 		few_photos: "Peu de photos ({count})",
 		new_account: "Compte vendeur très récent",
 		no_reviews: "Aucun avis sur le vendeur",
@@ -48,6 +54,9 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"panel.footer":
 			"Lokale analyse, zonder AI. Voor een grondige analyse klikt u op het Radarnaque-pictogram in uw browser.",
 		"badge.aria": "Radarnaque-analyse openen",
+		"severity.danger": "Ernstig",
+		"severity.warning": "Let op",
+		"severity.info": "Info",
 		few_photos: "Weinig foto's ({count})",
 		new_account: "Zeer recent verkopersaccount",
 		no_reviews: "Geen beoordelingen voor de verkoper",

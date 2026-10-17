@@ -1,0 +1,143 @@
+import type { Locale } from "@radarnaque/shared";
+import {
+	type RefObject,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
+import { type ContentKey, contentText, signalText } from "../lib/content-i18n";
+import type { Severity, Signal } from "../lib/rules/rules";
+import type { RiskLevel, RiskReport } from "../lib/rules/score";
+
+const SEVERITY_ORDER: Record<Severity, number> = {
+	danger: 0,
+	warning: 1,
+	info: 2,
+};
+
+const LEVEL_KEY: Record<RiskLevel, ContentKey> = {
+	low: "level.low",
+	medium: "level.medium",
+	high: "level.high",
+};
+
+// Couleur du point et du texte de niveau. Le niveau est toujours aussi écrit en
+// toutes lettres : la couleur ne porte jamais seule l'information.
+const LEVEL_STYLE: Record<RiskLevel, { dot: string; text: string }> = {
+	low: { dot: "bg-green-600", text: "text-green-800" },
+	medium: { dot: "bg-amber-500", text: "text-amber-800" },
+	high: { dot: "bg-red-600", text: "text-red-800" },
+};
+
+const SEVERITY_STYLE: Record<Severity, string> = {
+	danger: "bg-red-100 text-red-800",
+	warning: "bg-amber-100 text-amber-800",
+	info: "bg-slate-100 text-slate-700",
+};
+
+const byGravity = (a: Signal, b: Signal) =>
+	SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
+
+/** Ferme le panneau sur Escape et sur tout clic hors de `ref`, tant qu'il est ouvert. */
+function useDismiss(
+	open: boolean,
+	ref: RefObject<HTMLElement | null>,
+	close: () => void,
+) {
+	useEffect(() => {
+		const element = ref.current;
+		if (!open || !element) return;
+		const root = element.getRootNode();
+		const host = root instanceof ShadowRoot ? root.host : null;
+
+		// Un clic sur la page n'entre jamais dans le Shadow DOM : l'écoute se fait donc
+		// sur le document, et `composedPath()` traverse la frontière du shadow root.
+		// Si le shadow root est fermé, seul l'hôte apparaît dans le chemin.
+		const onPointerDown = (event: Event) => {
+			const path = event.composedPath();
+			if (path.includes(element) || (host && path.includes(host))) return;
+			close();
+		};
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") close();
+		};
+		document.addEventListener("pointerdown", onPointerDown, true);
+		document.addEventListener("keydown", onKeyDown, true);
+		return () => {
+			document.removeEventListener("pointerdown", onPointerDown, true);
+			document.removeEventListener("keydown", onKeyDown, true);
+		};
+	}, [open, ref, close]);
+}
+
+export function RiskBadge({
+	report,
+	locale,
+}: {
+	report: RiskReport;
+	locale: Locale;
+}) {
+	const [open, setOpen] = useState(false);
+	const rootRef = useRef<HTMLDivElement>(null);
+	const close = useCallback(() => setOpen(false), []);
+	useDismiss(open, rootRef, close);
+
+	const style = LEVEL_STYLE[report.level];
+	const signals = [...report.signals].sort(byGravity);
+
+	// Police en px et reset explicite : le site hôte ne doit ni agrandir ni styler la pastille.
+	return (
+		<div
+			ref={rootRef}
+			className="relative ml-2 inline-block align-middle text-[13px] leading-[1.4] font-normal"
+		>
+			<button
+				type="button"
+				aria-expanded={open}
+				aria-label={contentText(locale, "badge.aria")}
+				onClick={() => setOpen((value) => !value)}
+				className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[13px] leading-[1.4] font-semibold shadow-sm hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700"
+			>
+				<span
+					aria-hidden="true"
+					className={`inline-block size-2.5 rounded-full ${style.dot}`}
+				/>
+				<span className={style.text}>
+					{contentText(locale, LEVEL_KEY[report.level])}
+				</span>
+				<span className="text-slate-600">{report.score}/100</span>
+			</button>
+			{open && (
+				<div
+					role="dialog"
+					aria-label={contentText(locale, "panel.title")}
+					className="absolute top-full left-0 z-[2147483647] mt-1.5 w-[320px] max-w-[90vw] rounded-lg border border-slate-300 bg-white p-3 text-[13px] leading-[1.4] text-slate-900 shadow-lg"
+				>
+					<h2 className="m-0 mb-2 text-[14px] font-bold">
+						{contentText(locale, "panel.title")}
+					</h2>
+					{signals.length === 0 ? (
+						<p className="m-0">{contentText(locale, "panel.none")}</p>
+					) : (
+						<ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+							{signals.map((signal) => (
+								<li key={signal.id} className="flex items-start gap-2">
+									<span
+										className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold ${SEVERITY_STYLE[signal.severity]}`}
+									>
+										{contentText(locale, `severity.${signal.severity}`)}
+									</span>
+									<span>{signalText(locale, signal)}</span>
+								</li>
+							))}
+						</ul>
+					)}
+					<p className="m-0 mt-3 border-t border-slate-200 pt-2 text-[12px] text-slate-600">
+						{contentText(locale, "panel.footer")}
+					</p>
+				</div>
+			)}
+		</div>
+	);
+}

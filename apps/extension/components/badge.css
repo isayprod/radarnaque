@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+/* Injecté dans le Shadow DOM (cssInjectionMode "ui") : aucun style global de la page
+   ne s'applique, et ceux-ci ne fuient pas vers la page. `:host` remplace `html`. */
+:host {
+	all: initial;
+	display: inline-block;
+	font-family:
+		system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+		sans-serif;
+}
