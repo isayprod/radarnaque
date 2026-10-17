@@ -12,7 +12,7 @@
 		"check:api": "bash scripts/gen-api.sh --check",
 		"test": "pnpm -r test",
 		"test:api": "cd services/api && uv run pytest",
-		"test:scripts": "node --test scripts/check-ports.test.mjs scripts/check-docker.test.mjs",
+		"test:scripts": "node --test scripts/check-ports.test.mjs scripts/check-docker.test.mjs scripts/llm-stub.test.mjs",
 		"test:all": "pnpm test && pnpm test:scripts && pnpm test:api",
 		"db:up": "docker compose -f infra/docker-compose.dev.yml up -d --wait postgres",
 		"dev:keys": "node scripts/dev-keys.mjs",
@@ -23,6 +23,8 @@
 		"dev": "node scripts/check-ports.mjs 3000 8000 3100 && node scripts/check-docker.mjs && pnpm db:up && docker compose -f infra/docker-compose.dev.yml up -d caddy && pnpm exec concurrently --kill-others-on-fail -n auth,api,site,ext -c blue,green,magenta,yellow \"pnpm dev:auth\" \"(pnpm exec wait-on -t 120000 http-get://localhost:3000/auth/health || (echo 'non démarré : /auth/health n a pas répondu 200 en 120 s' >&2; exit 1)) && pnpm dev:api\" \"pnpm dev:site\" \"pnpm dev:ext\"",
 		"dev:stop": "docker compose -f infra/docker-compose.dev.yml stop caddy postgres",
 		"e2e:login": "tsx scripts/e2e-login.ts",
+		"e2e:scan": "tsx scripts/e2e-scan.ts",
+		"llm:stub": "node scripts/llm-stub.mjs",
 		"typecheck:scripts": "tsc -p scripts"
 	},
 	"devDependencies": {

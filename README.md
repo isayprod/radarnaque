@@ -137,6 +137,124 @@ nécessaire, seul `apps/extension/.env` doit exister (voir « 1. Configuration �
 Si une fiche n'est pas reconnue, rien ne s'affiche et la console de la page (niveau
 « Verbose ») contient une seule ligne `radarnaque: extraction impossible (<adaptateur>)`.
 
+## Analyses IA en dev (OmniRoute, Ollama ou faux fournisseur)
+
+Les fournisseurs LLM sont décrits dans `services/api/providers.toml` : URL, format de sortie
+structurée, source du coût et **nom** de la variable d'environnement de la clé (jamais la
+clé elle-même). Le modèle utilisé pour chaque type de scan (`text`, `image`) est choisi en
+base avec `radarnaque-llm`, depuis `services/api` :
+
+```sh
+cd services/api
+uv run --env-file ../../infra/.env radarnaque-llm list                     # fournisseurs (clé: oui/non), modèles, modèle actif par type
+uv run --env-file ../../infra/.env radarnaque-llm use <fournisseur> <modèle> --kind text
+```
+
+`use` crée le modèle en base s'il n'existe pas encore. Le modèle actif est relu à chaque
+scan : inutile de redémarrer l'API. Noter la sortie de `list` avant de changer de modèle,
+pour pouvoir revenir ensuite au modèle d'origine.
+
+### Faux fournisseur (`stub`), sans réseau ni clé
+
+```sh
+pnpm llm:stub                # terminal à part : http://127.0.0.1:20199/v1 (autre port : pnpm llm:stub 20200)
+cd services/api && uv run --env-file ../../infra/.env radarnaque-llm use stub stub-model --kind text
+pnpm e2e:scan                # contre la stack lancée (pnpm dev)
+```
+
+Le faux fournisseur répond toujours la même analyse (score 42, une raison, textes FR/NL fixes)
+et écrit une ligne par requête : modèle, nombre de messages, présence d'images, jamais le
+contenu ni les en-têtes. Il n'écoute que sur `127.0.0.1`.
+
+`pnpm e2e:scan` reprend la connexion de `pnpm e2e:login` (compte neuf, donc essai neuf de 3
+scans à chaque exécution), puis envoie deux fois le même scan texte, sans photo : le premier
+appelle le LLM (`fromCache: false`), le second est servi depuis le cache (`fromCache: true`,
+même analyse) et `remaining.total` baisse de 1 à chaque scan. Il affiche
+`E2E SCAN OK (provider=<p>, model=<m>, score=<n>)` ; sinon il nomme l'étape en échec
+(connexion, modèle actif, premier scan, second scan, cache ou quota) et sort avec le code 1.
+Le modèle affiché est le modèle actif du type `text`, lu avec `radarnaque-llm list` ;
+`E2E_PROVIDER` et `E2E_MODEL` permettent de l'imposer. Il fonctionne avec n'importe quel
+fournisseur ; le score 42 n'est vérifié qu'avec `stub`.
+
+Le fournisseur `stub` figure aussi dans le `providers.toml` de la production : il n'a pas de
+clé et ne vise que `localhost:20199`, où rien n'écoute en production. Il est donc sans effet
+tant qu'aucun type de scan ne l'utilise.
+
+### OmniRoute (routeur local vers des modèles gratuits ou par abonnement)
+
+1. Lancer OmniRoute sur le port 20128 : `npx omniroute`, ou avec Docker
+   `docker run -d --name omniroute -p 20128:20128 diegosouzapw/omniroute`.
+2. Dans son interface (`http://localhost:20128`), connecter au moins un fournisseur, puis
+   copier la clé d'API dans **Dashboard → Endpoints**.
+3. Dans `infra/.env` : `OMNIROUTE_API_KEY=<clé>` (et `OMNIROUTE_BASE_URL` seulement si
+   OmniRoute n'écoute pas sur `http://localhost:20128/v1`). Redémarrer `pnpm dev:api` pour
+   que l'API lise la clé.
+4. Activer OmniRoute pour les deux types de scan, avec son routage automatique :
+
+   ```sh
+   cd services/api
+   uv run --env-file ../../infra/.env radarnaque-llm use omniroute auto --kind text
+   uv run --env-file ../../infra/.env radarnaque-llm use omniroute auto --kind image
+   ```
+
+5. `pnpm e2e:scan` doit afficher `E2E SCAN OK (provider=omniroute, model=auto, …)`.
+
+OmniRoute reçoit une sortie `json_object` (le schéma attendu est ajouté au prompt système) ;
+le coût de chaque analyse est lu dans l'en-tête `X-OmniRoute-Response-Cost`.
+
+### Ollama (modèles locaux)
+
+```sh
+ollama serve                         # http://localhost:11434 ; sinon OLLAMA_BASE_URL dans infra/.env
+ollama pull <modèle>                 # par exemple qwen2.5:7b ; un modèle « vision » pour --kind image
+cd services/api && uv run --env-file ../../infra/.env radarnaque-llm use ollama <modèle> --kind text
+```
+
+Ollama n'a pas de clé ; le coût enregistré est nul.
+
+## Changer de fournisseur
+
+En production, les modèles sont ceux d'OpenRouter (clé `OPENROUTER_API_KEY` dans
+`infra/.env`) :
+
+```sh
+docker compose -f infra/docker-compose.yml --env-file infra/.env exec api \
+  radarnaque-llm use openrouter google/gemini-2.5-flash-lite --kind text
+docker compose -f infra/docker-compose.yml --env-file infra/.env exec api \
+  radarnaque-llm use openrouter google/gemini-3.1-flash-lite --kind image
+```
+
+En dev, mêmes commandes avec `cd services/api && uv run --env-file ../../infra/.env
+radarnaque-llm …`. La composition de production passe à l'API `OPENROUTER_API_KEY`,
+`OMNIROUTE_API_KEY`, `OMNIROUTE_BASE_URL` et `OLLAMA_BASE_URL`, toutes facultatives.
+
+**Changer de modèle change la clé du cache.** Une analyse est réutilisée pour la même
+annonce, le même modèle et la même version de prompt : après un changement de modèle, les
+annonces déjà analysées le sont à nouveau (nouvel appel LLM, nouveau coût) ; revenir à
+l'ancien modèle retrouve ses analyses tant qu'elles ont moins de 24 h (`cache_ttl_hours`).
+
+Ajouter un fournisseur compatible OpenAI (`POST <base_url>/chat/completions`) :
+
+1. Ajouter une entrée dans `services/api/providers.toml` :
+
+   ```toml
+   [providers.monfournisseur]
+   base_url = "https://api.exemple.com/v1"
+   api_key_env = "MONFOURNISSEUR_API_KEY"   # nom de la variable, jamais la clé
+   structured_output = "json_object"        # ou "json_schema" s'il accepte un schéma strict
+   cost_source = "none"                     # ou "usage_cost" (usage.cost, comme OpenRouter)
+   ```
+
+   `base_url_env` (facultatif) nomme une variable qui remplace `base_url`, et `extra_body`
+   (facultatif) ajoute des champs à chaque requête (voir l'entrée `openrouter`).
+2. Définir la variable dans `infra/.env` ; en production, l'ajouter aussi à l'environnement
+   du service `api` dans `infra/docker-compose.yml` (`MONFOURNISSEUR_API_KEY:
+   ${MONFOURNISSEUR_API_KEY:-}`).
+3. Redémarrer l'API : `providers.toml` est lu au démarrage, et l'API refuse de démarrer si un
+   modèle en base référence un fournisseur absent du fichier.
+4. `radarnaque-llm list` doit afficher le fournisseur avec `clé: oui` ; puis
+   `radarnaque-llm use monfournisseur <modèle> --kind text` et `pnpm e2e:scan`.
+
 ## Déployer
 
 Production : un serveur (Allemagne) avec Docker et Docker Compose, un enregistrement DNS
