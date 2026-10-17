@@ -233,7 +233,10 @@ session de Codex (`~/.codex/auth.json`).
 
 3. `pnpm e2e:scan` doit afficher `E2E SCAN OK (provider=openai-oauth, model=gpt-6-luna, …)`.
 
-Le proxy n'a pas de clé et ignore `response_format` : l'entrée `openai-oauth` est donc en
+Les modèles de raisonnement du service Codex (dont `gpt-6-luna`) refusent `temperature` :
+l'entrée `openai-oauth` a `omit_params = ["temperature"]`. Sans cela, chaque scan échoue en
+`502` avec la raison `transport` (le proxy transforme le refus en erreur 500). Le proxy n'a
+pas de clé et ignore `response_format` : l'entrée `openai-oauth` est donc en
 `json_object` (schéma dans le prompt système, réponse validée par l'API, une nouvelle
 tentative si elle est invalide). **À n'utiliser qu'en local** : toute requête qui atteint le
 proxy est décomptée de l'abonnement, OpenAI peut changer ou fermer ce service interne à tout
@@ -312,7 +315,9 @@ Ajouter un fournisseur compatible OpenAI (`POST <base_url>/chat/completions`) :
    `base_url_env` (facultatif) nomme une variable qui remplace `base_url`, `extra_body`
    (facultatif) ajoute des champs à chaque requête (voir l'entrée `openrouter`), et
    `max_images` (facultatif) réduit le nombre de photos envoyées si le fournisseur en accepte
-   moins de 4 par requête (voir l'entrée `groq`).
+   moins de 4 par requête (voir l'entrée `groq`), et `omit_params` (facultatif, parmi
+   `temperature` et `max_tokens`) retire des paramètres d'appel qu'il refuse (voir l'entrée
+   `openai-oauth`).
 2. Définir la variable dans `infra/.env` ; en production, l'ajouter aussi à l'environnement
    du service `api` dans `infra/docker-compose.yml` (`MONFOURNISSEUR_API_KEY:
    ${MONFOURNISSEUR_API_KEY:-}`).
