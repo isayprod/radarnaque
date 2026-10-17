@@ -222,15 +222,16 @@ session de Codex (`~/.codex/auth.json`).
 1. Se connecter si ce n'est pas déjà fait (`npx openai-oauth login`, ou `codex login`), puis
    lancer le proxy dans un terminal à part : `npx openai-oauth`. Il écoute sur
    `http://127.0.0.1:10531/v1` et affiche les modèles de l'abonnement.
-2. Activer un de ces modèles, par exemple :
+2. Activer le modèle de dev par défaut, `gpt-6-luna` (ou un autre modèle de la liste du
+   proxy) :
 
    ```sh
    cd services/api
-   uv run --env-file ../../infra/.env radarnaque-llm use openai-oauth gpt-5.4-mini --kind text
-   uv run --env-file ../../infra/.env radarnaque-llm use openai-oauth gpt-5.4-mini --kind image
+   uv run --env-file ../../infra/.env radarnaque-llm use openai-oauth gpt-6-luna --kind text
+   uv run --env-file ../../infra/.env radarnaque-llm use openai-oauth gpt-6-luna --kind image
    ```
 
-3. `pnpm e2e:scan` doit afficher `E2E SCAN OK (provider=openai-oauth, …)`.
+3. `pnpm e2e:scan` doit afficher `E2E SCAN OK (provider=openai-oauth, model=gpt-6-luna, …)`.
 
 Le proxy n'a pas de clé et ignore `response_format` : l'entrée `openai-oauth` est donc en
 `json_object` (schéma dans le prompt système, réponse validée par l'API, une nouvelle
