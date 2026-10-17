@@ -102,8 +102,9 @@ export const PRICING: Record<Locale, PricingText> = {
 			},
 			premium: {
 				name: "Premium",
-				tagline: "Pour chercher sans limite pratique",
+				tagline: "Pour un usage intensif",
 				features: {
+					button: "Bouton d'analyse IA sur la page de l'annonce",
 					texts: "{texts} analyses de texte par mois",
 					photos: "{photos} analyses avec photos par mois",
 					icons: "Icônes sur les résultats de recherche",
@@ -142,11 +143,12 @@ export const PRICING: Record<Locale, PricingText> = {
 			},
 			premium: {
 				name: "Premium",
-				tagline: "Om zoveel te zoeken als u wilt",
+				tagline: "Voor intensief gebruik",
 				features: {
+					button: "AI-analyseknop op de pagina van de advertentie",
 					texts: "{texts} tekstanalyses per maand",
 					photos: "{photos} analyses met foto's per maand",
-					icons: "Pictogrammen op de zoekresultaten",
+					icons: "Iconen op de zoekresultaten",
 				},
 			},
 		},
@@ -166,6 +168,8 @@ export interface PrivacyText {
 	switchLang: string;
 	sections: {
 		hosting: PrivacySection;
+		trigger: PrivacySection;
+		photos: PrivacySection;
 		seller: PrivacySection;
 		ai: PrivacySection;
 		kept: PrivacySection;
@@ -180,7 +184,9 @@ export const PRIVACY_RETENTION_MONTHS = 12;
 /** Display order of the privacy sections. */
 export const PRIVACY_ORDER = [
 	"local",
+	"trigger",
 	"seller",
+	"photos",
 	"ai",
 	"hosting",
 	"kept",
@@ -188,6 +194,8 @@ export const PRIVACY_ORDER = [
 	"erasure",
 ] as const satisfies readonly (keyof PrivacyText["sections"])[];
 
+// Ne pas publier avant la phase 4 : DELETE /api/me et la purge à 12 mois ne
+// sont pas encore implémentés.
 export const PRIVACY: Record<Locale, PrivacyText> = {
 	fr: {
 		title: "Politique de confidentialité",
@@ -200,17 +208,25 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 				heading: "Sans compte : tout reste dans votre navigateur",
 				body: "Sans compte, les règles locales de Radarnaque s'exécutent entièrement dans votre navigateur. Rien n'est envoyé à notre serveur.",
 			},
+			trigger: {
+				heading: "Quand une analyse est lancée",
+				body: "Une analyse IA n'est lancée que si vous la demandez (clic sur le bouton d'analyse) ou, avec Premium, pour afficher les icônes sur les résultats de recherche.",
+			},
 			seller: {
 				heading: "L'identité du vendeur n'est jamais envoyée",
-				body: "Avec un compte, le contenu de l'annonce est envoyé pour analyse. Le nom, l'identifiant et le profil du vendeur ne sont jamais transmis, ni à notre serveur ni à l'IA. Les numéros de téléphone et les adresses email présents dans l'annonce sont masqués avant l'analyse.",
+				body: "Avec un compte, le contenu de l'annonce est envoyé pour analyse. Le nom et l'identifiant du vendeur, ainsi que le lien vers son profil, ne sont jamais envoyés, ni à notre serveur ni à l'IA. Seuls des éléments qui ne permettent pas de l'identifier sont envoyés : ancienneté du compte, nombre d'avis, note, autres annonces, vérification. Les numéros de téléphone et les adresses email présents dans l'annonce sont masqués avant l'envoi à l'IA.",
+			},
+			photos: {
+				heading: "Analyses avec photos (Premium)",
+				body: "Pour une analyse avec photos, les photos de l'annonce sont téléchargées par notre serveur, puis envoyées à l'IA.",
 			},
 			ai: {
-				heading: "Le fournisseur d'IA ne conserve rien",
-				body: "Le fournisseur d'IA est configuré pour ne collecter ni conserver les données qui lui sont envoyées.",
+				heading: "Données envoyées à l'IA",
+				body: "Nous demandons au fournisseur d'IA de ne pas collecter ni réutiliser les données envoyées.",
 			},
 			hosting: {
-				heading: "Hébergement dans l'UE",
-				body: "Nos données sont hébergées sur un serveur situé en Allemagne (Union européenne).",
+				heading: "Où sont traitées les données",
+				body: "Notre serveur est situé en Allemagne (Union européenne). Le fournisseur d'IA peut toutefois traiter les données hors de l'UE.",
 			},
 			kept: {
 				heading: "Les données que nous conservons sur vous",
@@ -222,7 +238,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			erasure: {
 				heading: "Droit à l'effacement",
-				body: "Supprimer votre compte supprime votre utilisateur, vos abonnements et vos analyses. Pour toute demande, écrivez-nous à {email}.",
+				body: "Supprimer votre compte supprime votre utilisateur, vos abonnements et l'historique de vos analyses. Pour toute demande, écrivez-nous à {email}.",
 			},
 		},
 	},
@@ -237,17 +253,25 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 				heading: "Zonder account blijft alles in uw browser",
 				body: "Zonder account worden de lokale regels van Radarnaque volledig in uw browser uitgevoerd. Er wordt niets naar onze server gestuurd.",
 			},
+			trigger: {
+				heading: "Wanneer een analyse wordt gestart",
+				body: "Een AI-analyse wordt alleen gestart als u erom vraagt (klik op de analyseknop) of, met Premium, om de iconen op de zoekresultaten te tonen.",
+			},
 			seller: {
 				heading: "De identiteit van de verkoper wordt nooit verstuurd",
-				body: "Met een account wordt de inhoud van de advertentie voor analyse verstuurd. De naam, de identificatie en het profiel van de verkoper worden nooit doorgegeven, noch aan onze server, noch aan de AI. Telefoonnummers en e-mailadressen in de advertentie worden voor de analyse afgeschermd.",
+				body: "Met een account wordt de inhoud van de advertentie voor analyse verstuurd. De naam en de identificatie van de verkoper, en de link naar zijn profiel, worden nooit verstuurd, noch naar onze server, noch naar de AI. Alleen gegevens waarmee hij niet te identificeren is, worden verstuurd: leeftijd van het account, aantal beoordelingen, score, andere advertenties, verificatie. Telefoonnummers en e-mailadressen in de advertentie worden gemaskeerd voordat ze naar de AI worden verstuurd.",
+			},
+			photos: {
+				heading: "Analyses met foto's (Premium)",
+				body: "Voor een analyse met foto's worden de foto's van de advertentie door onze server gedownload en daarna naar de AI verstuurd.",
 			},
 			ai: {
-				heading: "De AI-aanbieder bewaart niets",
-				body: "De AI-aanbieder is zo ingesteld dat hij de gegevens die hij ontvangt niet verzamelt en niet bewaart.",
+				heading: "Gegevens die naar de AI worden verstuurd",
+				body: "Wij vragen de AI-aanbieder om de verstuurde gegevens niet te verzamelen en niet opnieuw te gebruiken.",
 			},
 			hosting: {
-				heading: "Hosting in de EU",
-				body: "Onze gegevens worden gehost op een server in Duitsland (Europese Unie).",
+				heading: "Waar de gegevens worden verwerkt",
+				body: "Onze server staat in Duitsland (Europese Unie). De AI-aanbieder kan de gegevens wel buiten de EU verwerken.",
 			},
 			kept: {
 				heading: "De gegevens die wij over u bewaren",
@@ -259,7 +283,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			erasure: {
 				heading: "Recht op gegevenswissing",
-				body: "Als u uw account verwijdert, worden uw gebruiker, uw abonnementen en uw analyses gewist. Voor elke vraag kunt u ons mailen op {email}.",
+				body: "Als u uw account verwijdert, worden uw gebruikersaccount, uw abonnementen en de geschiedenis van uw analyses gewist. Voor elke vraag kunt u mailen naar {email}.",
 			},
 		},
 	},
