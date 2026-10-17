@@ -397,20 +397,23 @@ function Account({
 	busy: boolean;
 	onSignOut: () => void;
 }) {
-	const rows: Array<{ label: string; remaining: number }> = me.unlimited
-		? []
-		: me.quotas.map((quota) => ({
-				label: t(
-					locale,
-					quota.scanKind === "image" ? "scan.image" : "scan.text",
-				),
-				remaining: quota.remaining,
-			}));
-	if (!me.unlimited && me.totalCap) {
-		rows.push({
-			label: t(locale, "account.totalCap"),
-			remaining: me.totalCap.remaining,
-		});
+	// L'essai n'a qu'un plafond global : les lignes par type seraient trompeuses.
+	let rows: Array<{ label: string; remaining: number }> = [];
+	if (!me.unlimited) {
+		rows = me.totalCap
+			? [
+					{
+						label: t(locale, "account.totalCap"),
+						remaining: me.totalCap.remaining,
+					},
+				]
+			: me.quotas.map((quota) => ({
+					label: t(
+						locale,
+						quota.scanKind === "image" ? "scan.image" : "scan.text",
+					),
+					remaining: quota.remaining,
+				}));
 	}
 
 	return (
