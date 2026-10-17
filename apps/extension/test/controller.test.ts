@@ -2,6 +2,7 @@ import type { Locale } from "@radarnaque/shared";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
 	BADGE_HOST_TAG,
+	CARD_HOST_TAG,
 	createController,
 	type Mounter,
 } from "../lib/content/controller";
@@ -330,6 +331,18 @@ describe("createController — observateur et cycle de vie", () => {
 		expect(t.host()?.isConnected).toBe(true);
 		const calls = t.getUrl.mock.calls.length;
 
+		await vi.advanceTimersByTimeAsync(500);
+		expect(t.getUrl.mock.calls.length).toBe(calls);
+	});
+
+	test("l'insertion d'une icône de carte ne déclenche pas de refresh", async () => {
+		vi.useFakeTimers();
+		const doc = loadFixture("twh/listing-fixed.html");
+		const t = setup(doc, FIXED_URL);
+		await t.controller.refresh();
+		const calls = t.getUrl.mock.calls.length;
+
+		doc.body.append(doc.createElement(CARD_HOST_TAG));
 		await vi.advanceTimersByTimeAsync(500);
 		expect(t.getUrl.mock.calls.length).toBe(calls);
 	});

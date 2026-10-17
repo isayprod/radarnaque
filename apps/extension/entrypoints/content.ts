@@ -17,6 +17,7 @@ import {
 	createCardMounter,
 } from "../lib/content/card-mounter";
 import { createController } from "../lib/content/controller";
+import { detachedUiContext } from "../lib/content/ui-context";
 import { resolveContentLocale } from "../lib/content-i18n";
 import type { Site } from "../lib/listing/types";
 import { localePref } from "../lib/storage";
@@ -61,11 +62,14 @@ export default defineContentScript({
 	main(ctx) {
 		// Un seul client IA par content script, partagé par toutes les pastilles.
 		const ai = createAiClient();
+		// Les UI ne s'abonnent pas à l'invalidation (une fuite par montage) : les
+		// `dispose()` ci-dessous les retirent toutes.
+		const uiCtx = detachedUiContext(ctx);
 		const controller = createController({
 			doc: document,
 			getUrl: () => new URL(location.href),
 			mounter: createBadgeMounter({
-				createUi: (options) => createShadowRootUi(ctx, options),
+				createUi: (options) => createShadowRootUi(uiCtx, options),
 				createRenderer: (container) => createReactRenderer(container, ai),
 			}),
 			getLocale,
@@ -76,7 +80,7 @@ export default defineContentScript({
 			getUrl: () => new URL(location.href),
 			ai,
 			mountCard: createCardMounter({
-				createUi: (options) => createShadowRootUi(ctx, options),
+				createUi: (options) => createShadowRootUi(uiCtx, options),
 				createRenderer: createCardRenderer,
 			}),
 			getLocale,

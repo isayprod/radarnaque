@@ -8,7 +8,10 @@ import { LEVEL_KEY, LEVEL_STYLE } from "./risk-styles";
 const BUTTON_CLASS =
 	"inline-flex h-6 min-w-6 cursor-pointer items-center justify-center gap-1 rounded-full border border-slate-300 bg-white px-1.5 text-[12px] leading-none font-bold text-slate-900 shadow-sm hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700";
 
-/** Le site ne doit ni naviguer (carte-lien) ni démarrer un glisser depuis l'icône. */
+/**
+ * Le site ne doit ni naviguer (carte-lien, clic du milieu compris) ni démarrer
+ * un glisser ou un geste tactile depuis l'icône.
+ */
 const stop = (event: SyntheticEvent) => event.stopPropagation();
 const cancel = (event: SyntheticEvent) => {
 	event.preventDefault();
@@ -72,8 +75,13 @@ export function CardBadge({ state, locale, onActivate }: CardView) {
 		<span
 			className="radarnaque-root relative ml-1 inline-block align-middle text-[12px] leading-[1.3] font-normal"
 			onClick={cancel}
+			onAuxClick={cancel}
 			onPointerDown={stop}
 			onMouseDown={stop}
+			onPointerUp={stop}
+			onMouseUp={stop}
+			onTouchEnd={stop}
+			onDragStart={cancel}
 			onMouseEnter={() => setOpen(true)}
 			onMouseLeave={() => setOpen(false)}
 			onKeyDown={(event) => {
@@ -84,6 +92,7 @@ export function CardBadge({ state, locale, onActivate }: CardView) {
 		>
 			<button
 				type="button"
+				draggable={false}
 				aria-label={label}
 				aria-busy={state.status === "loading" ? true : undefined}
 				aria-describedby={tip ? tipId : undefined}
