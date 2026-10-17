@@ -23,7 +23,9 @@ const PROFILE_LINK = 'a[href*="/marketplace/profile/"]';
 const PROFILE_ID_RE = /\/marketplace\/profile\/(\d+)/;
 // h1 de la navigation du site ou d'un panneau, jamais le titre d'une annonce.
 const SITE_HEADING_RE = /^(Marketplace|Notifications)$/i;
-const LOCATION_LINK = 'a[href^="https://www.facebook.com/marketplace/"]';
+const LOCATION_LINK = 'a[href*="/marketplace/"]';
+// Lien du lieu (« Publié … dans <lien> ») : `/marketplace/<id>/`, quel que soit l'hôte Facebook.
+const LOCATION_PATH_RE = /^\/marketplace\/\d+\/?$/;
 const POSTED_LINE_RE = /^(Publié|Listed|Geplaatst)\b/i;
 const BELGIAN_REGIONS = new Set(["WAL", "BRU", "VLG"]);
 
@@ -51,9 +53,25 @@ function idOf(url: URL): string | null {
 	return ITEM_PATH_RE.exec(url.pathname)?.[1] ?? null;
 }
 
+/** Préfixes d'hôte acceptés : `www.` et `web.` (version servie dans certains pays). */
+const HOST_PREFIXES = ["", "www.", "web."];
+
 function siteOf(url: URL): Site | null {
 	const { hostname } = url;
-	return SITES.find((d) => hostname === d || hostname === `www.${d}`) ?? null;
+	return (
+		SITES.find((d) => HOST_PREFIXES.some((p) => hostname === `${p}${d}`)) ??
+		null
+	);
+}
+
+/** Vrai si `href` pointe vers la page d'un lieu de Marketplace sur Facebook. */
+function isLocationHref(href: string): boolean {
+	try {
+		const url = new URL(href, "https://www.facebook.com");
+		return siteOf(url) !== null && LOCATION_PATH_RE.test(url.pathname);
+	} catch {
+		return false;
+	}
 }
 
 function pageType(url: URL): PageType {
@@ -189,8 +207,7 @@ function readPrice(
 /** « Namur, WAL » dans la ligne « Publié il y a … dans <lien> ». */
 function readLocation(root: Element): Listing["location"] {
 	const link = [...root.querySelectorAll(LOCATION_LINK)].find((a) => {
-		if (/\/marketplace\/(profile|item)\//.test(a.getAttribute("href") ?? ""))
-			return false;
+		if (!isLocationHref(a.getAttribute("href") ?? "")) return false;
 		const line = a.closest('[dir="auto"]');
 		return (
 			line !== null &&
