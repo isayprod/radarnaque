@@ -5,8 +5,13 @@ import {
 } from "../lib/adapters/facebook";
 import { loadFixture } from "./helpers";
 
+// Id porté par les `product_id` des liens vendeur des deux fixtures de fiche.
+const ITEM_ID = "9000000000000007";
 const ITEM_URL = new URL(
-	"https://www.facebook.com/marketplace/item/1234567890/",
+	`https://www.facebook.com/marketplace/item/${ITEM_ID}/`,
+);
+const OTHER_ITEM_URL = new URL(
+	"https://www.facebook.com/marketplace/item/9000000000000008/",
 );
 const GRID_URL = new URL("https://www.facebook.com/marketplace/");
 const NOW = new Date("2026-10-17T12:00:00Z");
@@ -54,8 +59,8 @@ describe("facebookAdapter : fiche en modale", () => {
 		const { listing } = extract(modal());
 		expect(listing).toMatchObject({
 			site: "facebook.com",
-			externalId: "1234567890",
-			url: "https://www.facebook.com/marketplace/item/1234567890/",
+			externalId: "9000000000000007",
+			url: "https://www.facebook.com/marketplace/item/9000000000000007/",
 			title: "Appareil photo canon EOS 3000 avec objectif",
 			price: { amountCents: 5000, currency: "EUR" },
 			priceType: "fixed",
@@ -143,22 +148,13 @@ describe("facebookAdapter : fiche en modale", () => {
 });
 
 describe("facebookAdapter : fiche en page", () => {
-	test("produit le même Listing que la modale, à l'URL près", () => {
-		const other = new URL(
-			"https://www.facebook.com/marketplace/item/9000000000000007/?ref=search",
-		);
-		const fromPage = extract(page(), other);
+	test("produit le même Listing que la modale (query de l'URL retirée)", () => {
+		const withQuery = new URL(`${ITEM_URL.href}?ref=search`);
+		const fromPage = extract(page(), withQuery);
 		const fromModal = extract(modal());
 		expect(rootOf(page()).getAttribute("role")).toBe("main");
-		expect(fromPage.listing.url).toBe(
-			"https://www.facebook.com/marketplace/item/9000000000000007/",
-		);
-		expect(fromPage.listing.externalId).toBe("9000000000000007");
-		expect({ ...fromPage.listing, url: "", externalId: "" }).toEqual({
-			...fromModal.listing,
-			url: "",
-			externalId: "",
-		});
+		expect(fromPage.listing.url).toBe(ITEM_URL.href);
+		expect(fromPage.listing).toEqual(fromModal.listing);
 		expect(fromPage.missing).toEqual(fromModal.missing);
 	});
 });
@@ -221,6 +217,83 @@ describe("facebookAdapter : racine", () => {
 		expect(rootOf(doc).getAttribute("aria-label")).toBe(
 			"Visionneuse de petites annonces Marketplace",
 		);
+	});
+
+	test("navigation A → B : la modale encore affichée décrit A, donc null", () => {
+		const doc = modal();
+		expect(adapter.listingRoot(doc, OTHER_ITEM_URL)).toBeNull();
+		expect(adapter.extractListing(doc, OTHER_ITEM_URL)).toBeNull();
+	});
+
+	test("un dialogue d'une autre annonce cède la place à la page qui correspond", () => {
+		const doc = page();
+		const stale = doc.createElement("div");
+		stale.setAttribute("role", "dialog");
+		stale.innerHTML = rootOf(doc).innerHTML.replaceAll(
+			`product_id=${ITEM_ID}`,
+			"product_id=9000000000000008",
+		);
+		const title = stale.querySelector("h1 span");
+		if (title) title.textContent = "Annonce précédente";
+		doc.body.prepend(stale);
+		expect(rootOf(doc).getAttribute("role")).toBe("main");
+		expect(extract(doc).listing.title).toBe(
+			"Appareil photo canon EOS 3000 avec objectif",
+		);
+	});
+
+	test.each([
+		[
+			"un lien vendeur d'une autre annonce",
+			'<h1>Annonce de chat</h1><a href="https://www.facebook.com/marketplace/profile/2/?product_id=555">x</a>',
+		],
+		[
+			"un h1 « Notifications »",
+			'<h1>Notifications</h1><a href="https://www.facebook.com/marketplace/profile/2/">x</a>',
+		],
+	])("un dialogue étranger avec %s ne masque pas la page", (_, html) => {
+		const doc = page();
+		const foreign = doc.createElement("div");
+		foreign.setAttribute("role", "dialog");
+		foreign.innerHTML = html;
+		doc.body.prepend(foreign);
+		expect(rootOf(doc).getAttribute("role")).toBe("main");
+		expect(extract(doc).listing.seller.id).toBe("10000001");
+	});
+
+	test("liens vendeur sans product_id : la racine est acceptée", () => {
+		const doc = modal();
+		for (const a of rootOf(doc).querySelectorAll(
+			'a[href*="/marketplace/profile/"]',
+		))
+			a.setAttribute(
+				"href",
+				"https://www.facebook.com/marketplace/profile/10000001/",
+			);
+		expect(extract(doc, OTHER_ITEM_URL).listing.externalId).toBe(
+			"9000000000000008",
+		);
+	});
+
+	test("dialogues imbriqués : le plus profond est choisi", () => {
+		const doc = modal();
+		const inner = rootOf(doc);
+		const outer = doc.createElement("div");
+		outer.setAttribute("role", "dialog");
+		inner.replaceWith(outer);
+		outer.append(inner);
+		expect(adapter.listingRoot(doc, ITEM_URL)).toBe(inner);
+	});
+
+	test("le h1 « Marketplace » de la page est ignoré", () => {
+		const doc = page();
+		const nav = doc.createElement("div");
+		nav.innerHTML = "<h1>Marketplace</h1>";
+		rootOf(doc).prepend(nav);
+		const { listing } = extract(doc);
+		expect(listing.title).toBe("Appareil photo canon EOS 3000 avec objectif");
+		expect(listing.price?.amountCents).toBe(5000);
+		expect(adapter.badgeAnchor(rootOf(doc))?.textContent).toBe(listing.title);
 	});
 
 	test("titre vide : null", () => {
@@ -335,6 +408,16 @@ describe("facebookAdapter : champs absents", () => {
 			);
 		},
 	);
+
+	test("libellé État sans valeur : état inconnu, description intacte", () => {
+		const doc = modal();
+		const value = spanWithText(rootOf(doc), "D’occasion - comme neuf");
+		value.parentElement?.closest("span")?.remove();
+		const { listing, missing } = extract(doc);
+		expect(listing.condition).toBeUndefined();
+		expect(missing).toContain("condition");
+		expect(listing.description).toMatch(/^Le flash/);
+	});
 
 	test.each(["Condition", "Staat"])("libellé %s de l'état", (label) => {
 		const doc = modal();
