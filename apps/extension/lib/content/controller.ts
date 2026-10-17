@@ -21,6 +21,8 @@ export interface Mounter {
 	mount(anchor: Element, report: RiskReport, locale: Locale): void;
 	update(report: RiskReport): void;
 	unmount(): void;
+	/** Vrai tant que la pastille est montée (ou en cours de montage) dans le document. */
+	isMounted(): boolean;
 }
 
 export interface ControllerDeps {
@@ -45,10 +47,16 @@ const isOwnUi = (node: Node) =>
 	node.nodeType === Node.ELEMENT_NODE &&
 	(node as Element).localName === BADGE_HOST_TAG;
 
-/** Mutation entièrement due à l'insertion ou au retrait de notre hôte. */
-function isOwnMutation(record: MutationRecord): boolean {
-	const nodes = [...record.addedNodes, ...record.removedNodes];
-	return nodes.length > 0 && nodes.every(isOwnUi);
+/**
+ * Mutation due uniquement à l'insertion de notre hôte. Un retrait reste
+ * observé : s'il vient du site, la pastille doit être remontée.
+ */
+function isOwnInsertion(record: MutationRecord): boolean {
+	return (
+		record.removedNodes.length === 0 &&
+		record.addedNodes.length > 0 &&
+		[...record.addedNodes].every(isOwnUi)
+	);
 }
 
 /**
@@ -65,6 +73,12 @@ export function createController(deps: ControllerDeps): {
 	let disposed = false;
 	/** URL dont l'échec d'extraction a déjà été journalisé. */
 	let loggedFailure: string | null = null;
+	/** URL pour laquelle une pastille perdue a déjà été remontée (une fois au plus). */
+	let remountedUrl: string | null = null;
+	/** URL dont une erreur de `refresh` a déjà été journalisée. */
+	const loggedErrors = new Set<string>();
+	/** URL du passage en cours, pour journaliser ses erreurs. */
+	let stepUrl = "";
 	let queue: Promise<void> = Promise.resolve();
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -77,6 +91,7 @@ export function createController(deps: ControllerDeps): {
 
 	async function step() {
 		const url = deps.getUrl();
+		stepUrl = url.href;
 		const adapter = adapterFor(url);
 		if (adapter?.pageType(url, doc) !== "listing") {
 			loggedFailure = null;
@@ -105,18 +120,26 @@ export function createController(deps: ControllerDeps): {
 		const key = reportKey(report);
 
 		if (current?.anchor === anchor && current.externalId === externalId) {
-			if (current.key !== key) {
-				current.key = key;
-				mounter.update(report);
+			if (mounter.isMounted()) {
+				if (current.key !== key) {
+					current.key = key;
+					mounter.update(report);
+				}
+				return;
 			}
-			return;
+			// Pastille perdue (hôte retiré par le site, ou montage en échec) : une
+			// seule nouvelle tentative par URL, pour ne pas boucler.
+			if (remountedUrl === url.href) return;
+			remountedUrl = url.href;
 		}
 
 		clear();
 		// Déjà montée pour cette annonce par une autre instance du script.
 		if (anchor.getAttribute(MARK_ATTR) === externalId) return;
 		const locale = await deps.getLocale(site);
-		if (disposed) return;
+		// Pendant l'attente, la page a pu passer à une autre annonce.
+		if (disposed || deps.getUrl().href !== url.href || !anchor.isConnected)
+			return;
 		anchor.setAttribute(MARK_ATTR, externalId);
 		current = { anchor, externalId, key };
 		mounter.mount(anchor, report, locale);
@@ -127,7 +150,11 @@ export function createController(deps: ControllerDeps): {
 		if (disposed) return Promise.resolve();
 		queue = queue
 			.then(() => (disposed ? undefined : step()))
-			.catch((error: unknown) => log(`radarnaque: ${String(error)}`));
+			.catch((error: unknown) => {
+				if (loggedErrors.has(stepUrl)) return;
+				loggedErrors.add(stepUrl);
+				log(`radarnaque: ${String(error)}`);
+			});
 		return queue;
 	}
 
@@ -135,7 +162,7 @@ export function createController(deps: ControllerDeps): {
 	// couvertes par ce passage, et toute mutation ultérieure en planifie un autre.
 	const observer = new MutationObserver((records) => {
 		if (disposed || timer !== undefined) return;
-		if (records.every(isOwnMutation)) return;
+		if (records.every(isOwnInsertion)) return;
 		timer = setTimeout(() => {
 			timer = undefined;
 			void refresh();

@@ -24,18 +24,39 @@ type Op =
 	| { op: "update"; report: RiskReport }
 	| { op: "unmount" };
 
-/** Mounter simulé : enregistre les appels dans l'ordre. */
+/**
+ * Mounter simulé : enregistre les appels dans l'ordre et insère un hôte vide
+ * après l'ancre, comme le vrai ; `isMounted()` suit sa présence dans le document.
+ */
 function fakeMounter() {
 	const ops: Op[] = [];
+	let host: Element | null = null;
 	const mounter: Mounter = {
-		mount: (anchor, report, locale) =>
-			ops.push({ op: "mount", anchor, report, locale }),
+		mount: (anchor, report, locale) => {
+			ops.push({ op: "mount", anchor, report, locale });
+			host = anchor.ownerDocument.createElement(BADGE_HOST_TAG);
+			anchor.after(host);
+		},
 		update: (report) => ops.push({ op: "update", report }),
-		unmount: () => ops.push({ op: "unmount" }),
+		unmount: () => {
+			ops.push({ op: "unmount" });
+			host?.remove();
+			host = null;
+		},
+		isMounted: () => host?.isConnected ?? false,
 	};
 	const of = <K extends Op["op"]>(kind: K) =>
 		ops.filter((o): o is Extract<Op, { op: K }> => o.op === kind);
-	return { mounter, ops, of };
+	return { mounter, ops, of, host: () => host };
+}
+
+/** Promesse résolue de l'extérieur. */
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((r) => {
+		resolve = r;
+	});
+	return { promise, resolve };
 }
 
 const disposers: Array<() => void> = [];
@@ -44,12 +65,16 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-function setup(doc: Document, initialUrl: string) {
+function setup(
+	doc: Document,
+	initialUrl: string,
+	locale: (site: Site) => Promise<Locale> = async () => "fr",
+) {
 	let url = new URL(initialUrl);
 	const fake = fakeMounter();
 	const log = vi.fn<(msg: string) => void>();
 	const getUrl = vi.fn(() => url);
-	const getLocale = vi.fn(async (_site: Site): Promise<Locale> => "fr");
+	const getLocale = vi.fn(locale);
 	const controller = createController({
 		doc,
 		getUrl,
@@ -222,18 +247,37 @@ describe("createController — observateur et cycle de vie", () => {
 		expect(t.ops.map((o) => o.op)).toEqual(["mount", "update"]);
 	});
 
-	test("les mutations causées par notre propre UI sont ignorées", async () => {
+	test("l'insertion de notre propre hôte ne déclenche pas de refresh", async () => {
 		vi.useFakeTimers();
 		const doc = loadFixture("twh/listing-fixed.html");
 		const t = setup(doc, FIXED_URL);
 		await t.controller.refresh();
+		expect(t.host()?.isConnected).toBe(true);
 		const calls = t.getUrl.mock.calls.length;
 
-		const host = doc.createElement(BADGE_HOST_TAG);
-		t.of("mount")[0]?.anchor.after(host);
-		host.remove();
 		await vi.advanceTimersByTimeAsync(500);
 		expect(t.getUrl.mock.calls.length).toBe(calls);
+	});
+
+	test("le site retire notre hôte (même ancre) : un seul remount par URL", async () => {
+		vi.useFakeTimers();
+		const doc = loadFixture("twh/listing-fixed.html");
+		const t = setup(doc, FIXED_URL);
+		await t.controller.refresh();
+		const anchor = t.of("mount")[0]?.anchor;
+
+		// Le retrait par le site est observé : refresh, puis remount sur la même ancre.
+		t.host()?.remove();
+		await vi.advanceTimersByTimeAsync(250);
+		expect(t.ops.map((o) => o.op)).toEqual(["mount", "unmount", "mount"]);
+		expect(t.of("mount")[1]?.anchor).toBe(anchor);
+		expect(anchor?.getAttribute("data-radarnaque")).toBe("m1000000001");
+
+		// Second retrait sur la même URL : pas de nouvelle tentative (pas de boucle).
+		t.host()?.remove();
+		await vi.advanceTimersByTimeAsync(250);
+		await t.controller.refresh();
+		expect(t.of("mount")).toHaveLength(2);
 	});
 
 	test("dispose() déconnecte l'observateur et rend refresh inopérant", async () => {
@@ -258,5 +302,89 @@ describe("createController — observateur et cycle de vie", () => {
 		t.controller.dispose();
 		expect(t.ops.map((o) => o.op)).toEqual(["mount", "unmount"]);
 		expect(anchor?.hasAttribute("data-radarnaque")).toBe(false);
+	});
+});
+
+describe("createController — concurrence et état obsolète", () => {
+	test("deux refresh simultanés : un seul mount", async () => {
+		const doc = loadFixture("twh/listing-fixed.html");
+		const t = setup(doc, FIXED_URL);
+		await Promise.all([t.controller.refresh(), t.controller.refresh()]);
+		expect(t.ops.map((o) => o.op)).toEqual(["mount"]);
+	});
+
+	test("dispose() pendant getLocale : aucun mount", async () => {
+		const doc = loadFixture("twh/listing-fixed.html");
+		const locale = deferred<Locale>();
+		const t = setup(doc, FIXED_URL, () => locale.promise);
+		const pending = t.controller.refresh();
+		await vi.waitFor(() => expect(t.getLocale).toHaveBeenCalled());
+		t.controller.dispose();
+		locale.resolve("fr");
+		await pending;
+		expect(t.ops).toEqual([]);
+		expect(
+			doc
+				.querySelector("#seller-sidebar-root h1")
+				?.hasAttribute("data-radarnaque"),
+		).toBe(false);
+	});
+
+	test("URL changée pendant getLocale : pas de mount sur l'ancienne annonce", async () => {
+		const doc = loadFixture("facebook/item-modal.html");
+		const locale = deferred<Locale>();
+		const t = setup(doc, fbItemUrl(FB_ITEM), () => locale.promise);
+		const pending = t.controller.refresh();
+		await vi.waitFor(() => expect(t.getLocale).toHaveBeenCalled());
+		t.navigate(FB_GRID_URL);
+		locale.resolve("fr");
+		await pending;
+		expect(t.ops).toEqual([]);
+	});
+
+	test("ancre retirée du document pendant getLocale : pas de mount", async () => {
+		const doc = loadFixture("twh/listing-fixed.html");
+		const locale = deferred<Locale>();
+		const t = setup(doc, FIXED_URL, () => locale.promise);
+		const pending = t.controller.refresh();
+		await vi.waitFor(() => expect(t.getLocale).toHaveBeenCalled());
+		doc.querySelector("#seller-sidebar-root h1")?.remove();
+		locale.resolve("fr");
+		await pending;
+		expect(t.ops).toEqual([]);
+	});
+
+	test("même élément d'ancre, autre externalId : unmount puis mount", async () => {
+		const doc = loadFixture("twh/listing-fixed.html");
+		const t = setup(doc, FIXED_URL);
+		await t.controller.refresh();
+		t.navigate(
+			"https://www.2ememain.be/v/telephonie/apple-iphone/m1000000003-autre-iphone",
+		);
+		await t.controller.refresh();
+
+		expect(t.ops.map((o) => o.op)).toEqual(["mount", "unmount", "mount"]);
+		const [first, second] = t.of("mount");
+		expect(second?.anchor).toBe(first?.anchor);
+		expect(second?.anchor.getAttribute("data-radarnaque")).toBe("m1000000003");
+	});
+
+	test("erreur pendant refresh : journalisée une seule fois par URL", async () => {
+		const doc = loadFixture("twh/listing-fixed.html");
+		const t = setup(doc, FIXED_URL, async () => {
+			throw new Error("stockage indisponible");
+		});
+		await t.controller.refresh();
+		await t.controller.refresh();
+		await t.controller.refresh();
+		expect(t.ops).toEqual([]);
+		expect(t.log).toHaveBeenCalledTimes(1);
+		expect(t.log.mock.calls[0]?.[0]).toContain("stockage indisponible");
+
+		t.navigate(
+			"https://www.2ememain.be/v/telephonie/apple-iphone/m1000000003-autre-iphone",
+		);
+		await t.controller.refresh();
+		expect(t.log).toHaveBeenCalledTimes(2);
 	});
 });
