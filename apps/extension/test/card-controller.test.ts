@@ -502,6 +502,31 @@ describe("createCardController — remontage (R4)", () => {
 		expect(mountsOf()).toHaveLength(5);
 	});
 
+	test("budget neuf après une page hors résultats : recherche → fiche → même recherche", async () => {
+		vi.useFakeTimers();
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH);
+		await t.controller.refresh();
+		const id = FB_IDS[0] as string;
+		const mountsOf = () => t.mounts.filter((m) => m.card.externalId === id);
+		const removeEachPass = async (passes: number) => {
+			for (let i = 0; i < passes; i++) {
+				for (const m of mountsOf()) m.host.remove();
+				await vi.advanceTimersByTimeAsync(250);
+			}
+		};
+		await removeEachPass(6);
+		expect(mountsOf()).toHaveLength(4);
+
+		t.navigate(FB_ITEM);
+		await t.controller.refresh();
+		t.navigate(FB_SEARCH);
+		await t.controller.refresh();
+		expect(mountsOf()).toHaveLength(5);
+		await removeEachPass(6);
+		expect(mountsOf()).toHaveLength(8);
+	});
+
 	test("ancre changée (autre variante de mise en page) : remontée à la nouvelle ancre, état conservé", async () => {
 		const doc = loadFixture("twh/search.html");
 		const t = setup(doc, TWH_SEARCH);
@@ -532,6 +557,37 @@ describe("createCardController — remontage (R4)", () => {
 			code: "rate_limited",
 		});
 		expect(second.card.element.getAttribute("data-radarnaque-card")).toBe(id);
+	});
+});
+
+describe("createCardController — aucun scan sans clic", () => {
+	test("montage, refresh, mutations, focus, langue : ai.scan jamais appelé ; un clic, un appel", async () => {
+		vi.useFakeTimers();
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH, [withCards], { realScan: true });
+		await t.controller.refresh();
+		expect(t.live()).toHaveLength(6);
+		await t.controller.refresh();
+		t.live()[2]?.host.remove();
+		doc.body.append(doc.createElement("div"));
+		await vi.advanceTimersByTimeAsync(250);
+		window.dispatchEvent(new Event("focus"));
+		t.setLocale("nl");
+		await t.controller.refresh();
+		t.navigate(`${FB_SEARCH}search/?query=velo`);
+		await t.controller.refresh();
+		expect(t.live()).toHaveLength(6);
+		expect(t.ai.scan).not.toHaveBeenCalled();
+		expect(t.fetchPage).not.toHaveBeenCalled();
+
+		t.lastView(FB_IDS[0] as string).onActivate();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(t.fetchPage).toHaveBeenCalledTimes(1);
+		expect(t.ai.scan).toHaveBeenCalledTimes(1);
+		expect(t.ai.scan.mock.calls[0]?.[0]).toMatchObject({
+			trigger: "card",
+			listing: { externalId: FB_IDS[0] },
+		});
 	});
 });
 

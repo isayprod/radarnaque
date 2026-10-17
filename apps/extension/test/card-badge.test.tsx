@@ -70,12 +70,23 @@ describe("CardBadge", () => {
 		expect(onActivate).toHaveBeenCalledTimes(1);
 	});
 
-	test("pointerdown et mousedown ne remontent pas au lien", () => {
+	test("pointerdown et mousedown : defaultPrevented (pas de glisser du lien), ne remontent pas, le bouton garde le focus", () => {
 		const { reached } = renderInLink({ status: "idle" });
 		const button = screen.getByRole("button");
-		button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-		button.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+		const pointer = new PointerEvent("pointerdown", {
+			bubbles: true,
+			cancelable: true,
+		});
+		const mouse = new MouseEvent("mousedown", {
+			bubbles: true,
+			cancelable: true,
+		});
+		button.dispatchEvent(pointer);
+		button.dispatchEvent(mouse);
+		expect(pointer.defaultPrevented).toBe(true);
+		expect(mouse.defaultPrevented).toBe(true);
 		expect(reached).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(button);
 	});
 
 	test("M6 : clic du milieu (auxclick) : defaultPrevented, ne remonte pas au lien", () => {

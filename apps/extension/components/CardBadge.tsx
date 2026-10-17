@@ -1,5 +1,5 @@
 import type { Locale } from "@radarnaque/shared";
-import { type SyntheticEvent, useId, useState } from "react";
+import { type SyntheticEvent, useId, useRef, useState } from "react";
 import type { ScanState } from "../lib/content/ai-client";
 import type { CardView } from "../lib/content/card-controller";
 import { aiErrorText, contentText } from "../lib/content-i18n";
@@ -62,6 +62,16 @@ function ButtonContent({ state, locale }: Omit<CardView, "onActivate">) {
 export function CardBadge({ state, locale, onActivate }: CardView) {
 	const [open, setOpen] = useState(false);
 	const tipId = useId();
+	const buttonRef = useRef<HTMLButtonElement>(null);
+	// `preventDefault` sur l'appui : la carte-lien ne peut pas démarrer un
+	// glisser depuis l'icône. Il retire aussi le focus par défaut du bouton,
+	// rendu ici à la main.
+	const press = (event: SyntheticEvent) => {
+		cancel(event);
+		const button = buttonRef.current;
+		if (button && event.target instanceof Node && button.contains(event.target))
+			button.focus({ preventScroll: true });
+	};
 	const tip = tooltipText(state, locale);
 	// Inactif ou en erreur, le clic lance l'analyse : le nom du bouton le dit.
 	// Terminé, son nom est le niveau affiché ; en cours, le texte d'attente.
@@ -76,8 +86,8 @@ export function CardBadge({ state, locale, onActivate }: CardView) {
 			className="radarnaque-root relative ml-1 inline-block align-middle text-[12px] leading-[1.3] font-normal"
 			onClick={cancel}
 			onAuxClick={cancel}
-			onPointerDown={stop}
-			onMouseDown={stop}
+			onPointerDown={press}
+			onMouseDown={press}
 			onPointerUp={stop}
 			onMouseUp={stop}
 			onTouchEnd={stop}
@@ -91,6 +101,7 @@ export function CardBadge({ state, locale, onActivate }: CardView) {
 			}}
 		>
 			<button
+				ref={buttonRef}
 				type="button"
 				draggable={false}
 				aria-label={label}
