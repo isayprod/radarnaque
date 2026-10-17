@@ -12,13 +12,18 @@ const standardMe: Me = {
 	totalCap: null,
 };
 
+// Forme renvoyée par le serveur pour un admin : aucun quota, aucun plafond.
 const adminMe: Me = {
 	...trialMe,
 	role: "admin",
 	plan: "trial",
 	features: [],
 	unlimited: true,
+	quotas: [],
+	totalCap: null,
 };
+
+const adminWithoutPlanMe: Me = { ...adminMe, plan: null };
 
 describe("accessOf", () => {
 	test("un essai donne ses fonctionnalités et ses quotas restants", () => {
@@ -38,6 +43,15 @@ describe("accessOf", () => {
 
 	test("un admin n'a aucun quota affiché", () => {
 		expect(accessOf(adminMe)).toEqual({
+			status: "active",
+			features: [],
+			unlimited: true,
+			remaining: { text: null, image: null, total: null },
+		});
+	});
+
+	test("un admin sans abonnement reste actif", () => {
+		expect(accessOf(adminWithoutPlanMe)).toEqual({
 			status: "active",
 			features: [],
 			unlimited: true,
@@ -82,8 +96,12 @@ describe("canUse", () => {
 		}
 	});
 
-	test("admin : tout, même sans fonctionnalité listée", () => {
-		const access = accessOf(adminMe);
-		for (const feature of features) expect(canUse(access, feature)).toBe(true);
+	test("admin : tout, même sans fonctionnalité listée ni abonnement", () => {
+		for (const me of [adminMe, adminWithoutPlanMe]) {
+			const access = accessOf(me);
+			for (const feature of features) {
+				expect(canUse(access, feature)).toBe(true);
+			}
+		}
 	});
 });
