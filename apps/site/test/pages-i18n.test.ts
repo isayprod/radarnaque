@@ -223,7 +223,10 @@ describe("privacy wording (spec 10)", () => {
 		expect(PRIVACY.nl.sections.erasure.body).toContain(
 			"de geschiedenis van uw analyses",
 		);
-		expect(PRIVACY.nl.sections.erasure.body).toContain("uw gebruikersaccount");
+		expect(PRIVACY.nl.sections.erasure.body).toContain(
+			"worden uw gebruikersgegevens, uw abonnementen en de geschiedenis van uw analyses gewist",
+		);
+		expect(PRIVACY.nl.sections.erasure.body).not.toContain("gebruikersaccount");
 		expect(PRIVACY.nl.sections.erasure.body).toContain("mailen naar {email}");
 	});
 
@@ -247,9 +250,30 @@ describe("privacy wording (spec 10)", () => {
 		expect(PRIVACY.nl.sections.photos.body).toMatch(/gedownload/);
 	});
 
+	it("says every AI analysis is triggered by a click (spec §2.1)", () => {
+		expect(PRIVACY.fr.sections.trigger.body).toBe(
+			"Une analyse IA n'est faite que lorsque vous la demandez, par un clic (bouton sur l'annonce, ou icône sur les résultats de recherche avec Premium).",
+		);
+		expect(PRIVACY.nl.sections.trigger.body).toBe(
+			"Een AI-analyse gebeurt alleen wanneer u erom vraagt, met een klik (knop op de advertentie, of icoon op de zoekresultaten met Premium).",
+		);
+		// Rien ne doit laisser croire à une analyse automatique à l'affichage des résultats.
+		expect(PRIVACY.fr.sections.trigger.body).not.toMatch(/pour afficher/);
+		expect(PRIVACY.nl.sections.trigger.body).not.toMatch(/te tonen/);
+	});
+
 	it("uses the agreed NL wording", () => {
 		expect(PRICING.nl.plans.premium.features.icons).toMatch(/iconen/i);
 		expect(text("nl")).not.toContain("afgeschermd");
+		expect(PRIVACY.nl.sections.seller.body).toContain(
+			"Alleen gegevens die de verkoper niet identificeren",
+		);
+		expect(PRIVACY.nl.sections.seller.body).toContain(
+			"hoe lang het account al bestaat",
+		);
+		expect(PRIVACY.nl.sections.seller.body).not.toContain(
+			"leeftijd van het account",
+		);
 	});
 });
 
@@ -263,7 +287,7 @@ describe("static pages", () => {
 			expect(html).toContain("<noscript>");
 			expect(html).toContain("Activez JavaScript pour afficher cette page.");
 			expect(html).toContain(
-				"Schakel JavaScript in om deze pagina te bekijken.",
+				'<p lang="nl">Schakel JavaScript in om deze pagina te bekijken.</p>',
 			);
 		});
 	}
