@@ -14,6 +14,7 @@ import { contentText, signalText } from "../lib/content-i18n";
 import type { Listing } from "../lib/listing/types";
 import type { Severity, Signal } from "../lib/rules/rules";
 import type { RiskReport } from "../lib/rules/score";
+import { AiErrorBoundary } from "./AiErrorBoundary";
 import { AiSection } from "./AiSection";
 import { LEVEL_KEY, LEVEL_STYLE, SEVERITY_STYLE } from "./risk-styles";
 
@@ -158,17 +159,22 @@ export function RiskBadge({
 							))}
 						</ul>
 					)}
-					<AiSection
+					<AiErrorBoundary
+						key={`${listing.site}|${listing.externalId}`}
 						locale={locale}
-						access={scan.access}
-						hasPhotos={listing.images.length > 0}
-						text={scan.text}
-						image={scan.image}
-						onScan={scan.scan}
-						onLogin={scan.login}
-						loginUnavailable={scan.loginUnavailable}
-						pricingUrl={scan.pricingUrl}
-					/>
+					>
+						<AiSection
+							locale={locale}
+							access={scan.access}
+							hasPhotos={listing.images.length > 0}
+							text={scan.text}
+							image={scan.image}
+							onScan={scan.scan}
+							onLogin={scan.login}
+							loginUnavailable={scan.loginUnavailable}
+							pricingUrl={scan.pricingUrl}
+						/>
+					</AiErrorBoundary>
 					<p className="m-0 mt-3 border-t border-slate-200 pt-2 text-[12px] text-slate-600">
 						{contentText(locale, "panel.footer")}
 					</p>
