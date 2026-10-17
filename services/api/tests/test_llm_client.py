@@ -36,6 +36,7 @@ def _provider(
     cost_source: str = "usage_cost",
     extra_body: dict | None = None,
     api_key_env: str | None = "TEST_LLM_KEY",
+    max_images: int | None = None,
 ) -> ProviderConfig:
     return ProviderConfig(
         code="testprov",
@@ -45,6 +46,7 @@ def _provider(
         structured_output=structured_output,  # type: ignore[arg-type]
         cost_source=cost_source,  # type: ignore[arg-type]
         extra_body=extra_body or {},
+        max_images=max_images,
     )
 
 
@@ -279,6 +281,11 @@ async def test_missing_api_key_is_configuration_error_without_any_call(mock, htt
     assert info.value.code == "configuration"
     assert route.call_count == 0
     _assert_not_chained(info.value)
+
+
+def test_client_exposes_the_provider_image_limit():
+    assert OpenAICompatibleClient(_provider(max_images=3), ENV).max_images == 3
+    assert OpenAICompatibleClient(_provider(), ENV).max_images is None
 
 
 def test_llm_error_provider_is_optional():

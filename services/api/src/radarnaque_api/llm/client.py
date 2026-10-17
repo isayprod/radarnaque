@@ -174,6 +174,11 @@ class OpenAICompatibleClient:
         self._http_client = http_client
         self._client: AsyncOpenAI | None = None
 
+    @property
+    def max_images(self) -> int | None:
+        """Limite d'images par requête propre au fournisseur (None : aucune)."""
+        return self._provider.max_images
+
     def _error(self, code: LLMErrorCode) -> LLMError:
         return LLMError(code, self._provider.code)
 

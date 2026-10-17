@@ -30,9 +30,9 @@ def _write(tmp_path: Path, content: str) -> Path:
     return path
 
 
-def test_repo_file_loads_the_four_providers():
+def test_repo_file_loads_the_providers():
     providers = load_providers(REPO_PROVIDERS)
-    assert set(providers) == {"openrouter", "omniroute", "ollama", "stub"}
+    assert set(providers) == {"openrouter", "groq", "openai-oauth", "omniroute", "ollama", "stub"}
     openrouter = providers["openrouter"]
     assert openrouter.code == "openrouter"
     assert openrouter.api_key_env == "OPENROUTER_API_KEY"
@@ -42,6 +42,35 @@ def test_repo_file_loads_the_four_providers():
     assert providers["omniroute"].structured_output == "json_object"
     assert providers["ollama"].api_key_env is None
     assert providers["stub"].extra_body == {}
+    assert providers["openrouter"].max_images is None
+
+
+def test_repo_file_groq_and_openai_oauth():
+    providers = load_providers(REPO_PROVIDERS)
+    groq = providers["groq"]
+    assert groq.base_url == "https://api.groq.com/openai/v1"
+    assert groq.api_key_env == "GROQ_API_KEY"
+    assert groq.structured_output == "json_object"
+    assert groq.cost_source == "none"
+    assert groq.max_images == 3  # modèle vision de Groq : 3 images par requête au plus
+    oauth = providers["openai-oauth"]
+    assert oauth.base_url == "http://127.0.0.1:10531/v1"
+    assert oauth.base_url_env == "OPENAI_OAUTH_BASE_URL"
+    assert oauth.api_key_env is None  # le proxy local utilise la session Codex, pas de clé
+    assert oauth.structured_output == "json_object"  # le proxy ignore response_format
+    assert oauth.cost_source == "none"
+
+
+def test_max_images_is_read(tmp_path):
+    path = _write(tmp_path, VALID + "max_images = 2\n")
+    assert load_providers(path)["p"].max_images == 2
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "'3'", "true", "1.5"])
+def test_max_images_must_be_a_positive_integer(tmp_path, value):
+    path = _write(tmp_path, VALID + f"max_images = {value}\n")
+    with pytest.raises(ProviderError, match=r"providers\.p\.max_images"):
+        load_providers(path)
 
 
 def test_repo_file_contains_no_secret():
@@ -236,4 +265,4 @@ async def test_startup_fails_when_a_model_has_an_unknown_provider(
 
 
 async def test_startup_exposes_providers(app: FastAPI):
-    assert set(app.state.providers) == {"openrouter", "omniroute", "ollama", "stub"}
+    assert set(app.state.providers) == set(load_providers(REPO_PROVIDERS))

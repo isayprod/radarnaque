@@ -8,6 +8,25 @@ provider = { data_collection = "deny" }
 usage = { include = true }
 reasoning = { enabled = false }
 
+# Groq : clé gratuite sur console.groq.com (offre gratuite limitée en requêtes et en tokens).
+# JSON simple : la sortie stricte n'est acceptée que par certains modèles. Le modèle vision
+# (qwen/qwen3.8-27b) refuse plus de 3 images par requête.
+[providers.groq]
+base_url = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+structured_output = "json_object"
+cost_source = "none"
+max_images = 3
+
+# openai-oauth (github.com/EvanZhouDev/openai-oauth) : proxy local qui passe par l'abonnement
+# ChatGPT/Codex (`npx openai-oauth`). Pour le dev en local uniquement : non officiel, et tout
+# appel est facturé sur l'abonnement. Pas de clé ; le proxy ignore `response_format`.
+[providers.openai-oauth]
+base_url = "http://127.0.0.1:10531/v1"
+base_url_env = "OPENAI_OAUTH_BASE_URL"
+structured_output = "json_object"
+cost_source = "none"
+
 [providers.omniroute]
 base_url = "http://localhost:20128/v1"
 base_url_env = "OMNIROUTE_BASE_URL"
