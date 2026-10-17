@@ -2,7 +2,7 @@ import "../components/badge.css";
 import type { Locale } from "@radarnaque/shared";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { createShadowRootUi } from "wxt/utils/content-script-ui/shadow-root";
+import { browser, type PublicPath } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
 import { CardBadge } from "../components/CardBadge";
 import { RiskBadge } from "../components/RiskBadge";
@@ -17,7 +17,7 @@ import {
 	createCardMounter,
 } from "../lib/content/card-mounter";
 import { createController } from "../lib/content/controller";
-import { detachedUiContext } from "../lib/content/ui-context";
+import { createUiFactory } from "../lib/content/ui-context";
 import { resolveContentLocale } from "../lib/content-i18n";
 import type { Site } from "../lib/listing/types";
 import { localePref } from "../lib/storage";
@@ -43,6 +43,20 @@ function createCardRenderer(container: HTMLElement): CardRenderer {
 	};
 }
 
+/**
+ * CSS de l'entrée, à l'URL que WXT charge lui-même en mode `"ui"`
+ * (`loadCss` de `createShadowRootUi`) : le fichier reste déclaré dans
+ * `web_accessible_resources` parce que l'entrée garde `cssInjectionMode: "ui"`.
+ */
+async function loadEntryCss(): Promise<string> {
+	// Fichier produit au build, absent des chemins publics typés par WXT.
+	const path = `/content-scripts/${import.meta.env.ENTRYPOINT}.css`;
+	const url = browser.runtime.getURL(path as PublicPath);
+	const res = await fetch(url);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.text();
+}
+
 async function getLocale(site: Site): Promise<Locale> {
 	return resolveContentLocale(
 		site,
@@ -63,13 +77,14 @@ export default defineContentScript({
 		// Un seul client IA par content script, partagé par toutes les pastilles.
 		const ai = createAiClient();
 		// Les UI ne s'abonnent pas à l'invalidation (une fuite par montage) : les
-		// `dispose()` ci-dessous les retirent toutes.
-		const uiCtx = detachedUiContext(ctx);
+		// `dispose()` ci-dessous les retirent toutes. R7 : pastille et icônes
+		// partagent un CSS chargé une seule fois, sans `<style>` dans la page.
+		const createUi = createUiFactory(ctx, loadEntryCss);
 		const controller = createController({
 			doc: document,
 			getUrl: () => new URL(location.href),
 			mounter: createBadgeMounter({
-				createUi: (options) => createShadowRootUi(uiCtx, options),
+				createUi,
 				createRenderer: (container) => createReactRenderer(container, ai),
 			}),
 			getLocale,
@@ -80,7 +95,7 @@ export default defineContentScript({
 			getUrl: () => new URL(location.href),
 			ai,
 			mountCard: createCardMounter({
-				createUi: (options) => createShadowRootUi(uiCtx, options),
+				createUi,
 				createRenderer: createCardRenderer,
 			}),
 			getLocale,
