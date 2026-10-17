@@ -67,7 +67,10 @@ def _clean_user_data(request: pytest.FixtureRequest) -> Iterator[None]:
     url = request.getfixturevalue("pg_url").replace("postgresql+psycopg://", "postgresql://", 1)
     with psycopg.connect(url, autocommit=True) as conn:
         conn.execute(
-            'truncate app.scan_failures, app.scan_events, app.subscriptions, auth."user" cascade'
+            "truncate app.scan_results, app.scan_failures, app.scan_events,"
+            " app.analysis_reason_texts, app.analysis_reasons, app.analysis_texts, app.analyses,"
+            " app.snapshot_images, app.listing_snapshots, app.listings,"
+            ' app.subscriptions, auth."user" cascade'
         )
 
 
