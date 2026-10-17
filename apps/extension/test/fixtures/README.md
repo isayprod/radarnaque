@@ -12,7 +12,7 @@ script local. Le script et les pages brutes ne sont pas dans le dépôt.
 |---|---|---|
 | `twh/listing-fixed.html` | annonce 2ememain, prix `FIXED` | JSON-LD, `window.__CONFIG__`, DOM de la fiche avec la section vendeur complète |
 | `twh/listing-bidding-skeleton.html` | annonce 2ememain, prix `MIN_BID` | idem, section vendeur `#vendeur` encore en squelette, bloc `#bidding-root` |
-| `twh/search.html` | résultats de recherche 2ememain (`/q/iphone/`) | `<head>` réduit (titre, canonical, `hreflang`), `ul.hz-Listings` avec 9 éléments : 8 cartes (une sponsorisée en `a…`, une sans lien de fiche, 6 cartes `m…`) et un emplacement publicitaire vidé ; chaque carte garde ses 3 variantes (bureau, tablette, mobile). Classes hachées et utilitaires retirées, seuls les marqueurs `hz-Listing…` restent |
+| `twh/search.html` | résultats de recherche 2ememain (`/q/iphone/`) | `<head>` réduit (titre, canonical, `hreflang`), `ul.hz-Listings` avec 9 éléments : 8 cartes (une annonce professionnelle (`a…`), dont la fiche n'est pas encore prise en charge, une sans lien de fiche, 6 cartes `m…`) et un emplacement publicitaire vidé ; chaque carte garde ses 3 variantes (bureau, tablette, mobile). Classes hachées et utilitaires retirées, seuls les marqueurs `hz-Listing…` restent |
 | `facebook/grid.html` | grille Marketplace | navigation (`h1` « Marketplace »), 6 cartes : 3 avec `aria-label`, 3 sans (prix barré, `€ 0`, `€ 1 234`), dont une `GRATUIT` |
 | `facebook/item-modal.html` | fiche ouverte en modale | 2 cartes de grille sous un `[role="dialog"]` contenant la fiche (5 photos, « A rejoint Facebook en 2007 ») |
 | `facebook/item-page.html` | même fiche | contenu de la modale sous `[role="main"]`, sans dialogue ni bouton « Fermer » |
@@ -77,8 +77,8 @@ donnée du visiteur, un script externe, une valeur de la liste locale, ou dépas
 | Photos Facebook | `https://images.example/fb/<n>.jpg` : `1` à `5` pour la fiche, `11` à `16` pour les cartes |
 | Lieu de l'annonce Facebook | `Namur, WAL`, page de lieu `/marketplace/100000000000001/` |
 | Ids d'annonces Facebook | grille : `9000000000000001` à `9000000000000006` ; fiche : `9000000000000007` |
-| Ids des cartes 2ememain | `m1000000101` à `m1000000106` ; carte sponsorisée : `a1000000201` |
-| Cartes 2ememain | vendeur `TestVendeur`, villes `Namur`, `Bruxelles`, `Liège`, `Leuven`, `Gent` (sans reprendre une ville réelle des cartes gardées), distances fictives (`5 km` à `60 km`), date `1 oct. '26`, description de la carte sponsorisée remplacée, `alt` des photos = titre de la carte |
+| Ids des cartes 2ememain | `m1000000101` à `m1000000106` ; annonce professionnelle (`a…`), dont la fiche n'est pas encore prise en charge : `a1000000201` |
+| Cartes 2ememain | vendeur `TestVendeur`, villes `Namur`, `Bruxelles`, `Liège`, `Leuven`, `Gent` (sans reprendre une ville réelle des cartes gardées), distances fictives (`5 km` à `60 km`), date `1 oct. '26`, description de l'annonce professionnelle (`a…`) remplacée, `alt` des photos = titre de la carte |
 | Photos des cartes 2ememain | `//images.example/twh/<n>?rule=<taille réelle>` (`eps_83`, `eps_85`, …), `1` à `10` |
 | Villes des cartes Facebook | villes génériques (`Bruxelles, BRU`, `Liège, WAL`, `Leuven, VLG`, `Gent, VLG`, `Antwerpen, VLG`) |
 
