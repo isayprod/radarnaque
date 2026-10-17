@@ -11,7 +11,8 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U radarnaque -d radarnaque"]
+      # TCP (-h 127.0.0.1) : pas « sain » pendant l'init de l'entrypoint, qui n'écoute que sur le socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U radarnaque -d radarnaque"]
       interval: 5s
       timeout: 5s
       retries: 10
