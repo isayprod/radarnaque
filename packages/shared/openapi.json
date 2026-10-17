@@ -87,6 +87,20 @@
         "title": "AnalysisResultOut",
         "type": "object"
       },
+      "BillingUrlOut": {
+        "description": "Adresse vers laquelle rediriger l'utilisateur (paiement ou portail de gestion).",
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "BillingUrlOut",
+        "type": "object"
+      },
       "BootstrapOut": {
         "properties": {
           "created": {
@@ -98,6 +112,34 @@
           "created"
         ],
         "title": "BootstrapOut",
+        "type": "object"
+      },
+      "CheckoutIn": {
+        "additionalProperties": false,
+        "description": "Corps de `POST /api/billing/checkout` : l'offre payante et la p\u00e9riodicit\u00e9 choisies.",
+        "properties": {
+          "interval": {
+            "enum": [
+              "month",
+              "year"
+            ],
+            "title": "Interval",
+            "type": "string"
+          },
+          "plan": {
+            "enum": [
+              "standard",
+              "premium"
+            ],
+            "title": "Plan",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan",
+          "interval"
+        ],
+        "title": "CheckoutIn",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -859,6 +901,107 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/billing/checkout": {
+      "post": {
+        "operationId": "checkout_api_billing_checkout_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingUrlOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Checkout"
+      }
+    },
+    "/api/billing/portal": {
+      "post": {
+        "operationId": "portal_api_billing_portal_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingUrlOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Portal"
+      }
+    },
+    "/api/billing/webhooks/stripe": {
+      "post": {
+        "description": "Sans authentification : l'appelant est Stripe, authentifi\u00e9 par sa signature. Le corps est\nlu brut, sans \u00eatre interpr\u00e9t\u00e9 ; ni lui ni la signature ne sont journalis\u00e9s.",
+        "operationId": "stripe_webhook_api_billing_webhooks_stripe_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "stripe-signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stripe-Signature"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stripe Webhook"
+      }
+    },
     "/api/health": {
       "get": {
         "operationId": "health_api_health_get",
