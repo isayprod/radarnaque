@@ -337,16 +337,20 @@ Facebook Marketplace.
   charge : pas d'icône.
 - **Carte sans icône sur 2ememain.** Certaines cartes reçoivent leur lien tard : l'icône
   apparaît dès que le site l'a renseigné (au défilement, ou après quelques instants).
-- **Fiche Facebook ouverte en fenêtre modale.** Les icônes de la grille disparaissent tant
-  que la fiche est ouverte, et reviennent à la fermeture.
+- **Fiche Facebook ouverte en fenêtre modale.** Les icônes de la grille restent en place
+  derrière la fiche ; les cartes chargées pendant qu'elle est ouverte n'en reçoivent qu'à
+  sa fermeture.
 - **Connexion depuis la popup.** Au retour sur l'onglet, le panneau et les icônes se mettent
-  à jour d'eux-mêmes : inutile de recharger la page.
+  à jour d'eux-mêmes : inutile de recharger la page. Un abonnement tout juste souscrit
+  peut mettre jusqu'à 30 s à apparaître (l'accès d'un compte sans abonnement est relu au
+  plus toutes les 30 s), et un accès actif est gardé 5 min d'une page à l'autre.
 
 ### En cas de problème
 
 - **« Session expirée, reconnectez-vous. »** : se reconnecter depuis la popup de l'extension
   (le bouton « Se connecter » du panneau l'ouvre, sinon cliquer sur l'icône Radarnaque de la
-  barre d'outils), puis revenir sur l'onglet.
+  barre d'outils), puis revenir sur l'onglet. Sur une recherche, seule l'icône cliquée reste,
+  avec ce message ; les autres reviennent après la reconnexion.
 - **« L'analyse a échoué. Elle ne vous a pas été décomptée. »** : c'est l'erreur
   `analysis_failed` (502) de l'API. Vérifier le fournisseur actif (`radarnaque-llm list`) :
   `pnpm llm:stub` lancé pour `stub`, clé valide et quota non atteint pour Groq, proxy
