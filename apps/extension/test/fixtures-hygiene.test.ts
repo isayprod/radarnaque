@@ -61,12 +61,66 @@ function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Une valeur réelle, insensible à la casse, non collée à une lettre ou un chiffre. */
+/** Sous 4 caractères, une valeur ne compte que hors d'un mot (faux positifs). */
+const MIN_SUBSTRING_LENGTH = 4;
+
+/**
+ * Une valeur réelle, insensible à la casse : simple sous-chaîne dès 4 caractères
+ * (attrape une valeur collée au texte voisin), bornes lettre/chiffre en dessous.
+ */
 function denylistMatcher(value: string): RegExp {
-	return new RegExp(
-		`(?<![\\p{L}\\p{N}])${escapeRegExp(value)}(?![\\p{L}\\p{N}])`,
-		"iu",
+	const escaped = escapeRegExp(value);
+	return value.length >= MIN_SUBSTRING_LENGTH
+		? new RegExp(escaped, "iu")
+		: new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "iu");
+}
+
+const NAMED_ENTITIES: Record<string, string> = {
+	amp: "&",
+	lt: "<",
+	gt: ">",
+	quot: '"',
+	apos: "'",
+	nbsp: " ",
+};
+
+function decodeHtmlEntities(text: string): string {
+	return text.replace(
+		/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi,
+		(entity, body: string) => {
+			if (body.startsWith("#")) {
+				const hex = body[1] === "x" || body[1] === "X";
+				const code = Number.parseInt(body.slice(hex ? 2 : 1), hex ? 16 : 10);
+				return Number.isNaN(code) ? entity : String.fromCodePoint(code);
+			}
+			return NAMED_ENTITIES[body.toLowerCase()] ?? entity;
+		},
 	);
+}
+
+function decodePercent(text: string): string {
+	return text.replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
+		try {
+			return decodeURIComponent(run);
+		} catch {
+			return run;
+		}
+	});
+}
+
+/** `/`, `<` et `\/` des JSON embarqués. */
+function decodeJsonEscapes(text: string): string {
+	return text
+		.replace(/\\u002F/gi, "/")
+		.replace(/\\u003C/gi, "<")
+		.replace(/\\\//g, "/");
+}
+
+/** Formes contrôlées : brute, échappements JSON, entités HTML et %-encodage décodés. */
+function scannedForms(raw: string): string {
+	const json = decodeJsonEscapes(raw);
+	const html = decodeHtmlEntities(json);
+	return [raw, json, html, decodePercent(html), decodePercent(raw)].join("\n");
 }
 
 function readDenylist(): Array<{ line: number; re: RegExp }> {
@@ -83,8 +137,7 @@ function findViolations(
 	raw: string,
 	denylist: Array<{ line: number; re: RegExp }>,
 ): string[] {
-	// Les JSON des pages échappent `/` en `/` : on contrôle aussi la forme décodée.
-	const content = `${raw}\n${raw.replace(/\\u002F/gi, "/")}`;
+	const content = scannedForms(raw);
 	const lower = content.toLowerCase();
 	const violations: string[] = [];
 	for (const pattern of FORBIDDEN_PATTERNS) {
@@ -125,12 +178,32 @@ describe("hygiène des fixtures", () => {
 		},
 	);
 
-	test("la denylist s'applique avec des bornes de mot, sans casse", () => {
+	test("la denylist attrape une valeur collée, encodée ou en casse différente", () => {
 		const list = [{ line: 1, re: denylistMatcher("Dupont") }];
 		expect(findViolations("vendeur DUPONT", list)).toHaveLength(1);
-		expect(findViolations("vendeur Dupontel", list)).toEqual([]);
+		expect(findViolations("vendeurDupontel", list)).toHaveLength(1);
+		const date = [{ line: 1, re: denylistMatcher("16 oct.") }];
+		expect(findViolations("depuis16 oct. '26", date)).toHaveLength(1);
+		expect(findViolations("Du&#112;ont", list)).toHaveLength(1);
+		expect(findViolations("Du&#x70;ONT", list)).toHaveLength(1);
+		expect(findViolations("?q=Du%70ont", list)).toHaveLength(1);
+		expect(findViolations('"u":"\\u002Fu\\u002FDupont"', list)).toHaveLength(1);
+		expect(findViolations("Dup&amp;ont", list)).toEqual([]);
 		expect(findViolations('<script async src="x.js">', [])).toHaveLength(1);
 	});
+
+	test("une valeur de moins de 4 caractères ne compte que hors d'un mot", () => {
+		const list = [{ line: 1, re: denylistMatcher("MAX") }];
+		expect(findViolations("vendeur max.", list)).toHaveLength(1);
+		expect(findViolations("maximum", list)).toEqual([]);
+	});
+
+	test.skipIf(!existsSync(DENYLIST_PATH))(
+		"denylist chargée et non vide",
+		() => {
+			expect(denylist.length).toBeGreaterThan(0);
+		},
+	);
 });
 
 describe("loadFixture", () => {

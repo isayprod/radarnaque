@@ -59,7 +59,7 @@ donnée du visiteur, un script externe, une valeur de la liste locale, ou dépas
 |---|---|
 | Ids d'annonces 2ememain | `m1000000001` (iPhone), `m1000000002` (bonnet) |
 | Identifiant vendeur 2ememain | `10000001` |
-| Identifiant chiffré | 32 caractères `0` suivis de `1` |
+| Identifiant chiffré | 31 caractères `0` suivis de `1` (32 caractères, comme le vrai format) |
 | Nom du vendeur | `TestVendeur` |
 | URL du profil | `/u/testvendeur/10000001/` (avis : `/experiences/user-reviews/10000001/`) |
 | Ville | `Namur` |
