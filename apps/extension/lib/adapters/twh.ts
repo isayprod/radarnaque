@@ -286,35 +286,39 @@ function cardIdOfHref(href: string | null, pageUrl: URL): string | null {
 /**
  * Une carte est l'élément de liste qui contient un lien de fiche ; elle
  * répète ce lien dans ses trois mises en page (bureau, tablette, mobile), d'où
- * la déduplication par id et par élément. Rien hors page de résultats.
+ * la déduplication par id et par élément. Rien hors page de résultats. Les
+ * cartes sont produites à la demande : `pageType` s'arrête à la première.
  */
-function findCards(root: ParentNode, pageUrl: URL): CardRef[] {
-	if (!siteOf(pageUrl) || !SEARCH_PATH_RE.test(pageUrl.pathname)) return [];
+function* cardsOf(root: ParentNode, pageUrl: URL): Generator<CardRef> {
+	if (!siteOf(pageUrl) || !SEARCH_PATH_RE.test(pageUrl.pathname)) return;
 	const seen = new Set<string>();
 	const used = new Set<Element>();
-	const cards: CardRef[] = [];
 	for (const link of root.querySelectorAll(CARD_LINK)) {
 		const href = link.getAttribute("href");
 		const id = cardIdOfHref(href, pageUrl);
+		if (!href || !id || seen.has(id)) continue;
 		// Hors d'un élément de liste (lien interne d'une fiche, etc.) : pas une carte.
 		const element = link.closest('li, [role="listitem"]');
-		if (!href || !id || !element || seen.has(id) || used.has(element)) continue;
+		if (!element || used.has(element)) continue;
 		seen.add(id);
 		used.add(element);
 		const { pathname } = new URL(href, pageUrl.origin);
-		cards.push({
+		yield {
 			element,
 			externalId: id,
 			// Hôte de la page (même origine pour `fetch`), sans paramètres de suivi.
 			url: `${pageUrl.origin}${pathname}`,
-		});
+		};
 	}
-	return cards;
+}
+
+function findCards(root: ParentNode, pageUrl: URL): CardRef[] {
+	return [...cardsOf(root, pageUrl)];
 }
 
 function pageType(url: URL, doc: Document): PageType {
 	if (isListingPage(url, doc)) return "listing";
-	return findCards(doc, url).length > 0 ? "search" : "other";
+	return cardsOf(doc, url).next().done ? "other" : "search";
 }
 
 /** Variante de mise en page affichée ; sans `checkVisibility`, toutes le sont. */
