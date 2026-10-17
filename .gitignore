@@ -49,3 +49,6 @@ logs/
 
 # Espace de travail des agents
 .superpowers/
+
+# Pages de marketplaces enregistrées (données personnelles, jetons de session)
+web-pages/
