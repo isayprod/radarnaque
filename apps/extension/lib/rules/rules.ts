@@ -3,6 +3,7 @@ import type { Listing } from "../listing/types";
 import {
 	containsKeyword,
 	OFFSITE_PAYMENT_KEYWORDS,
+	OFFSITE_PAYMENT_WITH_PAYPAL_KEYWORDS,
 	SHIPPING_ONLY_KEYWORDS,
 } from "./keywords";
 
@@ -36,15 +37,17 @@ export interface Rule {
 	check(l: Listing): Signal | null;
 }
 
-// Les trois formes sont testées sur le texte en minuscules. `(?<!\d)` évite de
-// lire un téléphone au milieu d'un nombre (prix, référence).
+// Testées sur le texte en minuscules. `(?<!\d)` et `(?!\d)` évitent de lire un
+// téléphone au milieu d'un nombre (prix, référence). L'international exige 9 à
+// 14 chiffres au total, pour écarter « +15 °C », « +50 000 km » ou « S23+ 256 ».
 const PHONE_RES: readonly RegExp[] = [
-	/(?<!\d)(\+32|0032|0)\s?4\d{2}([\s./-]?\d{2}){3}/,
-	/\+\d{2,3}[\s./-]?\d{2,3}([\s./-]?\d{2,3}){2,4}/,
+	/(?<!\d)(\+32|0032|0)\s?4\d{2}([\s./-]?\d{2}){3}(?!\d)/,
+	/(?<!\d)(\+32|0032|0)\s?4\d{2}[\s./-]?\d{3}[\s./-]?\d{3}(?!\d)/,
+	/(?<!\d)\+(?=(?:[\s./-]?\d){9,14}(?!\d))\d{2,3}[\s./-]?\d{1,3}(?:[\s./-]?\d{2,4}){2,4}(?!\d)/,
 ];
 const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/;
 const APP_RES: readonly RegExp[] = [
-	/whatsapp|whats app|wa\.me|telegram|t\.me\//,
+	/whatsapp|whats app|(?<![a-z0-9.-])wa\.me|telegram|(?<![a-z0-9.-])t\.me\//,
 	/\b(sur|via|op) signal\b|\bsignal app\b/,
 ];
 
@@ -112,8 +115,14 @@ export const RULES: readonly Rule[] = [
 	rule("shipping_only", 15, "warning", (l) =>
 		containsKeyword(text(l), SHIPPING_ONLY_KEYWORDS),
 	),
-	rule("offsite_payment", 35, "danger", (l) =>
-		containsKeyword(text(l), OFFSITE_PAYMENT_KEYWORDS),
+	rule(
+		"offsite_payment",
+		35,
+		"danger",
+		(l) =>
+			containsKeyword(text(l), OFFSITE_PAYMENT_KEYWORDS) ||
+			(containsKeyword(text(l), ["paypal"]) &&
+				containsKeyword(text(l), OFFSITE_PAYMENT_WITH_PAYPAL_KEYWORDS)),
 	),
 	rule(
 		"symbolic_price",
