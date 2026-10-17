@@ -58,10 +58,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Scan */
+        post: operations["create_scan_api_scans_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scans/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** History */
+        get: operations["history_api_scans_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AnalysisReasonOut */
+        AnalysisReasonOut: {
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "warning" | "danger";
+            text: components["schemas"]["LocalizedTextOut"];
+        };
+        /** AnalysisResultOut */
+        AnalysisResultOut: {
+            advice: components["schemas"]["LocalizedTextOut"];
+            /** Analysisid */
+            analysisId: number;
+            /**
+             * Analyzedat
+             * Format: date-time
+             */
+            analyzedAt: string;
+            /** Fromcache */
+            fromCache: boolean;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "low" | "medium" | "high";
+            /** Partial */
+            partial: boolean;
+            /** Reasons */
+            reasons: components["schemas"]["AnalysisReasonOut"][];
+            remaining: components["schemas"]["RemainingOut"];
+            /** Score */
+            score: number;
+            summary: components["schemas"]["LocalizedTextOut"];
+        };
         /** BootstrapOut */
         BootstrapOut: {
             /** Created */
@@ -71,6 +140,57 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** ListingIn */
+        ListingIn: {
+            /** Category */
+            category?: string | null;
+            /** Condition */
+            condition?: string | null;
+            /** Description */
+            description: string;
+            /** Externalid */
+            externalId: string;
+            /** Images */
+            images?: string[];
+            location: components["schemas"]["LocationIn"];
+            /** Postedat */
+            postedAt?: string | null;
+            price?: components["schemas"]["PriceIn"] | null;
+            /**
+             * Pricetype
+             * @enum {string}
+             */
+            priceType: "fixed" | "bidding" | "free" | "unknown";
+            seller: components["schemas"]["SellerFactsIn"];
+            /**
+             * Site
+             * @enum {string}
+             */
+            site: "2ememain.be" | "2dehands.be" | "facebook.com";
+            /** Title */
+            title: string;
+            /**
+             * Url
+             * Format: uri
+             */
+            url: string;
+        };
+        /** LocalizedTextOut */
+        LocalizedTextOut: {
+            /** Fr */
+            fr: string;
+            /** Nl */
+            nl: string;
+        };
+        /** LocationIn */
+        LocationIn: {
+            /** City */
+            city?: string | null;
+            /** Country */
+            country?: string | null;
+            /** Region */
+            region?: string | null;
         };
         /** MeOut */
         MeOut: {
@@ -95,6 +215,23 @@ export interface components {
             /** Userid */
             userId: string;
         };
+        /** MonthRangeIn */
+        MonthRangeIn: {
+            /** Max */
+            max: number;
+            /** Min */
+            min: number;
+        };
+        /** PriceIn */
+        PriceIn: {
+            /** Amountcents */
+            amountCents: number;
+            /**
+             * Currency
+             * @constant
+             */
+            currency: "EUR";
+        };
         /** QuotaOut */
         QuotaOut: {
             /** Limit */
@@ -105,6 +242,124 @@ export interface components {
             scanKind: string | null;
             /** Used */
             used: number;
+        };
+        /**
+         * RemainingOut
+         * @description Scans restants après celui-ci ; `None` : illimité (admin) ou sans plafond.
+         */
+        RemainingOut: {
+            /** Image */
+            image: number | null;
+            /** Text */
+            text: number | null;
+            /** Total */
+            total: number | null;
+        };
+        /** RulesIn */
+        RulesIn: {
+            /** Signals */
+            signals: components["schemas"]["SignalIn"][];
+            /** Version */
+            version: number;
+        };
+        /**
+         * ScanHistoryItemOut
+         * @description Un scan de l'historique. `site` et `title` viennent du snapshot de l'analyse servie :
+         *     `None` pour un scan sans résultat (échec ou en cours), qui n'est relié à aucun snapshot.
+         *     `score` et `level` sont `None` dans le même cas.
+         */
+        ScanHistoryItemOut: {
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Failed */
+            failed: boolean;
+            /** Fromcache */
+            fromCache: boolean;
+            /** Level */
+            level: ("low" | "medium" | "high") | null;
+            /** Scaneventid */
+            scanEventId: number;
+            /**
+             * Scankind
+             * @enum {string}
+             */
+            scanKind: "text" | "image";
+            /** Score */
+            score: number | null;
+            /** Site */
+            site: string | null;
+            /** Title */
+            title: string | null;
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "button" | "card";
+        };
+        /**
+         * ScanHistoryOut
+         * @description Page de l'historique, du plus récent au plus ancien ; `next_before` est à passer en
+         *     `before` pour la page suivante (`None` : plus rien).
+         */
+        ScanHistoryOut: {
+            /** Items */
+            items: components["schemas"]["ScanHistoryItemOut"][];
+            /** Nextbefore */
+            nextBefore: number | null;
+        };
+        /** ScanIn */
+        ScanIn: {
+            listing: components["schemas"]["ListingIn"];
+            /**
+             * Partial
+             * @default false
+             */
+            partial: boolean;
+            rules: components["schemas"]["RulesIn"];
+            /**
+             * Scankind
+             * @enum {string}
+             */
+            scanKind: "text" | "image";
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "button" | "card";
+        };
+        /**
+         * SellerFactsIn
+         * @description Faits sur le vendeur, jamais son identité : `id`, `name` et `profileUrl` sont refusés.
+         */
+        SellerFactsIn: {
+            accountAgeMonths?: components["schemas"]["MonthRangeIn"] | null;
+            /** Otherlistingscount */
+            otherListingsCount?: number | null;
+            /** Rating */
+            rating?: number | null;
+            /** Reviewcount */
+            reviewCount?: number | null;
+            /** Verified */
+            verified?: boolean | null;
+        };
+        /** SignalIn */
+        SignalIn: {
+            /** Id */
+            id: string;
+            /** Params */
+            params?: {
+                [key: string]: string | number;
+            } | null;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "warning" | "danger";
+            /** Weight */
+            weight: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -199,6 +454,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MeOut"];
+                };
+            };
+        };
+    };
+    create_scan_api_scans_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScanIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisResultOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    history_api_scans_history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                before?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanHistoryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -1,6 +1,9 @@
+import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,8 +11,20 @@ from radarnaque_api.auth.jwt import JwksFetcher, JwtVerifier, http_jwks_fetcher
 from radarnaque_api.config import Settings
 from radarnaque_api.db import make_engine
 from radarnaque_api.errors import install_error_handlers
+from radarnaque_api.llm.client import LLMClientFactory
 from radarnaque_api.llm.providers import ensure_models_use_known_providers, load_providers
-from radarnaque_api.routes import health, internal, me
+from radarnaque_api.routes import health, internal, me, scans
+
+# En DEBUG, ces bibliothèques journalisent les URL et les corps des requêtes : l'annonce, les
+# photos, et les réponses du fournisseur.
+_QUIET_LOGGERS = ("httpx", "httpcore", "openai")
+
+
+def _quiet_http_loggers() -> None:
+    for name in _QUIET_LOGGERS:
+        logger = logging.getLogger(name)
+        if logger.getEffectiveLevel() < logging.WARNING:
+            logger.setLevel(logging.WARNING)
 
 
 def create_app(
@@ -19,16 +34,26 @@ def create_app(
     (utilisable comme factory uvicorn). `jwks_fetcher` remplace la récupération HTTP du JWKS
     (tests)."""
     settings = settings or Settings()  # type: ignore[call-arg]
+    _quiet_http_loggers()
     providers = load_providers(settings.providers_file)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.engine = make_engine(settings.database_url)
+        # Client dédié aux photos (règles R6, R7, R13) : ni proxy de l'environnement (il
+        # résoudrait l'hôte à la place de la vérification SSRF), ni redirection automatique
+        # (fetch_images vérifie chaque saut), ni en-têtes, cookies ou authentification partagés.
+        app.state.http_images = httpx.AsyncClient(trust_env=False, follow_redirects=False)
+        # Un client par fournisseur, créé au premier scan ; jamais le client des photos.
+        app.state.llm_clients = LLMClientFactory(providers, os.environ)
+        app.state.llm_for = app.state.llm_clients
         try:
             async with AsyncSession(app.state.engine) as session:
                 await ensure_models_use_known_providers(session, providers)
             yield
         finally:
+            await app.state.llm_clients.aclose()
+            await app.state.http_images.aclose()
             await app.state.engine.dispose()
 
     app = FastAPI(title="Radarnaque API", lifespan=lifespan)
@@ -42,5 +67,6 @@ def create_app(
     install_error_handlers(app)
     app.include_router(health.router)
     app.include_router(me.router)
+    app.include_router(scans.router)
     app.include_router(internal.router)
     return app

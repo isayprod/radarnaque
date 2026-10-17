@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -8,12 +9,13 @@ from pydantic import BaseModel
 
 from radarnaque_api.llm.client import (
     LLMAnalysis,
+    LLMClientFactory,
     LLMError,
     OpenAICompatibleClient,
     strict_analysis_schema,
     strict_json_schema,
 )
-from radarnaque_api.llm.providers import ProviderConfig
+from radarnaque_api.llm.providers import ProviderConfig, ProviderError
 
 BASE = "https://llm.test/v1"
 KEY = "sk-test-secret"
@@ -414,3 +416,25 @@ async def test_extra_body_of_provider_is_not_mutated(mock, http):
     before = provider.extra_body_dict()
     await _analyze(provider, http)
     assert provider.extra_body_dict() == before
+
+
+async def test_aclose_closes_the_sdk_client_once_used(mock, http):
+    mock.post("/chat/completions").mock(return_value=_ok())
+    client = OpenAICompatibleClient(_provider(), ENV, http_client=http)
+    await client.aclose()  # jamais utilisé : rien à fermer
+    assert not http.is_closed
+    await client.analyze(model="vendor/model", system_prompt="SYS", messages=MESSAGES)
+    await client.aclose()
+    assert http.is_closed
+
+
+async def test_client_factory_caches_one_client_per_provider():
+    other = replace(_provider(), code="other")
+    factory = LLMClientFactory({"testprov": _provider(), "other": other}, ENV)
+    client = factory("testprov")
+    assert isinstance(client, OpenAICompatibleClient)
+    assert factory("testprov") is client
+    assert factory("other") is not client
+    with pytest.raises(ProviderError, match="inconnu"):
+        factory("missing")
+    await factory.aclose()

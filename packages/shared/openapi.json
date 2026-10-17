@@ -1,6 +1,92 @@
 {
   "components": {
     "schemas": {
+      "AnalysisReasonOut": {
+        "properties": {
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "danger"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "text": {
+            "$ref": "#/components/schemas/LocalizedTextOut"
+          }
+        },
+        "required": [
+          "severity",
+          "text"
+        ],
+        "title": "AnalysisReasonOut",
+        "type": "object"
+      },
+      "AnalysisResultOut": {
+        "properties": {
+          "advice": {
+            "$ref": "#/components/schemas/LocalizedTextOut"
+          },
+          "analysisId": {
+            "title": "Analysisid",
+            "type": "integer"
+          },
+          "analyzedAt": {
+            "format": "date-time",
+            "title": "Analyzedat",
+            "type": "string"
+          },
+          "fromCache": {
+            "title": "Fromcache",
+            "type": "boolean"
+          },
+          "level": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "partial": {
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisReasonOut"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "remaining": {
+            "$ref": "#/components/schemas/RemainingOut"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/LocalizedTextOut"
+          }
+        },
+        "required": [
+          "analysisId",
+          "score",
+          "level",
+          "partial",
+          "fromCache",
+          "summary",
+          "advice",
+          "reasons",
+          "analyzedAt",
+          "remaining"
+        ],
+        "title": "AnalysisResultOut",
+        "type": "object"
+      },
       "BootstrapOut": {
         "properties": {
           "created": {
@@ -25,6 +111,184 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ListingIn": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "condition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Condition"
+          },
+          "description": {
+            "maxLength": 5000,
+            "title": "Description",
+            "type": "string"
+          },
+          "externalId": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Externalid",
+            "type": "string"
+          },
+          "images": {
+            "items": {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Images",
+            "type": "array"
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationIn"
+          },
+          "postedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postedat"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "priceType": {
+            "enum": [
+              "fixed",
+              "bidding",
+              "free",
+              "unknown"
+            ],
+            "title": "Pricetype",
+            "type": "string"
+          },
+          "seller": {
+            "$ref": "#/components/schemas/SellerFactsIn"
+          },
+          "site": {
+            "enum": [
+              "2ememain.be",
+              "2dehands.be",
+              "facebook.com"
+            ],
+            "title": "Site",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "site",
+          "externalId",
+          "url",
+          "title",
+          "description",
+          "priceType",
+          "location",
+          "seller"
+        ],
+        "title": "ListingIn",
+        "type": "object"
+      },
+      "LocalizedTextOut": {
+        "properties": {
+          "fr": {
+            "title": "Fr",
+            "type": "string"
+          },
+          "nl": {
+            "title": "Nl",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fr",
+          "nl"
+        ],
+        "title": "LocalizedTextOut",
+        "type": "object"
+      },
+      "LocationIn": {
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          }
+        },
+        "title": "LocationIn",
         "type": "object"
       },
       "MeOut": {
@@ -111,6 +375,48 @@
         "title": "MeOut",
         "type": "object"
       },
+      "MonthRangeIn": {
+        "additionalProperties": false,
+        "properties": {
+          "max": {
+            "minimum": 0.0,
+            "title": "Max",
+            "type": "integer"
+          },
+          "min": {
+            "minimum": 0.0,
+            "title": "Min",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "min",
+          "max"
+        ],
+        "title": "MonthRangeIn",
+        "type": "object"
+      },
+      "PriceIn": {
+        "additionalProperties": false,
+        "properties": {
+          "amountCents": {
+            "minimum": 0.0,
+            "title": "Amountcents",
+            "type": "integer"
+          },
+          "currency": {
+            "const": "EUR",
+            "title": "Currency",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amountCents",
+          "currency"
+        ],
+        "title": "PriceIn",
+        "type": "object"
+      },
       "QuotaOut": {
         "properties": {
           "limit": {
@@ -144,6 +450,365 @@
           "remaining"
         ],
         "title": "QuotaOut",
+        "type": "object"
+      },
+      "RemainingOut": {
+        "description": "Scans restants apr\u00e8s celui-ci ; `None` : illimit\u00e9 (admin) ou sans plafond.",
+        "properties": {
+          "image": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "text",
+          "image",
+          "total"
+        ],
+        "title": "RemainingOut",
+        "type": "object"
+      },
+      "RulesIn": {
+        "additionalProperties": false,
+        "properties": {
+          "signals": {
+            "items": {
+              "$ref": "#/components/schemas/SignalIn"
+            },
+            "maxItems": 20,
+            "title": "Signals",
+            "type": "array"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "signals"
+        ],
+        "title": "RulesIn",
+        "type": "object"
+      },
+      "ScanHistoryItemOut": {
+        "description": "Un scan de l'historique. `site` et `title` viennent du snapshot de l'analyse servie :\n`None` pour un scan sans r\u00e9sultat (\u00e9chec ou en cours), qui n'est reli\u00e9 \u00e0 aucun snapshot.\n`score` et `level` sont `None` dans le m\u00eame cas.",
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "boolean"
+          },
+          "fromCache": {
+            "title": "Fromcache",
+            "type": "boolean"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "scanEventId": {
+            "title": "Scaneventid",
+            "type": "integer"
+          },
+          "scanKind": {
+            "enum": [
+              "text",
+              "image"
+            ],
+            "title": "Scankind",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "site": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "trigger": {
+            "enum": [
+              "button",
+              "card"
+            ],
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scanEventId",
+          "createdAt",
+          "scanKind",
+          "trigger",
+          "site",
+          "title",
+          "score",
+          "level",
+          "fromCache",
+          "failed"
+        ],
+        "title": "ScanHistoryItemOut",
+        "type": "object"
+      },
+      "ScanHistoryOut": {
+        "description": "Page de l'historique, du plus r\u00e9cent au plus ancien ; `next_before` est \u00e0 passer en\n`before` pour la page suivante (`None` : plus rien).",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScanHistoryItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextBefore": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextbefore"
+          }
+        },
+        "required": [
+          "items",
+          "nextBefore"
+        ],
+        "title": "ScanHistoryOut",
+        "type": "object"
+      },
+      "ScanIn": {
+        "additionalProperties": false,
+        "properties": {
+          "listing": {
+            "$ref": "#/components/schemas/ListingIn"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "rules": {
+            "$ref": "#/components/schemas/RulesIn"
+          },
+          "scanKind": {
+            "enum": [
+              "text",
+              "image"
+            ],
+            "title": "Scankind",
+            "type": "string"
+          },
+          "trigger": {
+            "enum": [
+              "button",
+              "card"
+            ],
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "listing",
+          "rules",
+          "scanKind",
+          "trigger"
+        ],
+        "title": "ScanIn",
+        "type": "object"
+      },
+      "SellerFactsIn": {
+        "additionalProperties": false,
+        "description": "Faits sur le vendeur, jamais son identit\u00e9 : `id`, `name` et `profileUrl` sont refus\u00e9s.",
+        "properties": {
+          "accountAgeMonths": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MonthRangeIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "otherListingsCount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Otherlistingscount"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "reviewCount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewcount"
+          },
+          "verified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified"
+          }
+        },
+        "title": "SellerFactsIn",
+        "type": "object"
+      },
+      "SignalIn": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "danger"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "weight": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Weight",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "weight",
+          "severity"
+        ],
+        "title": "SignalIn",
         "type": "object"
       },
       "ValidationError": {
@@ -288,6 +953,103 @@
           }
         },
         "summary": "Me"
+      }
+    },
+    "/api/scans": {
+      "post": {
+        "operationId": "create_scan_api_scans_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisResultOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Scan"
+      }
+    },
+    "/api/scans/history": {
+      "get": {
+        "operationId": "history_api_scans_history_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanHistoryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "History"
       }
     }
   }
