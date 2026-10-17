@@ -3,9 +3,13 @@
 Chaque URL (et chaque cible de redirection) est vérifiée avant toute requête : schéma `http` ou
 `https`, ni identifiants ni port autre que 80 ou 443, hôte égal à un suffixe autorisé ou se
 terminant par « . » + ce suffixe, et **toutes** les adresses résolues publiques. Les redirections
-sont suivies à la main, deux au plus. Le corps est lu en flux et coupé au-delà de 5 Mo, avec un
-délai global de 5 s par image, résolution et redirections comprises. L'image est ensuite
-vérifiée et réencodée par Pillow en JPEG de 768 px au plus.
+sont suivies à la main, deux au plus. Une réponse compressée est refusée : le corps est lu brut,
+en flux, sans aucun décodage de notre côté, et coupé au-delà de 5 Mo, avec un délai global de
+5 s par image, résolution et redirections comprises. L'image, refusée dès son en-tête au-delà
+de MAX_PIXELS, est ensuite vérifiée et réencodée par Pillow en JPEG de 768 px au plus.
+
+Les adresses IPv6 qui embarquent une IPv4 (NAT64 `64:ff9b::/96`, 6to4, Teredo) sont refusées
+par `is_reserved` ou `is_global`, quelle que soit l'IPv4 embarquée : le contrôle échoue fermé.
 
 Aucune information ne sort d'ici : le message d'une `ImageFetchError` n'est que sa raison, sans
 URL, ni octets, ni adresse, et aucune exception d'origine ne lui est chaînée.
@@ -31,6 +35,7 @@ MAX_SIDE = 768
 JPEG_QUALITY = 80
 TIMEOUT_S = 5
 MAX_BYTES = 5 * 1024 * 1024
+MAX_PIXELS = 24_000_000  # bien sous la limite de Pillow (≈ 89,5 Mpx), mémoire décodée bornée
 MAX_REDIRECTS = 2
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 ALLOWED_SCHEMES = frozenset({"http", "https"})
@@ -83,6 +88,7 @@ def _is_public(address: str) -> bool:
         or ip.is_reserved
         or ip.is_multicast
         or ip.is_unspecified
+        or (isinstance(ip, ipaddress.IPv6Address) and ip.is_site_local)
     )
 
 
@@ -90,10 +96,15 @@ def _normalize(host: str) -> str:
     return host.lower().removesuffix(".")
 
 
+def _normalize_suffix(suffix: str) -> str:
+    # « .fbcdn.net » se comporte comme « fbcdn.net ».
+    return _normalize(suffix).lstrip(".")
+
+
 def _host_allowed(host: str, suffixes: list[str]) -> bool:
     return any(
         host == suffix or host.endswith("." + suffix)
-        for suffix in map(_normalize, suffixes)
+        for suffix in map(_normalize_suffix, suffixes)
         if suffix
     )
 
@@ -135,11 +146,17 @@ async def _checked(raw: str, suffixes: list[str], resolve: Resolver) -> httpx.UR
 
 
 async def _read_body(response: httpx.Response) -> bytes:
+    # `Accept-Encoding: identity` n'est qu'une demande. Un corps compressé serait décodé par
+    # httpx sans borne (gzip jusqu'à ~1000:1, brotli ou zstd au-delà) : il est refusé avant
+    # toute lecture, et le corps est lu brut (`aiter_raw`), sans décodage.
+    encoding = response.headers.get("content-encoding", "").strip().lower()
+    if encoding not in ("", "identity"):
+        raise ImageFetchError("too_large")
     declared = response.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > MAX_BYTES:
         raise ImageFetchError("too_large")
     body = bytearray()
-    async for chunk in response.aiter_bytes():
+    async for chunk in response.aiter_raw():
         body += chunk
         if len(body) > MAX_BYTES:
             raise ImageFetchError("too_large")
@@ -154,8 +171,9 @@ async def _follow(
         async with http.stream(
             "GET",
             url,
-            # Sans compression, la taille comptée est celle reçue (pas de bombe gzip).
+            # Demande seulement : une réponse compressée reste refusée par `_read_body`.
             headers={"Accept-Encoding": "identity"},
+            auth=None,  # jamais l'authentification du client
             follow_redirects=False,
         ) as response:
             if response.status_code in REDIRECT_STATUSES:
@@ -194,6 +212,9 @@ def _to_jpeg(data: bytes) -> bytes | None:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(data), formats=ALLOWED_FORMATS) as probe:
+                # `open` n'a lu que l'en-tête : refus avant `verify` et tout décodage.
+                if probe.width * probe.height > MAX_PIXELS:
+                    return None
                 probe.verify()
             with Image.open(io.BytesIO(data), formats=ALLOWED_FORMATS) as image:
                 # Décodage JPEG réduit d'emblée (sans effet sur les autres formats).
@@ -217,7 +238,10 @@ async def fetch_images(
 ) -> list[str]:
     """Les `limit` premières images, en JPEG encodé en base64, dans l'ordre des URL. Les
     téléchargements se font l'un après l'autre ; une seule image en échec fait échouer tout
-    l'appel."""
+    l'appel.
+
+    `http` doit être un client dédié à ce téléchargement : `trust_env=False` (aucun proxy, qui
+    résoudrait l'hôte à notre place), sans en-têtes, cookies ni authentification partagés."""
     encoded: list[str] = []
     for raw in urls[:limit]:
         jpeg = _to_jpeg(await _download(raw, allowed_suffixes, http, resolve))
