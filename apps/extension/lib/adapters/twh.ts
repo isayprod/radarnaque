@@ -21,9 +21,10 @@ const PRICE_TYPES: Record<string, Listing["priceType"]> = {
 
 const CONDITION_LABEL_RE = /^(État|Conditie|Staat)$/i;
 const VERIFICATION_TITLE_RE = /^(Vérification|Verificatie|Verification)/i;
-const NOT_VERIFIED_RE =
-	/rien n['’]a été vérifié|er is niets van de verkoper gecontroleerd/i;
-const VERIFIED_RE = /vérifié|gecontroleerd|geverifieerd|verified/i;
+// Toute négation l'emporte : « Rien n'a été vérifié », « non vérifié », « niet gecontroleerd ».
+const NEGATION_RE = /\b(rien|pas|non|niet|niets|geen)\b/i;
+const VERIFIED_RE = /a été vérifiée?|is (gecontroleerd|geverifieerd)/i;
+const REVIEWS_HREF_RE = /\/experiences\/user-reviews\/([^/?#]+)/;
 const OTHER_LISTINGS_RE = /(\d+)\s*(annonces?|advertenties?)/i;
 const RATING_RE = /(\d+(?:[.,]\d+)?)/;
 
@@ -69,7 +70,8 @@ function readConfigListing(doc: Document): TwhConfigListing | null {
 		const text = script.textContent ?? "";
 		if (!CONFIG_PREFIX_RE.test(text)) continue;
 		try {
-			const json = text.slice(text.indexOf("=") + 1, text.lastIndexOf(";"));
+			const body = text.slice(text.indexOf("=") + 1).trimEnd();
+			const json = body.endsWith(";") ? body.slice(0, -1) : body;
 			const config = JSON.parse(json) as { listing?: TwhConfigListing };
 			return config?.listing && typeof config.listing === "object"
 				? config.listing
@@ -106,12 +108,16 @@ function absoluteImage(src: string): string | null {
 	return null;
 }
 
+/**
+ * Un tableau vide est une vraie réponse (zéro photo). null : pas de tableau, ou
+ * des entrées toutes illisibles.
+ */
 function imagesOf(list: unknown): string[] | null {
 	if (!Array.isArray(list)) return null;
 	const images = list
 		.map((src) => (typeof src === "string" ? absoluteImage(src) : null))
 		.filter((src): src is string => src !== null);
-	return images.length ? images : null;
+	return images.length || !list.length ? images : null;
 }
 
 function priceFromConfig(info: TwhConfigListing["priceInfo"]): {
@@ -184,8 +190,22 @@ function readCondition(doc: Document): string | undefined {
 	return undefined;
 }
 
-function readReviews(doc: Document): { count?: number; rating?: number } {
-	const link = doc.querySelector('a[href*="/experiences/user-reviews/"]');
+/**
+ * Avis du vendeur : seulement dans la sidebar ou `#vendeur` (l'en-tête du site
+ * porte les liens du visiteur), et pour l'id du vendeur quand il est connu.
+ */
+function readReviews(
+	doc: Document,
+	sellerId: string | undefined,
+): { count?: number; rating?: number } {
+	const link = ["#seller-sidebar-root", "#vendeur"]
+		.flatMap((scope) => [
+			...doc.querySelectorAll(`${scope} a[href*="/experiences/user-reviews/"]`),
+		])
+		.find((a) => {
+			const id = REVIEWS_HREF_RE.exec(a.getAttribute("href") ?? "")?.[1];
+			return sellerId === undefined || id === sellerId;
+		});
 	if (!link) return {};
 	const count = /\d+/.exec(normalizeText(link.textContent ?? ""))?.[0];
 	const ratingText = link.previousElementSibling?.textContent ?? "";
@@ -201,18 +221,36 @@ function readVerified(doc: Document): boolean | undefined {
 	for (const item of doc.querySelectorAll("#vendeur li")) {
 		const text = normalizeText(item.textContent ?? "");
 		if (!VERIFICATION_TITLE_RE.test(text)) continue;
-		if (NOT_VERIFIED_RE.test(text)) return false;
 		const body = text.replace(VERIFICATION_TITLE_RE, "");
+		if (NEGATION_RE.test(body)) return false;
 		if (VERIFIED_RE.test(body)) return true;
 		return undefined;
 	}
 	return undefined;
 }
 
+/** Compte dans l'en-tête du carrousel (bloc du premier titre), pas dans les cartes. */
 function readOtherListingsCount(doc: Document): number | undefined {
-	const el = doc.querySelector("#seller-other-items-root");
-	const m = OTHER_LISTINGS_RE.exec(normalizeText(el?.textContent ?? ""));
+	const heading = doc.querySelector(
+		"#seller-other-items-root :is(h1, h2, h3, h4, h5, h6)",
+	);
+	const header = heading?.parentElement;
+	const m = OTHER_LISTINGS_RE.exec(normalizeText(header?.textContent ?? ""));
 	return m?.[1] ? Number(m[1]) : undefined;
+}
+
+/** URL du profil, seulement si elle reste sur le site de l'annonce. */
+function sameOriginUrl(
+	path: string | undefined,
+	base: URL,
+): string | undefined {
+	if (!path) return undefined;
+	try {
+		const u = new URL(path, base.origin);
+		return u.origin === base.origin ? u.href : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 function siteOf(url: URL): Site | null {
@@ -237,13 +275,13 @@ function extract(doc: Document, url: URL, site: Site): ExtractResult | null {
 		str(rawConfig?.itemId)?.toLowerCase() === externalId ? rawConfig : null;
 	const rawProduct = readJsonLdProduct(doc);
 	const sku = str(rawProduct?.sku)?.toLowerCase();
-	const product = sku === undefined || sku === externalId ? rawProduct : null;
+	const product = sku === externalId ? rawProduct : null;
 
 	const h1 = sidebarTitle(doc) ?? doc.querySelector("h1");
 	const title =
 		str(config?.title) ??
-		str(product?.name) ??
-		str(normalizeText(h1?.textContent ?? ""));
+		str(normalizeText(h1?.textContent ?? "")) ??
+		str(product?.name);
 	if (!title) return null;
 
 	const missing: string[] = [];
@@ -261,9 +299,11 @@ function extract(doc: Document, url: URL, site: Site): ExtractResult | null {
 	const description = descriptionEl ? textWithBreaks(descriptionEl) : "";
 	if (!descriptionEl) missing.push("description");
 
-	const images =
-		imagesOf(config?.gallery?.imageUrls) ?? imagesOf(product?.image) ?? [];
-	if (!images.length) missing.push("images");
+	// Un `__CONFIG__` valide fait foi, même avec zéro photo : pas de repli.
+	const configImages = imagesOf(config?.gallery?.imageUrls);
+	const fallbackImages = configImages ? null : imagesOf(product?.image);
+	const images = configImages ?? fallbackImages ?? [];
+	if (!configImages && !fallbackImages?.length) missing.push("images");
 
 	const seller = config?.seller;
 	const location: Listing["location"] = {};
@@ -274,16 +314,16 @@ function extract(doc: Document, url: URL, site: Site): ExtractResult | null {
 	if (!city) missing.push("location.city");
 	if (!country) missing.push("location.country");
 
-	const reviews = readReviews(doc);
-	const sellerId = seller?.id;
-	const profilePath = str(seller?.sellerProfileUrl);
+	const rawSellerId = seller?.id;
+	const sellerId =
+		typeof rawSellerId === "number" || typeof rawSellerId === "string"
+			? str(String(rawSellerId))
+			: undefined;
+	const reviews = readReviews(doc, sellerId);
 	const sellerFields: Listing["seller"] = {
-		id:
-			typeof sellerId === "number" || typeof sellerId === "string"
-				? str(String(sellerId))
-				: undefined,
+		id: sellerId,
 		name: str(seller?.name),
-		profileUrl: profilePath ? new URL(profilePath, url.origin).href : undefined,
+		profileUrl: sameOriginUrl(str(seller?.sellerProfileUrl), url),
 		accountAgeMonths:
 			parseAccountAge(str(seller?.activeSinceDiff) ?? "") ?? undefined,
 		reviewCount: reviews.count,

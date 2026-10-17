@@ -331,3 +331,169 @@ describe("twhAdapter — site, page type, anchor", () => {
 		expect(twhAdapter.badgeAnchor(other.body)?.textContent).toBe("Un");
 	});
 });
+
+function decoyReviews(doc: Document, sellerId: string, count: number) {
+	const div = doc.createElement("div");
+	div.innerHTML = `<span>1.2 · </span><a href="https://www.2ememain.be/experiences/user-reviews/${sellerId}/"><span> ${count} avis</span></a>`;
+	return div;
+}
+
+describe("twhAdapter.extractListing — seller reviews scope", () => {
+	test("a visitor 'my reviews' link in the page header is ignored", () => {
+		const doc = fixed();
+		const header = doc.createElement("header");
+		header.append(decoyReviews(doc, "99999999", 7));
+		doc.body.prepend(header);
+		const { seller } = extract(doc, FIXED_URL).listing;
+		expect(seller.reviewCount).toBe(21);
+		expect(seller.rating).toBe(4.5);
+	});
+
+	test("a review link of another user inside the sidebar is ignored", () => {
+		const doc = fixed();
+		doc
+			.querySelector("#seller-sidebar-root")
+			?.prepend(decoyReviews(doc, "100000011", 7));
+		const { seller } = extract(doc, FIXED_URL).listing;
+		expect(seller.reviewCount).toBe(21);
+		expect(seller.rating).toBe(4.5);
+	});
+});
+
+describe("twhAdapter.extractListing — images authority", () => {
+	test("valid __CONFIG__ with an empty gallery → zero photos, known", () => {
+		const doc = fixed();
+		editListingConfig(doc, (listing) => {
+			listing.gallery = { imageUrls: [] };
+		});
+		const { listing, missing } = extract(doc, FIXED_URL);
+		expect(listing.images).toEqual([]);
+		expect(missing).not.toContain("images");
+	});
+});
+
+describe("twhAdapter.extractListing — verification wording", () => {
+	test.each([
+		["Le vendeur a été vérifié sur le numéro de téléphone.", true],
+		["De verkoper is gecontroleerd op telefoonnummer.", true],
+		["De verkoper is geverifieerd.", true],
+		["Vendeur non vérifié.", false],
+		["Le numéro n'a pas été vérifié.", false],
+		["Telefoonnummer niet gecontroleerd.", false],
+		["Geen gegevens gecontroleerd.", false],
+		["Profil vérifié bientôt", undefined],
+	])("%s → %s", (text, expected) => {
+		const doc = fixed();
+		verificationBody(doc).textContent = text;
+		expect(extract(doc, FIXED_URL).listing.seller.verified).toBe(expected);
+	});
+});
+
+describe("twhAdapter.extractListing — JSON-LD fallback", () => {
+	test("Product without sku is ignored when __CONFIG__ is absent", () => {
+		const doc = fixed();
+		configScript(doc).remove();
+		const ld = [
+			...doc.querySelectorAll('script[type="application/ld+json"]'),
+		].find((s) => s.textContent?.includes('"Product"'));
+		if (!ld) throw new Error("no Product JSON-LD");
+		const product = JSON.parse(ld.textContent ?? "");
+		delete product.sku;
+		ld.textContent = JSON.stringify(product);
+		const { listing, missing } = extract(doc, FIXED_URL);
+		expect(listing.images).toEqual([]);
+		expect(missing).toContain("images");
+	});
+
+	test("fallback title prefers the h1 over JSON-LD", () => {
+		const doc = fixed();
+		configScript(doc).remove();
+		const h1 = doc.querySelector("#seller-sidebar-root header h1");
+		if (!h1) throw new Error("no h1");
+		h1.textContent = "Titre du DOM";
+		expect(extract(doc, FIXED_URL).listing.title).toBe("Titre du DOM");
+	});
+});
+
+describe("twhAdapter.extractListing — other listings count", () => {
+	test("seller-written card titles are not counted", () => {
+		const doc = fixed();
+		const root = doc.querySelector("#seller-other-items-root");
+		if (!root) throw new Error("no other items root");
+		const card = doc.createElement("a");
+		card.innerHTML = "<p>Lot de 30 annonces de magazines</p>";
+		root.append(card);
+		expect(extract(doc, FIXED_URL).listing.seller.otherListingsCount).toBe(2);
+
+		for (const span of root.querySelectorAll("span")) span.remove();
+		expect(
+			extract(doc, FIXED_URL).listing.seller.otherListingsCount,
+		).toBeUndefined();
+	});
+});
+
+describe("twhAdapter.extractListing — seller profile URL", () => {
+	test.each([
+		"javascript:alert(1)",
+		"https://evil.example/u/x/1/",
+		"//evil.example/u/",
+	])("%s is rejected", (value) => {
+		const doc = fixed();
+		editListingConfig(doc, (listing) => {
+			(listing.seller as Record<string, unknown>).sellerProfileUrl = value;
+		});
+		const { listing, missing } = extract(doc, FIXED_URL);
+		expect(listing.seller.profileUrl).toBeUndefined();
+		expect(missing).toContain("seller.profileUrl");
+	});
+});
+
+describe("twhAdapter.extractListing — robustness and NL", () => {
+	test("malformed __CONFIG__ → DOM fallback without throwing", () => {
+		const doc = fixed();
+		configScript(doc).textContent = "window.__CONFIG__ = { not json };";
+		const { listing } = extract(doc, FIXED_URL);
+		expect(listing.title).toBe("Iphone 14 PRO 128GB");
+		expect(listing.price).toEqual({ amountCents: 39900, currency: "EUR" });
+		expect(listing.location).toEqual({});
+	});
+
+	test("__CONFIG__ without trailing ; is still read", () => {
+		const doc = fixed();
+		const script = configScript(doc);
+		script.textContent = (script.textContent ?? "").replace(/;\s*$/, "");
+		const { listing } = extract(doc, FIXED_URL);
+		expect(listing.location).toEqual({ city: "Namur", country: "BE" });
+		expect(listing.seller.name).toBe("TestVendeur");
+	});
+
+	test("NL labels on 2dehands.be", () => {
+		const doc = fixed();
+		const label = [...doc.querySelectorAll("div")].find(
+			(d) => d.textContent === "État",
+		);
+		if (!label) throw new Error("no condition label");
+		label.textContent = "Conditie";
+		const link = doc.querySelector(
+			'#seller-sidebar-root a[href*="/experiences/user-reviews/"]',
+		);
+		if (!link?.previousElementSibling) throw new Error("no review link");
+		link.textContent = " 21 reviews";
+		link.previousElementSibling.textContent = "4,9 · ";
+		const count = doc.querySelector("#seller-other-items-root span");
+		if (!count) throw new Error("no other items count");
+		count.textContent = "2 advertenties";
+		const url = new URL(
+			"https://www.2dehands.be/v/telefonie/apple-iphone/m1000000001-iphone-14-pro-128-gb",
+		);
+		const { listing } = extract(doc, url);
+		expect(listing.site).toBe("2dehands.be");
+		expect(listing.condition).toBe("Comme neuf");
+		expect(listing.seller).toMatchObject({
+			reviewCount: 21,
+			rating: 4.9,
+			otherListingsCount: 2,
+			profileUrl: "https://www.2dehands.be/u/testvendeur/10000001/",
+		});
+	});
+});
