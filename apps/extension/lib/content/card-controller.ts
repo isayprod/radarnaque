@@ -207,6 +207,9 @@ export function createCardController(deps: CardControllerDeps): {
 		stepUrl = url.href;
 		const adapter = adapterFor(url);
 		const site = adapter?.siteOf(url);
+		// R7 : fiche en modale sur la grille, qui reste visible à sa fermeture.
+		// Les icônes restent telles quelles : ni retrait, ni nouveau montage.
+		if (adapter?.isOverlayListing?.(doc, url)) return;
 		if (!adapter || !site || adapter.pageType(url, doc) !== "search") {
 			onSearch = false;
 			invalidateAccess();
