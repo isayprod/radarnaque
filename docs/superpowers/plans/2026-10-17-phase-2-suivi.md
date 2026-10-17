@@ -50,3 +50,11 @@ Remarques mineures relevées pendant les relectures de la phase 2. Elles ne bloq
 - **Adaptateur Facebook** : la fiche lue est liée à l'annonce de l'URL par `product_id`. `web.facebook.com` est accepté.
 - **Pastille** : les variables Tailwind ont une valeur par défaut dans le Shadow DOM, les espacements sont en px, Échap est intercepté, et un changement de langue est appliqué à la pastille déjà affichée.
 - **Stack de dev** : `pnpm dev` vérifie les ports et Docker, attend que Postgres soit prêt, puis que l'auth réponde avant de lancer l'API.
+
+## Passe de design (à faire à la fin, avant publication)
+
+- **Police** : la police à empattements apparaît dans le Shadow DOM, car la police de l'hôte n'est pas héritée. Fixer explicitement la famille de police sur la racine du composant.
+- **Placement** : revoir la pastille et le panneau (chevauchement du titre et du bloc vendeur sur 2ememain).
+- **Identité visuelle** : appliquer l'identité Radarnaque (logo, couleurs du logo) sur la pastille, le panneau et la popup.
+- **Cohérence** : harmoniser la popup et la pastille.
+- **Maquettes** : en proposer avant toute implémentation.
