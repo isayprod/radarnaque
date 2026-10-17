@@ -6,10 +6,9 @@ import type { Site } from "../listing/types";
 import type { ContentAccess } from "../messages";
 import type { AiClient, ScanState } from "./ai-client";
 import { defaultFetchPage, scanCard } from "./card-scan";
-import { BADGE_HOST_TAG } from "./controller";
+import { BADGE_HOST_TAG, CARD_HOST_TAG } from "./controller";
 
-/** Balise de l'hôte du shadow root d'une icône de carte (nom passé à `createShadowRootUi`). */
-export const CARD_HOST_TAG = "radarnaque-card";
+export { CARD_HOST_TAG };
 
 /** Attribut posé sur la carte : son icône y est déjà montée. */
 const MARK_ATTR = "data-radarnaque-card";
@@ -19,6 +18,12 @@ const THROTTLE_MS = 250;
 
 /** Erreurs de session : l'accès est relu (il peut être devenu `signedOut`). */
 const RELOGIN_CODES = new Set(["session_expired", "unauthenticated"]);
+
+/** Hôte retiré par le site, même carte et même ancre : remontages par annonce et par URL. */
+const MAX_REMOUNTS = 3;
+
+/** Accès `noSubscription` ou en erreur : relu au plus une fois toutes les 30 s (R5). */
+const RECHECK_MS = 30_000;
 
 const IDLE: ScanState = { status: "idle" };
 
@@ -118,6 +123,11 @@ export function createCardController(deps: CardControllerDeps): {
 	let access: { href: string; value: ContentAccess | null } | null = null;
 	/** Incrémenté à chaque invalidation : une lecture plus ancienne est ignorée. */
 	let accessGen = 0;
+	/** Début de la dernière lecture de l'accès (`Date.now()`). */
+	let accessReadAt = 0;
+	/** Remontages après un hôte retiré, par annonce, pour l'URL `remountsUrl`. */
+	const remounts = new Map<string, number>();
+	let remountsUrl = "";
 	let onSearch = false;
 	let locale: Locale = "fr";
 	let disposed = false;
@@ -204,9 +214,14 @@ export function createCardController(deps: CardControllerDeps): {
 			return;
 		}
 		onSearch = true;
+		if (remountsUrl !== url.href) {
+			remountsUrl = url.href;
+			remounts.clear();
+		}
 
 		if (access?.href !== url.href) {
 			const gen = accessGen;
+			accessReadAt = Date.now();
 			const value = await readAccess();
 			// Page changée ou accès invalidé pendant la lecture : un autre passage suit.
 			if (disposed || gen !== accessGen || deps.getUrl().href !== url.href)
@@ -233,15 +248,22 @@ export function createCardController(deps: CardControllerDeps): {
 			seen.add(id);
 			const anchor = mountPointOf(adapter, card.element);
 			const entry = tracked.get(id);
-			if (
-				entry &&
-				entry.card.element === card.element &&
-				entry.anchor === anchor &&
-				entry.mount.isMounted()
-			) {
+			const samePlace =
+				entry?.card.element === card.element && entry.anchor === anchor;
+			if (entry && samePlace && entry.mount.isMounted()) {
 				entry.card = card;
 				if (localeChanged) entry.mount.update(viewOf(id));
 				continue;
+			}
+			if (entry && samePlace) {
+				// Le site retire notre hôte à chaque rendu : on cesse après 3 essais.
+				// Un changement de carte ou d'ancre (R4) n'est pas limité.
+				const count = remounts.get(id) ?? 0;
+				if (count >= MAX_REMOUNTS) {
+					entry.card = card;
+					continue;
+				}
+				remounts.set(id, count + 1);
 			}
 			// Hôte perdu, carte recréée ou ancre changée (autre mise en page) : remontage.
 			unmountCard(id);
@@ -275,7 +297,12 @@ export function createCardController(deps: CardControllerDeps): {
 	/** R5 : accès inactif sur une page de résultats, relu au retour sur l'onglet. */
 	function recheckInactiveAccess() {
 		if (disposed || !onSearch || !access) return;
-		if (access.value?.status === "active") return;
+		const status = access.value?.status;
+		if (status === "active") return;
+		// signedOut : réponse locale du service worker, relue sans délai. Sinon
+		// (`noSubscription`, erreur), chaque relecture coûte un appel à l'API.
+		if (status !== "signedOut" && Date.now() - accessReadAt < RECHECK_MS)
+			return;
 		invalidateAccess();
 		void refresh();
 	}

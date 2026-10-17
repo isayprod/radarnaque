@@ -6,6 +6,9 @@ import { evaluate, type RiskReport, type UnknownField } from "../rules/score";
 /** Balise de l'hôte du shadow root de la pastille (nom passé à `createShadowRootUi`). */
 export const BADGE_HOST_TAG = "radarnaque-badge";
 
+/** Balise de l'hôte d'une icône de carte (card-controller.ts), ignorée ici aussi. */
+export const CARD_HOST_TAG = "radarnaque-card";
+
 /** Attribut posé sur l'ancre : la pastille de cette annonce y est déjà montée. */
 const MARK_ATTR = "data-radarnaque";
 
@@ -57,12 +60,14 @@ const mountedKey = ({ report, listing }: BadgeView, locale: Locale) =>
 		locale,
 	]);
 
+const OWN_TAGS: ReadonlySet<string> = new Set([BADGE_HOST_TAG, CARD_HOST_TAG]);
+
 const isOwnUi = (node: Node) =>
 	node.nodeType === Node.ELEMENT_NODE &&
-	(node as Element).localName === BADGE_HOST_TAG;
+	OWN_TAGS.has((node as Element).localName);
 
 /**
- * Mutation due uniquement à l'insertion de notre hôte. Un retrait reste
+ * Mutation due uniquement à l'insertion de nos hôtes (pastille, icônes de cartes). Un retrait reste
  * observé : s'il vient du site, la pastille doit être remontée.
  */
 function isOwnInsertion(record: MutationRecord): boolean {

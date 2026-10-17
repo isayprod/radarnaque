@@ -369,6 +369,28 @@ describe("createCardController — remontage (R4)", () => {
 		expect(t.mountCard).toHaveBeenCalledTimes(7);
 	});
 
+	test("M1 : hôte retiré à chaque passage, au plus 3 remontages", async () => {
+		vi.useFakeTimers();
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH);
+		await t.controller.refresh();
+		const id = FB_IDS[0] as string;
+		const mountsOf = () => t.mounts.filter((m) => m.card.externalId === id);
+
+		for (let i = 0; i < 6; i++) {
+			for (const m of mountsOf()) m.host.remove();
+			await vi.advanceTimersByTimeAsync(250);
+		}
+		expect(mountsOf()).toHaveLength(4);
+		// Les autres cartes ne sont pas touchées.
+		expect(t.mountCard).toHaveBeenCalledTimes(6 + 3);
+
+		// Nouvelle URL : nouveau budget.
+		t.navigate("https://www.facebook.com/marketplace/brussels/search/?query=x");
+		await t.controller.refresh();
+		expect(mountsOf()).toHaveLength(5);
+	});
+
 	test("ancre changée (autre variante de mise en page) : remontée à la nouvelle ancre, état conservé", async () => {
 		const doc = loadFixture("twh/search.html");
 		const t = setup(doc, TWH_SEARCH);
@@ -509,7 +531,7 @@ describe("createCardController — accès inactif relu (R5)", () => {
 
 	test("visibilitychange vers visible : accès relu ; masqué : non", async () => {
 		const doc = loadFixture("facebook/grid.html");
-		const t = setup(doc, FB_SEARCH, [{ status: "noSubscription" }, withCards]);
+		const t = setup(doc, FB_SEARCH, [signedOut, withCards]);
 		await t.controller.refresh();
 		let state: DocumentVisibilityState = "hidden";
 		Object.defineProperty(doc, "visibilityState", {
@@ -524,6 +546,45 @@ describe("createCardController — accès inactif relu (R5)", () => {
 		doc.dispatchEvent(new Event("visibilitychange"));
 		await vi.waitFor(() => expect(t.live()).toHaveLength(6));
 		expect(t.ai.access).toHaveBeenCalledTimes(2);
+	});
+
+	test.each([
+		["noSubscription", { ok: true, data: { status: "noSubscription" } }],
+		["en erreur", { ok: false, error: { code: "background_unavailable" } }],
+	] as const)(
+		"M2 : accès %s, au plus une relecture toutes les 30 s",
+		async (_, first) => {
+			vi.useFakeTimers();
+			const doc = loadFixture("facebook/grid.html");
+			const t = setup(doc, FB_SEARCH);
+			t.ai.access.mockResolvedValueOnce(first as BgResponse<ContentAccess>);
+			await t.controller.refresh();
+			expect(t.live()).toHaveLength(0);
+
+			// Trop tôt : pas de relecture.
+			await vi.advanceTimersByTimeAsync(29_000);
+			window.dispatchEvent(new Event("focus"));
+			await t.controller.refresh();
+			expect(t.ai.access).toHaveBeenCalledTimes(1);
+
+			await vi.advanceTimersByTimeAsync(1_000);
+			window.dispatchEvent(new Event("focus"));
+			await t.controller.refresh();
+			expect(t.ai.access).toHaveBeenCalledTimes(2);
+			expect(t.live()).toHaveLength(6);
+		},
+	);
+
+	test("M2 : signedOut, relecture immédiate à chaque focus", async () => {
+		vi.useFakeTimers();
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH, [signedOut]);
+		await t.controller.refresh();
+		for (let i = 0; i < 3; i++) {
+			window.dispatchEvent(new Event("focus"));
+			await t.controller.refresh();
+		}
+		expect(t.ai.access).toHaveBeenCalledTimes(4);
 	});
 
 	test("accès actif : focus ne relit pas l'accès", async () => {

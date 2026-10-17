@@ -24,7 +24,16 @@ function renderInLink(
 	link.append(container);
 	document.body.append(link);
 	const reached = vi.fn();
-	for (const type of ["click", "pointerdown", "mousedown"]) {
+	for (const type of [
+		"click",
+		"auxclick",
+		"pointerdown",
+		"mousedown",
+		"pointerup",
+		"mouseup",
+		"touchend",
+		"dragstart",
+	]) {
 		link.addEventListener(type, reached);
 	}
 	const utils = render(
@@ -67,6 +76,32 @@ describe("CardBadge", () => {
 		button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
 		button.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
 		expect(reached).not.toHaveBeenCalled();
+	});
+
+	test("M6 : clic du milieu (auxclick) : defaultPrevented, ne remonte pas au lien", () => {
+		const { reached } = renderInLink({ status: "idle" });
+		const button = screen.getByRole("button");
+		const aux = new MouseEvent("auxclick", {
+			bubbles: true,
+			cancelable: true,
+			button: 1,
+		});
+		button.dispatchEvent(aux);
+		expect(aux.defaultPrevented).toBe(true);
+		expect(reached).not.toHaveBeenCalled();
+	});
+
+	test("M6 : pointerup, mouseup et touchend ne remontent pas ; pas de glisser", () => {
+		const { reached } = renderInLink({ status: "idle" });
+		const button = screen.getByRole("button");
+		button.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+		button.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+		button.dispatchEvent(new Event("touchend", { bubbles: true }));
+		expect(reached).not.toHaveBeenCalled();
+		expect(button.getAttribute("draggable")).toBe("false");
+		const drag = new Event("dragstart", { bubbles: true, cancelable: true });
+		button.dispatchEvent(drag);
+		expect(drag.defaultPrevented).toBe(true);
 	});
 
 	test("clic sur l'infobulle : ne navigue pas", () => {

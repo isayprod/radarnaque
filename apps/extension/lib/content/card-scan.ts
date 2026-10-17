@@ -39,14 +39,19 @@ const fail = (code: string): BgResponse<never> => ({
 
 /**
  * HTML de la fiche, avec les cookies du site (même origine que la page) ;
- * rejette sur une réponse non `ok` ou au-delà de 10 s.
+ * rejette sur une réponse non `ok`, une redirection vers une autre origine ou
+ * au-delà de 10 s.
  */
 export async function defaultFetchPage(url: string): Promise<string> {
 	const res = await fetch(url, {
 		credentials: "include",
+		redirect: "follow",
 		signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
 	});
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	// Redirection hors du site (connexion, page externe) : ce n'est pas la fiche.
+	if (new URL(res.url || url).origin !== new URL(url).origin)
+		throw new Error("redirection vers une autre origine");
 	return res.text();
 }
 

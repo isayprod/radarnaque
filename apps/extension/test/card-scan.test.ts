@@ -201,6 +201,28 @@ describe("defaultFetchPage", () => {
 		expect(init?.signal).toBeInstanceOf(AbortSignal);
 	});
 
+	test("M4 : suit les redirections, mais rejette une autre origine", async () => {
+		const redirected = (url: string) => {
+			const res = new Response("<p>ok</p>", { status: 200 });
+			Object.defineProperty(res, "url", { value: url });
+			return res;
+		};
+		const fetchMock = vi.fn<typeof fetch>(async () =>
+			redirected("https://www.2ememain.be/v/autre/m1000000001-x"),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		await expect(defaultFetchPage(FIXED_URL)).resolves.toBe("<p>ok</p>");
+		expect(fetchMock.mock.calls[0]?.[1]?.redirect).toBe("follow");
+
+		vi.stubGlobal(
+			"fetch",
+			vi.fn<typeof fetch>(async () =>
+				redirected("https://login.example/connexion"),
+			),
+		);
+		await expect(defaultFetchPage(FIXED_URL)).rejects.toThrow();
+	});
+
 	test("rejette si la réponse n'est pas ok", async () => {
 		vi.stubGlobal(
 			"fetch",
