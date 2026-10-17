@@ -8,6 +8,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from radarnaque_api.config import DEFAULT_PROVIDERS_FILE, normalize_database_url
@@ -35,26 +36,40 @@ def _fail(message: str) -> int:
     return EXIT_USAGE
 
 
+def _has_key(provider: ProviderConfig) -> bool:
+    try:
+        provider.api_key(os.environ)
+    except ProviderError:
+        return False
+    return True
+
+
 def _list(session: Session, providers: dict[str, ProviderConfig]) -> int:
     print("Fournisseurs :")
     for code, provider in providers.items():
-        has_key = provider.api_key_env is None or bool(os.environ.get(provider.api_key_env))
-        key = "oui" if has_key else "non"
+        key = "oui" if _has_key(provider) else "non"
         print(
             f"  {code:<12} sortie structurée : {provider.structured_output}, "
             f"coût : {provider.cost_source}, clé: {key}"
         )
-    active = dict(session.execute(select(ScanKind.active_model_id, ScanKind.code)).all())
     print("Modèles :")
     for model in session.scalars(select(Model).order_by(Model.provider, Model.slug)):
-        notes = [f"actif : {active[model.id]}"] if model.id in active else []
-        if model.provider not in providers:
-            notes.append("fournisseur inconnu")
-        print(f"  {model.provider}/{model.slug}" + (f"  ({', '.join(notes)})" if notes else ""))
+        unknown = "  (fournisseur inconnu)" if model.provider not in providers else ""
+        print(f"  {model.provider}/{model.slug}{unknown}")
+    print("Modèle actif par type :")
+    rows = session.execute(
+        select(ScanKind.code, Model.provider, Model.slug)
+        .outerjoin(Model, Model.id == ScanKind.active_model_id)
+        .order_by(ScanKind.code)
+    )
+    for kind, provider, slug in rows:
+        print(f"  {kind} -> " + (f"{provider}/{slug}" if provider else "(aucun)"))
     return EXIT_OK
 
 
 def _use(session: Session, providers: dict[str, ProviderConfig], args: argparse.Namespace) -> int:
+    if not args.slug.strip():
+        return _fail("slug de modèle vide")
     if args.provider not in providers:
         known = ", ".join(providers)
         return _fail(f"fournisseur inconnu : {args.provider} (connus : {known})")
@@ -96,5 +111,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.command == "list":
                 return _list(session, providers)
             return _use(session, providers, args)
+    except SQLAlchemyError as exc:
+        # Ni l'URL ni le détail de l'erreur : ils peuvent contenir l'hôte ou des identifiants.
+        return _fail(f"base de données inaccessible ou requête refusée ({type(exc).__name__})")
     finally:
         engine.dispose()

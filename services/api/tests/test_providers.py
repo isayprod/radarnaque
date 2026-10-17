@@ -87,6 +87,60 @@ def test_unknown_key_is_rejected(tmp_path):
     assert "sk-oops" not in str(exc.value)
 
 
+@pytest.mark.parametrize(
+    ("line", "key"),
+    [
+        ("base_url = true", "base_url"),
+        ("base_url = 12", "base_url"),
+        ("base_url = ''", "base_url"),
+        ("base_url = 'ftp://x/v1'", "base_url"),
+        ("base_url = 'localhost:11434/v1'", "base_url"),
+        ("api_key_env = true", "api_key_env"),
+        ("api_key_env = 3", "api_key_env"),
+        ("api_key_env = ''", "api_key_env"),
+        ("base_url_env = false", "base_url_env"),
+        ("extra_body = 'x'", "extra_body"),
+        ("extra_body = [1]", "extra_body"),
+    ],
+)
+def test_wrongly_typed_values_name_the_key(tmp_path, line, key):
+    content = (
+        VALID.replace('base_url = "http://x/v1"\n', "") if line.startswith("base_url =") else VALID
+    )
+    path = _write(tmp_path, content + line + "\n")
+    with pytest.raises(ProviderError, match=rf"providers\.p\.{key}"):
+        load_providers(path)
+
+
+def test_non_utf8_file(tmp_path):
+    path = tmp_path / "providers.toml"
+    path.write_bytes(b'[providers.p]\nbase_url = "http://x/\xff\xfe"\n')
+    with pytest.raises(ProviderError, match="illisible"):
+        load_providers(path)
+
+
+def test_extra_body_is_immutable_and_copied(tmp_path):
+    source = {"provider": {"order": ["a", "b"]}}
+    config = _config(extra_body=source)
+    source["provider"]["order"].append("c")  # la source ne doit pas affecter la config
+    assert config.extra_body["provider"]["order"] == ("a", "b")
+    with pytest.raises(TypeError):
+        config.extra_body["x"] = 1  # type: ignore[index]
+    with pytest.raises(TypeError):
+        config.extra_body["provider"]["order"] = []  # type: ignore[index]
+    hash(config)  # reste hachable
+
+
+def test_extra_body_dict_returns_a_fresh_deep_copy():
+    config = load_providers(REPO_PROVIDERS)["openrouter"]
+    first = config.extra_body_dict()
+    assert first["provider"] == {"data_collection": "deny"}
+    assert type(first["provider"]) is dict
+    first["provider"]["data_collection"] = "allow"
+    assert config.extra_body_dict()["provider"] == {"data_collection": "deny"}
+    assert config.extra_body["provider"]["data_collection"] == "deny"
+
+
 def test_malformed_toml(tmp_path):
     path = _write(tmp_path, "[providers.p\nbase_url = ")
     with pytest.raises(ProviderError, match="providers.toml"):
@@ -130,6 +184,17 @@ def test_api_key_missing_raises_without_leaking_values():
     with pytest.raises(ProviderError, match="P_KEY") as exc:
         _config().api_key({"P_KEY": ""})
     assert "sk-secret-value" not in str(exc.value)
+
+
+def test_api_key_env_empty_name_is_a_missing_key():
+    with pytest.raises(ProviderError, match="absente"):
+        _config(api_key_env="").api_key({"OTHER": "x"})
+
+
+def test_resolved_base_url_override_must_be_http():
+    with pytest.raises(ProviderError, match="P_URL") as exc:
+        _config().resolved_base_url({"P_URL": "file:///etc/passwd"})
+    assert "passwd" not in str(exc.value)
 
 
 def test_resolved_base_url_env_wins():

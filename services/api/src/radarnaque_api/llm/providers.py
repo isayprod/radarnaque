@@ -2,8 +2,10 @@
 
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Literal, get_args
 
 from sqlalchemy import select
@@ -28,20 +30,53 @@ class ProviderError(Exception):
     """Fichier de fournisseurs invalide, clé absente ou fournisseur inconnu."""
 
 
+def _freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({k: _freeze(v) for k, v in value.items()})
+    if isinstance(value, list | tuple):
+        return tuple(_freeze(v) for v in value)
+    return value
+
+
+def _thaw(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {k: _thaw(v) for k, v in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw(v) for v in value]
+    return value
+
+
+def _check_http_url(value: str, where: str) -> None:
+    if not value.startswith(("http://", "https://")):
+        raise ProviderError(f"{where} : URL http:// ou https:// attendue")
+
+
 @dataclass(frozen=True)
 class ProviderConfig:
+    """`extra_body` est stocké sous forme immuable (copie profonde, exclue du hachage) ;
+    `extra_body_dict()` en rend une copie modifiable pour le client."""
+
     code: str
     base_url: str
     api_key_env: str | None
     base_url_env: str | None
     structured_output: StructuredOutput
     cost_source: CostSource
-    extra_body: dict
+    extra_body: Mapping[str, Any] = field(hash=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "extra_body", _freeze(deepcopy(dict(self.extra_body))))
+
+    def extra_body_dict(self) -> dict[str, Any]:
+        """Copie profonde et modifiable de `extra_body`."""
+        return _thaw(self.extra_body)
 
     def resolved_base_url(self, env: Mapping[str, str]) -> str:
         """`base_url_env`, s'il est défini et non vide dans `env`, l'emporte sur `base_url`."""
         if self.base_url_env and env.get(self.base_url_env):
-            return env[self.base_url_env]
+            value = env[self.base_url_env]
+            _check_http_url(value, f"fournisseur {self.code} : variable {self.base_url_env}")
+            return value
         return self.base_url
 
     def api_key(self, env: Mapping[str, str]) -> str:
@@ -81,6 +116,7 @@ def _parse_provider(code: str, raw: object) -> ProviderConfig:
     base_url = _optional_str(code, raw, "base_url")
     if base_url is None:
         raise ProviderError(f"providers.{code}.base_url : obligatoire")
+    _check_http_url(base_url, f"providers.{code}.base_url")
     extra_body = raw.get("extra_body", {})
     if not isinstance(extra_body, dict):
         raise ProviderError(f"providers.{code}.extra_body : table attendue")
@@ -102,7 +138,7 @@ def load_providers(path: Path) -> dict[str, ProviderConfig]:
             data = tomllib.load(f)
     except FileNotFoundError:
         raise ProviderError(f"{path} : fichier de fournisseurs introuvable") from None
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise ProviderError(f"{path} : fichier de fournisseurs illisible ({exc})") from exc
     table = data.get("providers")
     if not isinstance(table, dict) or not table:

@@ -107,5 +107,58 @@ def test_list_shows_models_and_active_ones(cli_env, capsys):
     out = capsys.readouterr().out
     assert "google/gemini-2.5-flash-lite" in out
     assert "google/gemini-3.1-flash-lite" in out
-    assert "text" in out and "image" in out
-    assert "actif" in out
+    assert "  text -> openrouter/google/gemini-2.5-flash-lite" in out
+    assert "  image -> openrouter/google/gemini-3.1-flash-lite" in out
+
+
+def test_list_shows_every_kind_when_one_model_is_active_for_both(cli_env, capsys):
+    assert main(["use", "omniroute", "auto", "--kind", "text"]) == 0
+    assert main(["use", "omniroute", "auto", "--kind", "image"]) == 0
+    capsys.readouterr()
+    assert main(["list"]) == 0
+    out = capsys.readouterr().out
+    assert "  text -> omniroute/auto" in out
+    assert "  image -> omniroute/auto" in out
+
+
+def test_list_shows_kind_without_active_model(cli_env, pg_url, capsys):
+    raw = pg_url.replace("postgresql+psycopg://", "postgresql://", 1)
+    with psycopg.connect(raw, autocommit=True) as conn:
+        conn.execute("alter table app.scan_kinds alter column active_model_id drop not null")
+        conn.execute("update app.scan_kinds set active_model_id = null where code = 'image'")
+    try:
+        assert main(["list"]) == 0
+        out = capsys.readouterr().out
+    finally:
+        # cli_env restaure ensuite les modèles actifs ; la contrainte est remise après coup.
+        with psycopg.connect(raw, autocommit=True) as conn:
+            conn.execute(
+                "update app.scan_kinds set active_model_id = (select id from app.models"
+                " where provider = 'openrouter' and slug = 'google/gemini-3.1-flash-lite')"
+                " where code = 'image'"
+            )
+            conn.execute("alter table app.scan_kinds alter column active_model_id set not null")
+    assert "  image -> (aucun)" in out
+    assert "  text -> " in out
+
+
+def test_list_key_presence_for_empty_variable_is_no(cli_env, monkeypatch, capsys):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    assert main(["list"]) == 0
+    line = next(
+        ln for ln in capsys.readouterr().out.splitlines() if ln.strip().startswith("openrouter")
+    )
+    assert "clé: non" in line
+
+
+def test_use_empty_slug_exits_2(cli_env, capsys):
+    assert main(["use", "omniroute", "  ", "--kind", "text"]) == 2
+    assert "slug" in capsys.readouterr().err
+
+
+def test_database_unreachable_exits_2_without_leaking_url(cli_env, monkeypatch, capsys):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:hunter2@127.0.0.1:1/db?connect_timeout=2")
+    assert main(["list"]) == 2
+    err = capsys.readouterr().err
+    assert "hunter2" not in err and "127.0.0.1" not in err
+    assert "Traceback" not in err
