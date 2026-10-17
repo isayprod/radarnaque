@@ -497,3 +497,14 @@ describe("twhAdapter.extractListing — robustness and NL", () => {
 		});
 	});
 });
+
+describe("twhAdapter — cartes (avant la tâche 6)", () => {
+	test("findCards rend [] et cardAnchor rend null", () => {
+		const doc = fixed();
+		expect(
+			twhAdapter.findCards(doc, new URL("https://www.2ememain.be/q/iphone/")),
+		).toEqual([]);
+		expect(twhAdapter.cardAnchor(doc.body)).toBeNull();
+		expect(twhAdapter.listingFromCard).toBeUndefined();
+	});
+});
