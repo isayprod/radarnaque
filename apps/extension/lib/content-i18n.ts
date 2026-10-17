@@ -13,6 +13,8 @@ type TextKey =
 	| "panel.none"
 	| "panel.footer"
 	| "badge.aria"
+	| "card.aria"
+	| "card.loading"
 	| "severity.danger"
 	| "severity.warning"
 	| "severity.info"
@@ -66,6 +68,8 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"panel.footer":
 			"Analyse locale, sans IA. Pour une analyse IA, utilisez le bouton ci-dessus.",
 		"badge.aria": "Ouvrir l'analyse Radarnaque",
+		"card.aria": "Analyser cette annonce avec Radarnaque",
+		"card.loading": "Analyse…",
 		"severity.danger": "Grave",
 		"severity.warning": "Attention",
 		"severity.info": "Info",
@@ -124,6 +128,8 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"panel.footer":
 			"Lokale analyse, zonder AI. Gebruik de knop hierboven voor een AI-analyse.",
 		"badge.aria": "Radarnaque-analyse openen",
+		"card.aria": "Deze advertentie analyseren met Radarnaque",
+		"card.loading": "Analyseren…",
 		"severity.danger": "Ernstig",
 		"severity.warning": "Let op",
 		"severity.info": "Info",

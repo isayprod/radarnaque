@@ -4,12 +4,18 @@ import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { createShadowRootUi } from "wxt/utils/content-script-ui/shadow-root";
 import { defineContentScript } from "wxt/utils/define-content-script";
+import { CardBadge } from "../components/CardBadge";
 import { RiskBadge } from "../components/RiskBadge";
 import { type AiClient, createAiClient } from "../lib/content/ai-client";
 import {
 	type BadgeRenderer,
 	createBadgeMounter,
 } from "../lib/content/badge-mounter";
+import { createCardController } from "../lib/content/card-controller";
+import {
+	type CardRenderer,
+	createCardMounter,
+} from "../lib/content/card-mounter";
 import { createController } from "../lib/content/controller";
 import { resolveContentLocale } from "../lib/content-i18n";
 import type { Site } from "../lib/listing/types";
@@ -23,6 +29,15 @@ function createReactRenderer(
 	return {
 		render: ({ report, listing }, locale) =>
 			root.render(createElement(RiskBadge, { report, listing, locale, ai })),
+		unmount: () => root.unmount(),
+	};
+}
+
+/** Une racine React par icône de carte. */
+function createCardRenderer(container: HTMLElement): CardRenderer {
+	const root = createRoot(container);
+	return {
+		render: (view) => root.render(createElement(CardBadge, view)),
 		unmount: () => root.unmount(),
 	};
 }
@@ -55,17 +70,33 @@ export default defineContentScript({
 			}),
 			getLocale,
 		});
+		// Icônes des cartes de résultats, à côté de la pastille de fiche.
+		const cards = createCardController({
+			doc: document,
+			getUrl: () => new URL(location.href),
+			ai,
+			mountCard: createCardMounter({
+				createUi: (options) => createShadowRootUi(ctx, options),
+				createRenderer: createCardRenderer,
+			}),
+			getLocale,
+			win: window,
+		});
 		ctx.addEventListener(window, "wxt:locationchange", () => {
 			void controller.refresh();
+			void cards.refresh();
 		});
-		// Langue changée dans la popup : nouveau rendu de la pastille montée.
+		// Langue changée dans la popup : nouveau rendu de la pastille et des icônes.
 		const unwatchLocale = localePref.watch(() => {
 			void controller.refresh();
+			void cards.refresh();
 		});
 		ctx.onInvalidated(() => {
 			unwatchLocale();
 			controller.dispose();
+			cards.dispose();
 		});
 		void controller.refresh();
+		void cards.refresh();
 	},
 });
