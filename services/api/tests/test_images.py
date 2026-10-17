@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import gzip
 import io
 import socket
 import struct
@@ -11,6 +12,7 @@ import httpx
 import pytest
 import respx
 from PIL import Image
+from PIL.PngImagePlugin import PngImageFile
 
 from radarnaque_api import images
 from radarnaque_api.images import ImageFetchError, default_resolve, fetch_images
@@ -126,6 +128,22 @@ async def test_allowed_hosts_and_ports_are_fetched(mock, http, url):
     assert resolve.calls == [httpx.URL(url).host.removesuffix(".")]
 
 
+async def test_suffix_with_leading_dot_behaves_like_bare_suffix(mock, http):
+    url = "https://scontent.fbcdn.net/a.jpg"
+    mock.get(url).mock(return_value=httpx.Response(200, content=PNG))
+    mock.get("https://fbcdn.net/a.jpg").mock(return_value=httpx.Response(200, content=PNG))
+
+    result = await fetch_images(
+        [url, "https://fbcdn.net/a.jpg"], [".FBCDN.NET."], http=http, resolve=FakeResolver()
+    )
+    assert len(result) == 2
+    with pytest.raises(ImageFetchError) as caught:
+        await fetch_images(
+            ["https://evil-fbcdn.net/a.jpg"], [".fbcdn.net"], http=http, resolve=FakeResolver()
+        )
+    assert caught.value.reason == "host_not_allowed"
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -164,6 +182,9 @@ async def test_bad_scheme_userinfo_port_or_url_are_refused(mock, http, url):
         ["::1"],
         ["fe80::1"],
         ["fc00::1"],
+        ["fec0::1"],  # site-local (obsolète)
+        ["64:ff9b::7f00:1"],  # NAT64 vers 127.0.0.1 : refusé par `is_reserved`
+        ["2002:7f00:1::"],  # 6to4 vers 127.0.0.1
         ["224.0.0.1"],
         ["::ffff:127.0.0.1"],
         ["::ffff:10.0.0.1"],
@@ -301,12 +322,55 @@ async def test_request_asks_for_identity_encoding(mock, http):
     assert route.calls.last.request.headers["accept-encoding"] == "identity"
 
 
+async def test_client_authentication_is_never_sent(mock):
+    route = mock.get(URL).mock(return_value=httpx.Response(200, content=PNG))
+    async with httpx.AsyncClient(auth=("user", "secret")) as client:
+        await fetch_images([URL], SUFFIXES, http=client, resolve=FakeResolver())
+    assert "authorization" not in route.calls.last.request.headers
+
+
 # --- Taille ---------------------------------------------------------------------------------
 
 
-async def test_content_length_over_limit_is_too_large(mock, http):
-    mock.get(URL).mock(return_value=httpx.Response(200, content=b"\0" * (6 * 1024 * 1024)))
+def _counting_stream(chunks: list[bytes], read: list[int]) -> AsyncIterator[bytes]:
+    async def body() -> AsyncIterator[bytes]:
+        for chunk in chunks:
+            read.append(len(chunk))
+            yield chunk
+
+    return body()
+
+
+async def test_content_length_over_limit_is_too_large_before_reading(mock, http):
+    read: list[int] = []
+    size = 6 * 1024 * 1024
+    stream = _counting_stream([b"\0" * (1024 * 1024)] * 6, read)
+    mock.get(URL).mock(
+        return_value=httpx.Response(200, headers={"Content-Length": str(size)}, content=stream)
+    )
+
     assert await _reason([URL], http) == "too_large"
+    assert read == []
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "deflate", "br", "zstd", "gzip, identity", "x"])
+async def test_compressed_response_is_refused_before_reading(mock, http, encoding):
+    # 64 Mo de zéros compressés en quelques dizaines de Ko, derrière un petit Content-Length.
+    bomb = gzip.compress(b"\0" * (64 * 1024 * 1024))
+    read: list[int] = []
+    headers = {"Content-Encoding": encoding, "Content-Length": str(len(bomb))}
+    mock.get(URL).mock(
+        return_value=httpx.Response(200, headers=headers, content=_counting_stream([bomb], read))
+    )
+
+    assert await _reason([URL], http) == "too_large"
+    assert read == []
+
+
+async def test_identity_content_encoding_is_accepted(mock, http):
+    headers = {"Content-Encoding": "Identity"}
+    mock.get(URL).mock(return_value=httpx.Response(200, headers=headers, content=PNG))
+    assert len(await fetch_images([URL], SUFFIXES, http=http, resolve=FakeResolver())) == 1
 
 
 async def test_streamed_body_over_limit_is_cut_early(mock, http):
@@ -364,6 +428,24 @@ async def test_decompression_bomb_is_bad_image(mock, http, width, height):
     assert reason == "bad_image"
     assert emitted == []  # l'avertissement devient une erreur, il n'est jamais émis
     assert warnings.filters == filters_before
+
+
+async def test_image_over_pixel_limit_is_refused_from_its_header(mock, http, monkeypatch):
+    # 6000 × 5000 = 30 Mpx : sous la limite de Pillow, au-dessus de MAX_PIXELS. Le refus vient
+    # de l'en-tête seul : ni `verify` ni `load` ne sont appelés.
+    touched: list[str] = []
+    monkeypatch.setattr(PngImageFile, "verify", lambda self: touched.append("verify"))
+    monkeypatch.setattr(PngImageFile, "load", lambda self: touched.append("load"))
+    mock.get(URL).mock(return_value=httpx.Response(200, content=_png_header_only(6000, 5000)))
+
+    assert await _reason([URL], http) == "bad_image"
+    assert touched == []
+
+
+async def test_image_at_pixel_limit_is_accepted(mock, http, monkeypatch):
+    monkeypatch.setattr(images, "MAX_PIXELS", 2000 * 1000)
+    mock.get(URL).mock(return_value=httpx.Response(200, content=_image_bytes(2000, 1000)))
+    assert len(await fetch_images([URL], SUFFIXES, http=http, resolve=FakeResolver())) == 1
 
 
 async def test_png_is_resized_to_768_jpeg(mock, http):
