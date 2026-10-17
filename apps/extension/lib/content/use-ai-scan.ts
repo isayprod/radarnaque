@@ -1,5 +1,5 @@
 import type { Locale } from "@radarnaque/shared";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiSectionProps } from "../../components/AiSection";
 import { PUBLIC_URL } from "../config";
 import type { ScanKind, ScanRequest } from "../messages";
@@ -27,7 +27,10 @@ interface Slots {
 interface Scope {
 	key: string;
 	inflight: Set<ScanKind>;
-	accessRequested: boolean;
+	/** Une lecture de l'accès est en cours. */
+	reading: boolean;
+	/** Dernier accès lu pour cette annonce (`null` : jamais lu). */
+	access: AccessState | null;
 	/** Numéro de la dernière lecture de l'accès : seules ses réponses comptent. */
 	accessSeq: number;
 }
@@ -45,9 +48,16 @@ const freshSlots = (key: string): Slots => ({
 const freshScope = (key: string): Scope => ({
 	key,
 	inflight: new Set(),
-	accessRequested: false,
+	reading: false,
+	access: null,
 	accessSeq: 0,
 });
+
+const isActive = (access: AccessState | null) =>
+	access !== null &&
+	typeof access === "object" &&
+	"status" in access &&
+	access.status === "active";
 
 const keyOf = (view: BadgeView) =>
 	`${view.listing.site}|${view.listing.externalId}`;
@@ -58,7 +68,11 @@ export interface AiScan {
 	image: ScanState;
 	loginUnavailable: boolean;
 	pricingUrl: string;
-	/** Charge l'accès s'il ne l'a pas encore été pour cette annonce (ouverture du panneau). */
+	/**
+	 * Lit l'accès, sauf s'il est déjà `active` ou qu'une lecture est en cours.
+	 * Appelée à l'ouverture du panneau et au retour sur l'onglet : après une
+	 * connexion dans la popup, le panneau passe à `active` sans rechargement.
+	 */
 	loadAccess(): void;
 	scan(kind: ScanKind): void;
 	login(): void;
@@ -89,9 +103,19 @@ export function useAiScan(
 	const viewRef = useRef(view);
 	viewRef.current = view;
 
-	/** Applique `patch` si la portée est toujours celle de l'annonce affichée. */
+	// Faux après le démontage : plus aucun état ni aucune requête. Remis à vrai
+	// à chaque montage, y compris le second montage du StrictMode.
+	const mountedRef = useRef(false);
+	useEffect(() => {
+		mountedRef.current = true;
+		return () => {
+			mountedRef.current = false;
+		};
+	}, []);
+
+	/** Applique `patch` si le composant est monté et la portée toujours celle de l'annonce affichée. */
 	const patch = useCallback((scope: Scope, update: Partial<Slots>) => {
-		if (scopeRef.current !== scope) return;
+		if (!mountedRef.current || scopeRef.current !== scope) return;
 		setSlots((prev) =>
 			prev.key === scope.key ? { ...prev, ...update } : prev,
 		);
@@ -99,20 +123,20 @@ export function useAiScan(
 
 	const readAccess = useCallback(
 		(scope: Scope) => {
+			if (!mountedRef.current) return;
 			const seq = ++scope.accessSeq;
+			scope.reading = true;
+			// L'accès précédent reste affiché pendant la lecture : pas de « Chargement… ».
+			const settle = (access: AccessState) => {
+				if (scope.accessSeq !== seq) return;
+				scope.reading = false;
+				scope.access = access;
+				patch(scope, { access });
+			};
 			void client.access().then(
-				(response) => {
-					if (scope.accessSeq !== seq) return;
-					patch(scope, {
-						access: response.ok
-							? response.data
-							: { error: response.error.code },
-					});
-				},
-				() => {
-					if (scope.accessSeq !== seq) return;
-					patch(scope, { access: { error: "background_unavailable" } });
-				},
+				(response) =>
+					settle(response.ok ? response.data : { error: response.error.code }),
+				() => settle({ error: "background_unavailable" }),
 			);
 		},
 		[client, patch],
@@ -121,8 +145,7 @@ export function useAiScan(
 	// biome-ignore lint/correctness/useExhaustiveDependencies: `key` renouvelle la fonction à chaque annonce
 	const loadAccess = useCallback(() => {
 		const scope = scopeRef.current;
-		if (scope.accessRequested) return;
-		scope.accessRequested = true;
+		if (scope.reading || isActive(scope.access)) return;
 		readAccess(scope);
 	}, [readAccess, key]);
 
@@ -148,7 +171,7 @@ export function useAiScan(
 				patch(scope, { [kind]: state });
 				// Quota consommé, session expirée (R3 : l'accès relu dit alors signedOut) :
 				// l'accès est relu après chaque scan, réussi ou non.
-				if (scopeRef.current === scope) readAccess(scope);
+				if (mountedRef.current && scopeRef.current === scope) readAccess(scope);
 			};
 			void client.scan(request).then(
 				(response) =>
@@ -167,7 +190,7 @@ export function useAiScan(
 		const scope = scopeRef.current;
 		void client.openLogin().then(
 			(response) => {
-				if (!response.ok) patch(scope, { loginUnavailable: true });
+				patch(scope, { loginUnavailable: !response.ok });
 			},
 			() => patch(scope, { loginUnavailable: true }),
 		);

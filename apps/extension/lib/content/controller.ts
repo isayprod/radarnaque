@@ -43,17 +43,17 @@ export interface ControllerDeps {
 interface Mounted {
 	anchor: Element;
 	externalId: string;
-	/** Score, signaux, titre, description et locale : un changement entraîne `update`. */
+	/** Score, signaux, annonce extraite et locale : un changement entraîne `update`. */
 	key: string;
 }
 
-// JSON : aucun séparateur ne peut se confondre avec le contenu du titre ou de la description.
+// Toute l'annonce extraite entre dans la clé : des photos ou une description
+// chargées après coup doivent atteindre la pastille, et donc le scan IA.
 const mountedKey = ({ report, listing }: BadgeView, locale: Locale) =>
 	JSON.stringify([
 		report.score,
 		report.signals.map((s) => s.id),
-		listing.title,
-		listing.description,
+		listing,
 		locale,
 	]);
 
