@@ -153,6 +153,7 @@ def _scan(
     title: str = "Vélo de course",
     signals: list[dict] | None = None,
     images: list[str] | None = None,
+    listing: dict | None = None,
     **overrides,
 ) -> ScanIn:
     body = {
@@ -177,6 +178,7 @@ def _scan(
         "scanKind": "text",
         "trigger": "button",
     }
+    body["listing"].update(listing or {})
     body.update(overrides)
     return ScanIn.model_validate(body)
 
@@ -349,6 +351,34 @@ async def test_expired_cache_entry_is_refreshed_in_place(engine, http, clock, ll
     assert len(llm.calls) == 2 and third.from_cache is True and third.score == 62
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"category": "Fietsen"},
+        {"condition": "Gebruikt"},
+        {"postedAt": "2026-10-01"},
+        {"location": {"city": "Brugge"}},
+    ],
+)
+async def test_listing_facts_sent_to_the_llm_are_part_of_the_cache_key(
+    engine, http, clock, llm, change
+):
+    # Règle R12 : un champ envoyé au LLM hors du snapshot (ici, injecté dans la catégorie ou le
+    # lieu) donne une autre clé de cache, et ne peut pas empoisonner l'analyse des autres.
+    user = await _user(engine, plan="premium")
+    honest = await _scan_once(engine, user, _scan(), llm, http, clock)
+    clock.advance(seconds=1)
+    forged = await _scan_once(engine, user, _scan(listing=change), llm, http, clock)
+    clock.advance(seconds=1)
+    again = await _scan_once(engine, user, _scan(), llm, http, clock)
+
+    assert len(llm.calls) == 2
+    assert forged.analysis_id != honest.analysis_id and forged.from_cache is False
+    assert again.analysis_id == honest.analysis_id and again.from_cache is True
+    assert again.score == honest.score == 61 and again.summary == honest.summary
+    assert await _count(engine, ListingSnapshot) == 1
+
+
 async def test_partial_scan_is_cached_separately(engine, http, clock, llm):
     user = await _user(engine, plan="premium")
     await _scan_once(engine, user, _scan(), llm, http, clock)
@@ -500,6 +530,30 @@ async def test_unexpected_error_returns_the_scan_then_propagates(engine, http, c
     assert await _remaining_total(engine, user, clock()) == 3
 
 
+async def test_cancellation_during_the_analysis_returns_the_scan(engine, http, clock):
+    started = asyncio.Event()
+
+    class BlockingLLM(FakeLLM):
+        async def analyze(self, *, model: str, system_prompt: str, messages: list[dict]):
+            self.calls.append({"model": model})
+            started.set()
+            await asyncio.Event().wait()  # jamais libéré : seule l'annulation en sort
+
+    user = await _user(engine)
+    task = asyncio.create_task(_scan_once(engine, user, _scan(), BlockingLLM(), http, clock))
+    await asyncio.wait_for(started.wait(), 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert (await _scalar(engine, select(ScanFailure))).error_code == "internal"
+    assert await _remaining_total(engine, user, clock()) == 3
+    # Le verrou consultatif a été libéré : un nouveau scan de la même annonce aboutit.
+    clock.advance(seconds=1)
+    result = await asyncio.wait_for(_scan_once(engine, user, _scan(), FakeLLM(), http, clock), 10)
+    assert result.from_cache is False and result.remaining.total == 2
+
+
 # --- Photos ------------------------------------------------------------------------------------
 
 
@@ -635,3 +689,35 @@ async def test_rate_limit_applies_to_admins_too(engine, http, clock, llm):
     clock.advance(seconds=61)
     await _scan_once(engine, admin, _scan(), llm, http, clock)
     assert len(llm.calls) == 1
+
+
+async def test_rate_limit_applies_to_a_standard_user(engine, http, clock, llm):
+    user = await _user(engine, plan="standard")
+    for _ in range(30):
+        await _scan_once(engine, user, _scan(), llm, http, clock)
+
+    with pytest.raises(ScanError) as info:
+        await _scan_once(engine, user, _scan(), llm, http, clock)
+    assert (info.value.status, info.value.code) == (429, "rate_limited")
+    assert await _count(engine, ScanEvent, ScanEvent.user_id == user.id) == 30
+
+
+async def test_rate_limit_is_atomic_under_concurrency(engine, http, clock, llm):
+    # Un admin ne verrouille pas d'abonnement : seul le verrou de la limite sérialise ses scans.
+    admin = await _user(engine, role="admin", plan=None)
+    async with AsyncSession(engine) as session:
+        for _ in range(29):
+            session.add(
+                ScanEvent(user_id=admin.id, scan_kind="text", trigger="button", created_at=T0)
+            )
+        await session.commit()
+
+    results = await asyncio.gather(
+        *(_scan_once(engine, admin, _scan(), llm, http, clock) for _ in range(4)),
+        return_exceptions=True,
+    )
+
+    successes = [r for r in results if isinstance(r, AnalysisResultOut)]
+    limited = [r for r in results if isinstance(r, ScanError) and r.code == "rate_limited"]
+    assert (len(successes), len(limited)) == (1, 3), results
+    assert await _count(engine, ScanEvent, ScanEvent.user_id == admin.id) == 30

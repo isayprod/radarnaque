@@ -5,6 +5,7 @@ Déroulé, dans cet ordre : 1. limite de requêtes, 2. droits, 3. validation de 
 consultatif. Toute erreur après la réservation enregistre un `scan_failures`, qui rend le scan à
 l'utilisateur : ni un fournisseur en panne ni un bogue du serveur ne consomment son quota."""
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -166,10 +167,18 @@ async def _validated_site(session: AsyncSession, listing: ListingIn) -> tuple[in
     return site_id, suffixes
 
 
-async def _reserve(session: AsyncSession, user: AuthUser, scan: ScanIn, at: datetime) -> int:
-    """Étape 5 : l'abonnement actif est verrouillé (`FOR UPDATE`) le temps de compter et
-    d'insérer l'événement, ce qui sérialise les scans concurrents d'un même utilisateur. Un
-    admin passe sans verrou ni comptage, mais son événement est enregistré."""
+async def _reserve(
+    session: AsyncSession, user: AuthUser, scan: ScanIn, at: datetime, rate_limit: int
+) -> int:
+    """Étape 5, en une transaction. Un verrou consultatif propre à l'utilisateur couvre le
+    recomptage de la limite de requêtes et l'insertion de l'événement : des scans simultanés ne
+    la dépassent pas, admins compris. Puis l'abonnement actif est verrouillé (`FOR UPDATE`) le
+    temps de compter le quota. Un admin passe sans abonnement ni comptage du quota, mais son
+    événement est enregistré. Les deux verrous sont toujours pris dans cet ordre."""
+    await session.execute(
+        select(func.pg_advisory_xact_lock(func.hashtextextended(f"rate:{user.id}", 0)))
+    )
+    await _check_rate_limit(session, user.id, rate_limit, at)
     if user.role != "admin":
         sub = (
             await session.execute(
@@ -206,19 +215,23 @@ async def _admit(
 ) -> _Admission:
     """Étapes 1 à 5. Une `ScanError` levée ici ne laisse aucun événement."""
     settings = (await session.execute(select(AppSettings))).scalar_one()
-    await _check_rate_limit(session, user.id, settings.rate_limit_per_minute, now())
+    # Lus tout de suite : rien ne dépend de l'objet `settings` après les commits qui suivent.
+    rate_limit = settings.rate_limit_per_minute
+    cache_ttl = timedelta(hours=settings.cache_ttl_hours)
+    # Premier contrôle sans verrou, pour refuser tôt ; `_reserve` recompte sous verrou.
+    await _check_rate_limit(session, user.id, rate_limit, now())
     if user.role != "admin":
         await _check_rights(session, user.id, scan)
     site_id, suffixes = await _validated_site(session, scan.listing)
     snapshot_id = await upsert_snapshot(session, site_id, scan.listing, now())
     event_at = now()  # date de l'événement, et de l'analyse qu'il produira (règle R8)
-    event_id = await _reserve(session, user, scan, event_at)
+    event_id = await _reserve(session, user, scan, event_at, rate_limit)
     return _Admission(
         event_id=event_id,
         event_at=event_at,
         snapshot_id=snapshot_id,
         image_host_suffixes=suffixes,
-        cache_ttl=timedelta(hours=settings.cache_ttl_hours),
+        cache_ttl=cache_ttl,
     )
 
 
@@ -292,14 +305,21 @@ def _failure_code(exc: Exception) -> str:
     return INTERNAL_FAILURE
 
 
+async def _record_failure(
+    maker: async_sessionmaker[AsyncSession], event_id: int, code: str, at: datetime
+) -> None:
+    """Rend le scan, dans une nouvelle transaction."""
+    async with maker() as session, session.begin():
+        session.add(ScanFailure(scan_event_id=event_id, error_code=code, created_at=at))
+
+
 async def _give_back(
     maker: async_sessionmaker[AsyncSession], event_id: int, exc: Exception, at: datetime
 ) -> NoReturn:
-    """Rend le scan (nouvelle transaction), puis lève `502 analysis_failed`, ou relance une
-    erreur inattendue telle quelle (500) une fois le scan rendu (règle R10)."""
+    """Rend le scan, puis lève `502 analysis_failed`, ou relance une erreur inattendue telle
+    quelle (500) une fois le scan rendu (règle R10)."""
     code = _failure_code(exc)
-    async with maker() as session, session.begin():
-        session.add(ScanFailure(scan_event_id=event_id, error_code=code, created_at=at))
+    await _record_failure(maker, event_id, code, at)
     if code == INTERNAL_FAILURE:
         raise exc
     raise ScanError(
@@ -323,6 +343,11 @@ async def _remaining(session: AsyncSession, user: AuthUser, at: datetime) -> Rem
 async def _result(
     engine: AsyncEngine, user: AuthUser, event_id: int, at: datetime
 ) -> AnalysisResultOut:
+    """Réponse du scan `event_id`, déjà relié à son analyse.
+
+    Appelée après le commit du `scan_result` : si elle échoue (base indisponible…), l'erreur
+    remonte (500) mais le scan reste décompté et l'analyse conservée. C'est voulu : l'analyse a
+    bien été servie et figure dans l'historique, et la redemander la sert depuis le cache."""
     # Une seule image de la base pour toute la réponse : un rafraîchissement concurrent de
     # l'analyse (règle R4) ne mélange pas l'ancienne note et les nouveaux textes.
     snapshot_engine = engine.execution_options(isolation_level="REPEATABLE READ")
@@ -374,6 +399,12 @@ async def run_scan(
     failure: Exception | None = None
     try:
         await _serve(maker, admission, scan, llm_for=llm_for, http=http, resolve=resolve)
+    except asyncio.CancelledError:
+        # Annulation (client parti, arrêt du serveur) : une `BaseException`, que `except
+        # Exception` laisserait passer. Le scan est rendu sous `shield`, pour que l'écriture
+        # aboutisse même si l'annulation se répète, puis l'annulation continue.
+        await asyncio.shield(_record_failure(maker, admission.event_id, INTERNAL_FAILURE, now()))
+        raise
     except Exception as exc:  # toute erreur après la réservation rend le scan
         failure = exc
     if failure is not None:  # hors du `except` : aucun contexte chaîné à l'erreur rendue
