@@ -12,7 +12,12 @@ dependencies = [
     "pydantic-settings",
     "pyjwt[crypto]",
     "httpx",
+    "openai>=3.33",
+    "pillow>=13",
 ]
+
+[project.scripts]
+radarnaque-llm = "radarnaque_api.llm.cli:main"
 
 [dependency-groups]
 dev = [
@@ -20,6 +25,7 @@ dev = [
     "pytest-asyncio",
     "testcontainers[postgres]",
     "ruff",
+    "respx>=0.23",
 ]
 
 [build-system]

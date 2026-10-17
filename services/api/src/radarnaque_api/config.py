@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Literal, Self
 from urllib.parse import unquote, urlsplit
 
@@ -7,6 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 MIN_INTERNAL_SECRET_LENGTH = 32
 # Préfixe des valeurs d'exemple de infra/.env.example : publiques, donc refusées en production.
 _PLACEHOLDER_PREFIX = "change-me"
+# providers.toml se trouve à côté de pyproject.toml (et /app/providers.toml dans l'image).
+DEFAULT_PROVIDERS_FILE = Path(__file__).resolve().parents[2] / "providers.toml"
 _DRIVER = "postgresql+psycopg://"
 _ACCEPTED_PREFIXES = ("postgres://", "postgresql://", _DRIVER)
 
@@ -37,6 +40,7 @@ class Settings(BaseSettings):
     jwt_audience: str
     internal_api_secret: SecretStr
     env: Literal["development", "test", "production"] = "development"
+    providers_file: Path = DEFAULT_PROVIDERS_FILE
 
     @field_validator("internal_api_secret")
     @classmethod
