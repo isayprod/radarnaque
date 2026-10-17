@@ -1,6 +1,14 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Identity,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from radarnaque_api.models.base import Base
@@ -19,7 +27,13 @@ class ListingSnapshot(Base):
     """État d'une annonce à un instant donné ; la description est déjà masquée (contacts)."""
 
     __tablename__ = "listing_snapshots"
-    __table_args__ = (UniqueConstraint("listing_id", "content_hash"),)
+    __table_args__ = (
+        # Un prix n'a de sens qu'avec sa devise, et inversement.
+        CheckConstraint(
+            "(price_cents IS NULL) = (currency IS NULL)", name="ck_listing_snapshots_price_currency"
+        ),
+        UniqueConstraint("listing_id", "content_hash"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     listing_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("app.listings.id"))
