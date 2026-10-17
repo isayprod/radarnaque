@@ -6,7 +6,6 @@ Remarques mineures relevées pendant les relectures de la phase 2. Elles ne bloq
 
 - **Facebook, descriptions tronquées** : les longues descriptions coupées derrière « Voir plus » ne sont pas dépliées. Le texte caché peut contenir un contact ou un paiement hors plateforme. Il faut les déplier, ou lire les données Relay.
 - **Facebook, page chargée directement** : faire une capture de `/marketplace/item/<id>/` juste après un rechargement complet (F5) pour vérifier si les données Marketplace sont présentes dans le HTML. C'est nécessaire pour les icônes sur les cartes.
-- **Messagerie entre content script et service worker** : le filtre d'expéditeur refuse aujourd'hui tout message venant d'un content script. Il faudra une liste blanche dédiée pour le bouton d'analyse IA, sans jamais exposer `auth/*`.
 - **Poids du bundle** : le content script pèse environ 261 Ko avec React, et il est chargé sur toutes les pages facebook.com. Charger React seulement au premier montage réduirait ce coût.
 - **Charge de travail** : sur une fiche Facebook très animée, l'extraction peut tourner jusqu'à 4 fois par seconde. À surveiller.
 
@@ -50,6 +49,7 @@ Remarques mineures relevées pendant les relectures de la phase 2. Elles ne bloq
 - **Adaptateur Facebook** : la fiche lue est liée à l'annonce de l'URL par `product_id`. `web.facebook.com` est accepté.
 - **Pastille** : les variables Tailwind ont une valeur par défaut dans le Shadow DOM, les espacements sont en px, Échap est intercepté, et un changement de langue est appliqué à la pastille déjà affichée.
 - **Stack de dev** : `pnpm dev` vérifie les ports et Docker, attend que Postgres soit prêt, puis que l'auth réponde avant de lancer l'API.
+- **Messagerie content script / service worker** (phase 3b) : faite. Le filtre d'expéditeur accepte les content scripts pour une liste blanche, `CONTENT_SCRIPT_MESSAGES` (`content/access`, `scan/run`, `ui/open-popup`), jamais pour `auth/*`.
 
 ## Passe de design (à faire à la fin, avant publication)
 

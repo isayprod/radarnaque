@@ -278,6 +278,86 @@ cd services/api && uv run --env-file ../../infra/.env radarnaque-llm use ollama 
 
 Ollama n'a pas de clé ; le coût enregistré est nul.
 
+## Tester les analyses IA dans l'extension
+
+Le panneau de la pastille a une section « Analyse IA », et les pages de résultats ont une
+icône « R » sur chaque carte. Les deux passent par le service worker, qui appelle l'API :
+contrairement à la pastille (voir « 6. Tester sur les vrais sites »), la stack doit tourner.
+
+### Prérequis
+
+1. `pnpm dev` est lancé (stack et extension : voir « 2. Lancer la stack »).
+2. Le compte est connecté depuis la popup de l'extension (email, puis code à 6 chiffres, lu
+   dans les logs `[auth]` en dev). Un compte neuf a un essai de 3 scans au total.
+3. Un fournisseur LLM est actif pour les types `text` (et `image`, pour tester les photos) :
+   le faux fournisseur `stub` (sans réseau), `Groq` ou `openai-oauth`. Voir les sections
+   « Faux fournisseur (`stub`) », « Groq » et « Abonnement ChatGPT/Codex (`openai-oauth`) »
+   ci-dessus. `radarnaque-llm list` donne le modèle actif.
+
+### Sur une annonce (2ememain, 2dehands ou Facebook Marketplace)
+
+1. Ouvrir une annonce, par exemple `https://www.2ememain.be/v/…` ou
+   `https://www.facebook.com/marketplace/item/…`.
+2. Cliquer sur la pastille pour ouvrir le panneau, puis sur « Lancer une analyse IA ».
+3. Le résultat montre le niveau de risque et le score, un résumé, un conseil, les raisons
+   (« Pourquoi ») et « Analyses restantes : n », qui baisse à chaque analyse. Un admin
+   n'a pas de compteur.
+4. Cliquer une seconde fois sur « Lancer une analyse IA » pour la même annonce : le résultat
+   est identique et la mention « Résultat déjà disponible : servi depuis le cache » apparaît.
+   Le compteur baisse quand même d'une unité.
+5. Le bouton « Analyse avec photos » n'apparaît que pour un compte en essai, premium ou admin,
+   et seulement si l'annonce a des photos. Sans photo, il n'est jamais proposé.
+6. Sans être connecté, le panneau propose « Se connecter » ; sans abonnement actif, il
+   l'indique et renvoie vers les formules.
+
+### Sur une page de résultats
+
+Pages concernées : une recherche ou une liste de catégorie sur 2ememain ou 2dehands
+(`https://www.2ememain.be/q/iphone/`, `https://www.2ememain.be/l/…`), et la grille de
+Facebook Marketplace.
+
+1. Une icône « R » apparaît sur chaque carte, pour un compte en essai, premium ou admin
+   seulement. Elle n'est jamais lancée toute seule : un scan n'est consommé qu'au clic.
+2. Un clic sur « R » analyse l'annonce de la carte sans ouvrir l'annonce. L'icône
+   indique « Analyse… » pendant le scan, puis le niveau de risque.
+3. Passer la souris sur l'icône (ou la focaliser au clavier) affiche le résumé. Échap le
+   ferme. Un second clic sur une carte déjà analysée ne fait rien ; si l'analyse a échoué
+   (« R ! »), il la relance.
+4. Ouvrir ensuite l'annonce elle-même et lancer l'analyse depuis le panneau : elle est
+   servie depuis le cache.
+
+### Limites à connaître
+
+- **Facebook, analyse partielle.** L'extension lit la fiche de l'annonce par une requête
+  directe, sans exécuter le JavaScript de la page. Sur Facebook, cette fiche ne contient
+  souvent pas les données complètes : l'analyse se fait alors avec les seules informations de
+  la carte et le résumé indique « Analyse partielle ». Pour une analyse complète, ouvrir
+  l'annonce et l'analyser depuis le panneau.
+- **Annonces professionnelles de 2ememain** (identifiants en `a…`) : pas d'icône, et leur
+  fiche n'est pas prise en charge.
+- **Carte sans icône sur 2ememain.** Certaines cartes reçoivent leur lien tard : l'icône
+  apparaît dès que le site l'a renseigné (au défilement, ou après quelques instants).
+- **Fiche Facebook ouverte en fenêtre modale.** Les icônes de la grille disparaissent tant
+  que la fiche est ouverte, et reviennent à la fermeture.
+- **Connexion depuis la popup.** Au retour sur l'onglet, le panneau et les icônes se mettent
+  à jour d'eux-mêmes : inutile de recharger la page.
+
+### En cas de problème
+
+- **« Session expirée, reconnectez-vous. »** : se reconnecter depuis la popup de l'extension
+  (le bouton « Se connecter » du panneau l'ouvre, sinon cliquer sur l'icône Radarnaque de la
+  barre d'outils), puis revenir sur l'onglet.
+- **« L'analyse a échoué. Elle ne vous a pas été décomptée. »** : c'est l'erreur
+  `analysis_failed` (502) de l'API. Vérifier le fournisseur actif (`radarnaque-llm list`) :
+  `pnpm llm:stub` lancé pour `stub`, clé valide et quota non atteint pour Groq, proxy
+  `npx openai-oauth` lancé pour `openai-oauth`. Les logs `[api]` donnent la raison.
+- **« Vous avez utilisé toutes vos analyses… »** : le quota est épuisé. Un essai n'a que 3
+  scans au total, texte et photos confondus ; se connecter depuis la popup avec une
+  nouvelle adresse email crée un compte neuf, donc un nouvel essai de 3 scans.
+- **Pas d'icône « R » sur une recherche** : le compte est-il en essai, premium ou admin ? la
+  page est-elle bien une recherche (`/q/…`, `/l/…`) et non une fiche ? Les cartes sponsorisées
+  (`a…`) n'en ont jamais.
+
 ## Changer de fournisseur
 
 En production, les modèles sont ceux d'OpenRouter (clé `OPENROUTER_API_KEY` dans
