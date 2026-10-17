@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { Listing } from "../lib/listing/types";
 import type { RuleId } from "../lib/rules/rules";
 import { RULES, RULES_VERSION } from "../lib/rules/rules";
+import type { UnknownField } from "../lib/rules/score";
 import { evaluate, levelOf } from "../lib/rules/score";
 
 const NEUTRAL_DESCRIPTION =
@@ -251,10 +252,56 @@ describe("contact_outside", () => {
 		expect(kindOf("Prix 12 345,00 €")).toBeUndefined();
 	});
 
-	test("unknown (empty text) triggers nothing", () => {
+	test("empty text does not trigger contact_outside", () => {
 		expect(ids(makeListing({ title: "", description: "" }))).toEqual([
 			"short_description",
 		]);
+	});
+
+	test("generic product text and measures are not phone numbers", () => {
+		for (const text of [
+			"iPhone 14 PRO 128GB",
+			"Canon EOS 3000D 2018",
+			"Année 2015, 85000 km",
+			"1000 Bruxelles",
+			"120x60x45 cm",
+			"Prix 8\u00a0500 €",
+			"Prix € 23\u202f500",
+			"Prix 8 500 €",
+			"Prix € 23 500",
+			"+15 °C à +25 °C",
+			"+50 000 km",
+			"S23+ 256",
+			"+10 20 30 40",
+			"+20 000 000",
+			"ean 0472123456789",
+		]) {
+			expect(kindOf(text), text).toBeUndefined();
+		}
+	});
+
+	test("more phone formats", () => {
+		for (const text of [
+			"+33 6 12 34 56 78",
+			"+32 4 123 45 67",
+			"+31 6 12345678",
+			"+33612345678",
+			"+49 151 23456789",
+			"0472 123 456",
+			"0472/123.456",
+			"gsm 0472 123 456",
+			"0472 12 34 56",
+			"0472123456",
+		]) {
+			expect(kindOf(text), text).toBe("phone");
+		}
+	});
+
+	test("app domains need a left word boundary", () => {
+		expect(kindOf("fact.me/xyz")).toBeUndefined();
+		expect(kindOf("voir exact.me/xyz")).toBeUndefined();
+		expect(kindOf("contact wa.me/32472123456")).toBe("app");
+		expect(kindOf("(t.me/vendeur)")).toBe("app");
 	});
 });
 
@@ -292,6 +339,9 @@ describe("offsite_payment", () => {
 		"Paiement à l'avance requis",
 		"paiement a l'avance",
 		"Paiement à l’avance",
+		"paiement à lʼavance",
+		"paiement à l´avance",
+		"paiement à l`avance",
 		"Vooraf betalen graag",
 		"Je krijgt een betaallink",
 		"Envoyez un lien de paiement",
@@ -318,6 +368,21 @@ describe("offsite_payment", () => {
 
 	test("unknown (no text) triggers nothing", () => {
 		expect(ids(makeListing({ title: "" }))).toEqual([]);
+	});
+
+	test("friends and family needs paypal in the same text", () => {
+		const idsOf = (text: string) =>
+			ids(makeListing({ description: `${NEUTRAL_DESCRIPTION} ${text}` }));
+		expect(idsOf("Ideal for friends and family")).toEqual([]);
+		expect(idsOf("PayPal, friends and family")).toEqual(["offsite_payment"]);
+		expect(
+			ids(
+				makeListing({
+					title: "PayPal only",
+					description: `${NEUTRAL_DESCRIPTION} friends and family`,
+				}),
+			),
+		).toEqual(["offsite_payment"]);
 	});
 });
 
@@ -388,6 +453,29 @@ describe("score and level", () => {
 		} finally {
 			rule.enabled = true;
 		}
+	});
+
+	test("unknown description skips short_description", () => {
+		const l = makeListing({ description: "" });
+		expect(ids(l)).toEqual(["short_description"]);
+		const unknown = new Set<UnknownField>(["description"]);
+		expect(evaluate(l, { unknown }).signals).toEqual([]);
+		expect(evaluate(l, { unknown: new Set() }).signals).toHaveLength(1);
+	});
+
+	test("unknown images skips few_photos", () => {
+		const l = makeListing({ images: [] });
+		expect(ids(l)).toEqual(["few_photos"]);
+		const unknown = new Set<UnknownField>(["images"]);
+		expect(evaluate(l, { unknown }).signals).toEqual([]);
+	});
+
+	test("unknown fields do not disable other rules", () => {
+		const l = makeListing({ images: [], description: "whatsapp" });
+		const unknown = new Set<UnknownField>(["description", "images"]);
+		expect(evaluate(l, { unknown }).signals.map((s) => s.id)).toEqual([
+			"contact_outside",
+		]);
 	});
 
 	test("levelOf thresholds", () => {

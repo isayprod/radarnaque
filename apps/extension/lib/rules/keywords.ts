@@ -17,19 +17,24 @@ export const OFFSITE_PAYMENT_KEYWORDS: readonly string[] = [
 	"betaallink",
 	"paypal amis",
 	"paypal vrienden",
-	"friends and family",
 	"payconiq vooraf",
 ];
 
+/** Ambigus seuls (« ideal for friends and family ») : comptent si « paypal » est aussi dans le texte. */
+export const OFFSITE_PAYMENT_WITH_PAYPAL_KEYWORDS: readonly string[] = [
+	"friends and family",
+];
+
 /**
- * Forme comparable d'un texte : minuscules, sans accents (NFD), apostrophes
- * typographiques ramenées à `'`, espaces (dont U+00A0 et U+202F) réduits à un seul.
+ * Forme comparable d'un texte : minuscules, apostrophes typographiques
+ * (‘ ’ ʼ ´ `) ramenées à `'`, puis accents retirés (NFD, marques combinantes
+ * seulement), espaces (dont U+00A0 et U+202F) réduits à un seul.
  */
 export function foldText(s: string): string {
 	return s
+		.replace(/[\u2018\u2019\u02bc\u00b4`]/g, "'")
 		.normalize("NFD")
-		.replace(/\p{Diacritic}/gu, "")
-		.replace(/[‘’ʼ]/g, "'")
+		.replace(/\p{M}/gu, "")
 		.replace(/\s+/g, " ")
 		.trim()
 		.toLowerCase();
