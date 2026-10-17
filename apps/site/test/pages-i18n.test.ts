@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { detectLocale } from "../src/i18n";
 import {
@@ -8,6 +10,7 @@ import {
 	PRICING,
 	PRIVACY,
 	PRIVACY_EMAIL,
+	PRIVACY_ORDER,
 } from "../src/pages-i18n";
 import { renderPricing, renderPrivacy } from "../src/pages-render";
 
@@ -34,11 +37,16 @@ describe("FR/NL parity", () => {
 	it("privacy dictionaries have exactly the same key tree", () => {
 		expect(keyTree(PRIVACY.fr)).toEqual(keyTree(PRIVACY.nl));
 	});
-	it("every string is non-empty and differs between FR and NL", () => {
+	it("every string is non-empty, and FR differs from NL except plan names", () => {
+		const sameInBothLanguages = new Set([
+			"pricing.plans.standard.name",
+			"pricing.plans.premium.name",
+		]);
 		const walk = (fr: unknown, nl: unknown, path: string) => {
 			if (typeof fr === "string") {
 				expect(fr.length, path).toBeGreaterThan(0);
 				expect((nl as string).length, path).toBeGreaterThan(0);
+				if (!sameInBothLanguages.has(path)) expect(fr, path).not.toBe(nl);
 				return;
 			}
 			for (const k of Object.keys(fr as object)) {
@@ -111,7 +119,22 @@ describe("renderPricing", () => {
 				}
 				expect(text).toContain(locale === "fr" ? "1 000" : "1.000");
 				const trial = norm(root.querySelector("article.plan")?.textContent);
-				expect(trial).toMatch(/(^|\D)3 /);
+				const firstFeature = root.querySelector("article.plan li")?.textContent;
+				expect(norm(firstFeature)).toMatch(/^3 /);
+				expect(trial).toContain(firstFeature);
+			});
+
+			it("premium lists the listing-page AI button and the search icons", () => {
+				renderPricing(document, root, locale);
+				const premium = root.querySelectorAll("article.plan")[2];
+				const items = [...premium.querySelectorAll("li")].map((li) =>
+					norm(li.textContent),
+				);
+				expect(items).toHaveLength(4);
+				expect(items.join("|")).toContain(
+					locale === "fr" ? "page de l'annonce" : "pagina van de advertentie",
+				);
+				expect(premium.textContent).not.toMatch(/sans limite|zonder limiet/i);
 			});
 
 			it("has no working buy button and says payment is coming", () => {
@@ -171,4 +194,77 @@ describe("renderPrivacy", () => {
 		renderPrivacy(document, root, "fr");
 		expect(root.querySelectorAll("script, img")).toHaveLength(0);
 	});
+});
+
+describe("privacy wording (spec 10)", () => {
+	const text = (l: "fr" | "nl") =>
+		Object.values(PRIVACY[l].sections)
+			.map((x) => `${x.heading} ${x.body}`)
+			.join(" ");
+
+	it("orders every section exactly once", () => {
+		expect([...PRIVACY_ORDER].sort()).toEqual(
+			Object.keys(PRIVACY.fr.sections).sort(),
+		);
+	});
+
+	it("does not promise that the AI provider keeps nothing", () => {
+		expect(text("fr")).not.toMatch(/ne conserve rien|ni conserver/);
+		expect(text("nl")).not.toMatch(/bewaart niets|niet bewaart/);
+		expect(PRIVACY.fr.sections.ai.heading).toBe("Données envoyées à l'IA");
+		expect(PRIVACY.fr.sections.ai.body).toContain("Nous demandons");
+		expect(PRIVACY.nl.sections.ai.body).toContain("Wij vragen");
+	});
+
+	it("erasure removes the analysis history, not the analyses", () => {
+		expect(PRIVACY.fr.sections.erasure.body).toContain(
+			"l'historique de vos analyses",
+		);
+		expect(PRIVACY.nl.sections.erasure.body).toContain(
+			"de geschiedenis van uw analyses",
+		);
+		expect(PRIVACY.nl.sections.erasure.body).toContain("uw gebruikersaccount");
+		expect(PRIVACY.nl.sections.erasure.body).toContain("mailen naar {email}");
+	});
+
+	it("does not claim everything stays in the EU", () => {
+		expect(PRIVACY.fr.sections.hosting.heading).toBe(
+			"Où sont traitées les données",
+		);
+		expect(PRIVACY.fr.sections.hosting.body).toMatch(/hors de l'UE/);
+		expect(PRIVACY.nl.sections.hosting.body).toMatch(/buiten de EU/);
+	});
+
+	it("discloses triggers, photo download and non-identifying seller facts", () => {
+		expect(PRIVACY.fr.sections.trigger.body).toMatch(/clic|demandez/);
+		expect(PRIVACY.fr.sections.photos.body).toMatch(
+			/téléchargées par notre serveur/,
+		);
+		expect(PRIVACY.fr.sections.seller.body).toMatch(/avant l'envoi à l'IA/);
+		expect(PRIVACY.fr.sections.seller.body).toMatch(/ancienneté/);
+		expect(PRIVACY.nl.sections.seller.body).toMatch(/voordat/);
+		expect(PRIVACY.nl.sections.seller.body).toContain("gemaskeerd");
+		expect(PRIVACY.nl.sections.photos.body).toMatch(/gedownload/);
+	});
+
+	it("uses the agreed NL wording", () => {
+		expect(PRICING.nl.plans.premium.features.icons).toMatch(/iconen/i);
+		expect(text("nl")).not.toContain("afgeschermd");
+	});
+});
+
+describe("static pages", () => {
+	for (const page of ["pricing", "privacy"] as const) {
+		it(`${page}/index.html has a noscript fallback in both languages`, () => {
+			const html = readFileSync(
+				resolve(import.meta.dirname, "..", page, "index.html"),
+				"utf8",
+			);
+			expect(html).toContain("<noscript>");
+			expect(html).toContain("Activez JavaScript pour afficher cette page.");
+			expect(html).toContain(
+				"Schakel JavaScript in om deze pagina te bekijken.",
+			);
+		});
+	}
 });
