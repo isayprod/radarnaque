@@ -27,3 +27,15 @@ class ScanFailure(Base):
     )
     error_code: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ScanResult(Base):
+    """Lie un scan réussi à l'analyse servie (« servi depuis le cache » se calcule)."""
+
+    __tablename__ = "scan_results"
+    __table_args__ = (Index("ix_scan_results_analysis_id", "analysis_id"),)
+
+    scan_event_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("app.scan_events.id", ondelete="CASCADE"), primary_key=True
+    )
+    analysis_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("app.analyses.id"))
