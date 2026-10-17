@@ -2,7 +2,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { checkDocker, DOCKER_DOWN_MESSAGE } from "./check-docker.mjs";
+import {
+	checkDocker,
+	DOCKER_DOWN_MESSAGE,
+	DOCKER_INFO_TIMEOUT_MS,
+} from "./check-docker.mjs";
 
 test("Docker disponible : code 0, aucun message", () => {
 	const calls = [];
@@ -37,6 +41,32 @@ test("docker introuvable (erreur de lancement) : code 1 et même message", () =>
 	const messages = [];
 	const code = checkDocker(
 		() => ({ status: null, error: new Error("ENOENT") }),
+		(m) => messages.push(m),
+	);
+	assert.equal(code, 1);
+	assert.deepEqual(messages, [DOCKER_DOWN_MESSAGE]);
+});
+
+test("`docker info` borné à 10 s : le délai est passé au lanceur", () => {
+	const options = [];
+	checkDocker(
+		(_cmd, _args, opts) => {
+			options.push(opts);
+			return { status: 0 };
+		},
+		() => {},
+	);
+	assert.equal(DOCKER_INFO_TIMEOUT_MS, 10_000);
+	assert.equal(options[0]?.timeout, 10_000);
+});
+
+test("`docker info` expiré (démon bloqué) : code 1 et même message", () => {
+	const messages = [];
+	const timeout = Object.assign(new Error("spawnSync docker ETIMEDOUT"), {
+		code: "ETIMEDOUT",
+	});
+	const code = checkDocker(
+		() => ({ status: null, signal: "SIGTERM", error: timeout }),
 		(m) => messages.push(m),
 	);
 	assert.equal(code, 1);
