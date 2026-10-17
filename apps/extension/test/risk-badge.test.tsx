@@ -1,13 +1,20 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import {
+	act,
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { browser } from "wxt/browser";
 import { RiskBadge } from "../components/RiskBadge";
 import type { AiClient } from "../lib/content/ai-client";
-import { contentText } from "../lib/content-i18n";
+import { aiErrorText, contentText } from "../lib/content-i18n";
 import type { Listing } from "../lib/listing/types";
 import type { ContentAccess } from "../lib/messages";
 import type { RiskReport } from "../lib/rules/score";
@@ -318,6 +325,142 @@ describe("RiskBadge : analyse IA", () => {
 		expect(
 			screen.getAllByRole("button", { name: contentText("fr", "ai.login") }),
 		).toHaveLength(1);
+	});
+
+	test("signedOut, panneau rouvert : l'accès est relu", async () => {
+		const user = userEvent.setup();
+		ai.access.mockResolvedValue({ ok: true, data: { status: "signedOut" } });
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await screen.findByText(contentText("fr", "ai.loginHint"));
+		await user.click(toggle());
+		await user.click(toggle());
+		await vi.waitFor(() => expect(ai.access).toHaveBeenCalledTimes(2));
+	});
+
+	test("accès en erreur, panneau rouvert : nouvel essai, puis le bouton d'analyse", async () => {
+		const user = userEvent.setup();
+		ai.access.mockResolvedValueOnce({
+			ok: false,
+			error: { code: "background_unavailable" },
+		});
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await screen.findByText(aiErrorText("fr", "background_unavailable"));
+		await user.click(toggle());
+		await user.click(toggle());
+		await findRun();
+		expect(ai.access).toHaveBeenCalledTimes(2);
+	});
+
+	test("signedOut, panneau ouvert, retour sur l'onglet (focus) : accès relu, le panneau passe à active", async () => {
+		const user = userEvent.setup();
+		ai.access.mockResolvedValueOnce({
+			ok: true,
+			data: { status: "signedOut" },
+		});
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await screen.findByText(contentText("fr", "ai.loginHint"));
+
+		// Connexion faite dans la popup ; la page reprend le focus.
+		act(() => {
+			window.dispatchEvent(new Event("focus"));
+		});
+		await findRun();
+		expect(ai.access).toHaveBeenCalledTimes(2);
+		expect(screen.queryByText(contentText("fr", "ai.loginHint"))).toBeNull();
+	});
+
+	test("signedOut, panneau ouvert, onglet de nouveau visible : accès relu", async () => {
+		const user = userEvent.setup();
+		ai.access.mockResolvedValueOnce({
+			ok: true,
+			data: { status: "signedOut" },
+		});
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await screen.findByText(contentText("fr", "ai.loginHint"));
+		const state = vi
+			.spyOn(document, "visibilityState", "get")
+			.mockReturnValue("visible");
+		fireEvent(document, new Event("visibilitychange"));
+		await findRun();
+		expect(ai.access).toHaveBeenCalledTimes(2);
+		state.mockRestore();
+	});
+
+	test("accès actif : focus ou panneau rouvert ne relisent pas l'accès", async () => {
+		const user = userEvent.setup();
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await findRun();
+		act(() => {
+			window.dispatchEvent(new Event("focus"));
+		});
+		await user.click(toggle());
+		await user.click(toggle());
+		await findRun();
+		expect(ai.access).toHaveBeenCalledTimes(1);
+	});
+
+	test("panneau fermé : focus ne relit pas l'accès", async () => {
+		const user = userEvent.setup();
+		ai.access.mockResolvedValue({ ok: true, data: { status: "signedOut" } });
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await screen.findByText(contentText("fr", "ai.loginHint"));
+		await user.click(toggle());
+		act(() => {
+			window.dispatchEvent(new Event("focus"));
+		});
+		expect(ai.access).toHaveBeenCalledTimes(1);
+	});
+
+	test("photos arrivées après coup : le bouton « Analyse avec photos » apparaît", async () => {
+		const user = userEvent.setup();
+		ai.access.mockResolvedValue({
+			ok: true,
+			data: { ...active, features: ["image_scan"] },
+		});
+		const view = render(
+			<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />,
+		);
+		await user.click(toggle());
+		await findRun();
+		const photos = { name: contentText("fr", "ai.runPhotos") };
+		expect(screen.queryByRole("button", photos)).toBeNull();
+
+		view.rerender(
+			<RiskBadge
+				report={high}
+				listing={{ ...listing, images: ["https://images.example/1.jpg"] }}
+				locale="fr"
+				ai={ai}
+			/>,
+		);
+		expect(screen.getByRole("button", photos)).toBeTruthy();
+	});
+
+	test("description modifiée puis clic : la requête porte la nouvelle description", async () => {
+		const user = userEvent.setup();
+		const view = render(
+			<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />,
+		);
+		await user.click(toggle());
+		await findRun();
+		view.rerender(
+			<RiskBadge
+				report={high}
+				listing={{ ...listing, description: "Description complétée." }}
+				locale="fr"
+				ai={ai}
+			/>,
+		);
+		await user.click(await findRun());
+		expect(ai.scan.mock.calls[0]?.[0].listing.description).toBe(
+			"Description complétée.",
+		);
 	});
 
 	test("lien vers les formules dans la langue active", async () => {

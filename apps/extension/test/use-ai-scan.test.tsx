@@ -148,6 +148,45 @@ describe("useAiScan : accès", () => {
 		expect(t.result.current.access).toEqual(latest);
 	});
 
+	test("lecture en cours : loadAccess ne relance pas de lecture", () => {
+		const t = setup();
+		act(() => t.result.current.loadAccess());
+		act(() => t.result.current.loadAccess());
+		expect(t.client.access).toHaveBeenCalledTimes(1);
+	});
+
+	test("signedOut : loadAccess relit, l'ancienne valeur reste affichée pendant la lecture", async () => {
+		const t = setup();
+		act(() => t.result.current.loadAccess());
+		t.accesses[0]?.resolve(ok({ status: "signedOut" }));
+		await settle();
+
+		act(() => t.result.current.loadAccess());
+		expect(t.client.access).toHaveBeenCalledTimes(2);
+		expect(t.result.current.access).toEqual({ status: "signedOut" });
+		t.accesses[1]?.resolve(ok(active));
+		await settle();
+		expect(t.result.current.access).toEqual(active);
+	});
+
+	test("accès en erreur : loadAccess réessaie", async () => {
+		const t = setup();
+		act(() => t.result.current.loadAccess());
+		t.accesses[0]?.resolve(fail("background_unavailable"));
+		await settle();
+		act(() => t.result.current.loadAccess());
+		expect(t.client.access).toHaveBeenCalledTimes(2);
+	});
+
+	test("noSubscription : loadAccess relit aussi", async () => {
+		const t = setup();
+		act(() => t.result.current.loadAccess());
+		t.accesses[0]?.resolve(ok({ status: "noSubscription" }));
+		await settle();
+		act(() => t.result.current.loadAccess());
+		expect(t.client.access).toHaveBeenCalledTimes(2);
+	});
+
 	test("pricingUrl pointe vers /pricing/ dans la langue active", () => {
 		const t = setup();
 		expect(t.result.current.pricingUrl).toBe(
@@ -260,6 +299,23 @@ describe("useAiScan : scans", () => {
 	});
 });
 
+describe("useAiScan : démontage", () => {
+	test("scan terminé après le démontage : ni état, ni relecture de l'accès", async () => {
+		const t = setup();
+		act(() => t.result.current.loadAccess());
+		t.accesses[0]?.resolve(ok(active));
+		await settle();
+		act(() => t.result.current.scan("text"));
+		const before = t.result.current;
+		t.unmount();
+
+		t.scans[0]?.resolve(ok(sampleAnalysis));
+		await settle();
+		expect(t.client.access).toHaveBeenCalledTimes(1);
+		expect(t.result.current).toBe(before);
+	});
+});
+
 describe("useAiScan : connexion", () => {
 	test("login() sur fail('popup_unavailable') : loginUnavailable vrai", async () => {
 		const t = setup();
@@ -275,6 +331,19 @@ describe("useAiScan : connexion", () => {
 		const t = setup();
 		act(() => t.result.current.login());
 		t.logins[0]?.resolve(ok(null));
+		await settle();
+		expect(t.result.current.loginUnavailable).toBe(false);
+	});
+
+	test("login() réussi après un échec : loginUnavailable repasse à faux", async () => {
+		const t = setup();
+		act(() => t.result.current.login());
+		t.logins[0]?.resolve(fail("popup_unavailable"));
+		await settle();
+		expect(t.result.current.loginUnavailable).toBe(true);
+
+		act(() => t.result.current.login());
+		t.logins[1]?.resolve(ok(null));
 		await settle();
 		expect(t.result.current.loginUnavailable).toBe(false);
 	});

@@ -83,9 +83,22 @@ export function RiskBadge({
 	// L'état IA vit ici, pas dans le panneau : il survit à sa fermeture.
 	const scan = useAiScan(ai, { report, listing }, locale);
 	const { loadAccess } = scan;
-	// Accès chargé à la première ouverture du panneau, jamais avant.
+	// Accès lu à l'ouverture du panneau, jamais avant. Panneau ouvert, il est relu
+	// au retour sur l'onglet (connexion faite dans la popup) ; `loadAccess` ne fait
+	// rien s'il est déjà actif.
 	useEffect(() => {
-		if (open) loadAccess();
+		if (!open) return;
+		loadAccess();
+		const onFocus = () => loadAccess();
+		const onVisibility = () => {
+			if (document.visibilityState === "visible") loadAccess();
+		};
+		window.addEventListener("focus", onFocus);
+		document.addEventListener("visibilitychange", onVisibility);
+		return () => {
+			window.removeEventListener("focus", onFocus);
+			document.removeEventListener("visibilitychange", onVisibility);
+		};
 	}, [open, loadAccess]);
 
 	const style = LEVEL_STYLE[report.level];

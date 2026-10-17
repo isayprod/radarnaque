@@ -243,6 +243,28 @@ describe("createController — Facebook", () => {
 		expect(second?.anchor.getAttribute("data-radarnaque")).toBe(FB_OTHER_ITEM);
 	});
 
+	test("photos chargées après coup : update avec les images, sans remontage", async () => {
+		const doc = loadFixture("facebook/item-modal.html");
+		const photos = [
+			...doc.querySelectorAll('[role="dialog"] img[alt^="Photo de produit"]'),
+		];
+		expect(photos.length).toBeGreaterThan(0);
+		const sources = photos.map((img) => img.getAttribute("src"));
+		for (const img of photos) img.removeAttribute("src");
+		const t = setup(doc, fbItemUrl(FB_ITEM));
+		await t.controller.refresh();
+		expect(t.of("mount")[0]?.view.listing.images).toEqual([]);
+
+		photos.forEach((img, i) => {
+			img.setAttribute("src", sources[i] ?? "");
+		});
+		await t.controller.refresh();
+
+		expect(t.ops.map((o) => o.op)).toEqual(["mount", "update"]);
+		const update = t.of("update")[0];
+		expect(update?.view.listing.images.length).toBeGreaterThan(0);
+	});
+
 	test("navigation vers la grille : unmount, sans nouveau mount", async () => {
 		const doc = loadFixture("facebook/item-modal.html");
 		const t = setup(doc, fbItemUrl(FB_ITEM));
