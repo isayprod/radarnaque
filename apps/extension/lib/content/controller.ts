@@ -1,6 +1,6 @@
 import type { Locale } from "@radarnaque/shared";
 import { adapterFor } from "../adapters/registry";
-import type { Site } from "../listing/types";
+import type { Listing, Site } from "../listing/types";
 import { evaluate, type RiskReport, type UnknownField } from "../rules/score";
 
 /** Balise de l'hôte du shadow root de la pastille (nom passé à `createShadowRootUi`). */
@@ -17,10 +17,16 @@ const UNKNOWN_FIELDS: ReadonlySet<string> = new Set<UnknownField>([
 	"images",
 ]);
 
+/** Ce que la pastille affiche : le rapport local et l'annonce extraite, envoyée au scan IA. */
+export interface BadgeView {
+	report: RiskReport;
+	listing: Listing;
+}
+
 export interface Mounter {
-	mount(anchor: Element, report: RiskReport, locale: Locale): void;
-	/** Nouveau rendu de la pastille montée (rapport ou langue changés), sans remontage. */
-	update(report: RiskReport, locale: Locale): void;
+	mount(anchor: Element, view: BadgeView, locale: Locale): void;
+	/** Nouveau rendu de la pastille montée (rapport, annonce ou langue changés), sans remontage. */
+	update(view: BadgeView, locale: Locale): void;
 	unmount(): void;
 	/** Vrai tant que la pastille est montée (ou en cours de montage) dans le document. */
 	isMounted(): boolean;
@@ -37,12 +43,19 @@ export interface ControllerDeps {
 interface Mounted {
 	anchor: Element;
 	externalId: string;
-	/** Score, identifiants des signaux et locale : un changement entraîne `update`. */
+	/** Score, signaux, titre, description et locale : un changement entraîne `update`. */
 	key: string;
 }
 
-const mountedKey = (report: RiskReport, locale: Locale) =>
-	`${report.score}|${report.signals.map((s) => s.id).join(",")}|${locale}`;
+// JSON : aucun séparateur ne peut se confondre avec le contenu du titre ou de la description.
+const mountedKey = ({ report, listing }: BadgeView, locale: Locale) =>
+	JSON.stringify([
+		report.score,
+		report.signals.map((s) => s.id),
+		listing.title,
+		listing.description,
+		locale,
+	]);
 
 const isOwnUi = (node: Node) =>
 	node.nodeType === Node.ELEMENT_NODE &&
@@ -124,13 +137,14 @@ export function createController(deps: ControllerDeps): {
 		// Pendant l'attente, la page a pu passer à une autre annonce.
 		if (disposed || deps.getUrl().href !== url.href || !anchor.isConnected)
 			return;
-		const key = mountedKey(report, locale);
+		const view: BadgeView = { report, listing: result.listing };
+		const key = mountedKey(view, locale);
 
 		if (current?.anchor === anchor && current.externalId === externalId) {
 			if (mounter.isMounted()) {
 				if (current.key !== key) {
 					current.key = key;
-					mounter.update(report, locale);
+					mounter.update(view, locale);
 				}
 				return;
 			}
@@ -145,7 +159,7 @@ export function createController(deps: ControllerDeps): {
 		if (anchor.getAttribute(MARK_ATTR) === externalId) return;
 		anchor.setAttribute(MARK_ATTR, externalId);
 		current = { anchor, externalId, key };
-		mounter.mount(anchor, report, locale);
+		mounter.mount(anchor, view, locale);
 	}
 
 	/** Les passages s'exécutent l'un après l'autre, jamais en parallèle. */

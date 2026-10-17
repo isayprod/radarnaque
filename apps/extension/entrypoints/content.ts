@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { createShadowRootUi } from "wxt/utils/content-script-ui/shadow-root";
 import { defineContentScript } from "wxt/utils/define-content-script";
 import { RiskBadge } from "../components/RiskBadge";
+import { type AiClient, createAiClient } from "../lib/content/ai-client";
 import {
 	type BadgeRenderer,
 	createBadgeMounter,
@@ -14,11 +15,14 @@ import { resolveContentLocale } from "../lib/content-i18n";
 import type { Site } from "../lib/listing/types";
 import { localePref } from "../lib/storage";
 
-function createReactRenderer(container: HTMLElement): BadgeRenderer {
+function createReactRenderer(
+	container: HTMLElement,
+	ai: AiClient,
+): BadgeRenderer {
 	const root = createRoot(container);
 	return {
-		render: (report, locale) =>
-			root.render(createElement(RiskBadge, { report, locale })),
+		render: ({ report, listing }, locale) =>
+			root.render(createElement(RiskBadge, { report, listing, locale, ai })),
 		unmount: () => root.unmount(),
 	};
 }
@@ -40,12 +44,14 @@ export default defineContentScript({
 	cssInjectionMode: "ui",
 	runAt: "document_idle",
 	main(ctx) {
+		// Un seul client IA par content script, partagé par toutes les pastilles.
+		const ai = createAiClient();
 		const controller = createController({
 			doc: document,
 			getUrl: () => new URL(location.href),
 			mounter: createBadgeMounter({
 				createUi: (options) => createShadowRootUi(ctx, options),
-				createRenderer: createReactRenderer,
+				createRenderer: (container) => createReactRenderer(container, ai),
 			}),
 			getLocale,
 		});
