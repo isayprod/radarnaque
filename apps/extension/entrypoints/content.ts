@@ -6,6 +6,10 @@ import { browser, type PublicPath } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
 import { CardBadge } from "../components/CardBadge";
 import { RiskBadge } from "../components/RiskBadge";
+import {
+	type AccessCache,
+	createAccessCache,
+} from "../lib/content/access-policy";
 import { type AiClient, createAiClient } from "../lib/content/ai-client";
 import {
 	type BadgeRenderer,
@@ -25,11 +29,14 @@ import { localePref } from "../lib/storage";
 function createReactRenderer(
 	container: HTMLElement,
 	ai: AiClient,
+	accessCache: AccessCache,
 ): BadgeRenderer {
 	const root = createRoot(container);
 	return {
 		render: ({ report, listing }, locale) =>
-			root.render(createElement(RiskBadge, { report, listing, locale, ai })),
+			root.render(
+				createElement(RiskBadge, { report, listing, locale, ai, accessCache }),
+			),
 		unmount: () => root.unmount(),
 	};
 }
@@ -76,6 +83,8 @@ export default defineContentScript({
 	main(ctx) {
 		// Un seul client IA par content script, partagé par toutes les pastilles.
 		const ai = createAiClient();
+		// R8 : un accès en cache pour la pastille et les icônes de cartes.
+		const accessCache = createAccessCache();
 		// Les UI ne s'abonnent pas à l'invalidation (une fuite par montage) : les
 		// `dispose()` ci-dessous les retirent toutes. R7 : pastille et icônes
 		// partagent un CSS chargé une seule fois, sans `<style>` dans la page.
@@ -85,7 +94,8 @@ export default defineContentScript({
 			getUrl: () => new URL(location.href),
 			mounter: createBadgeMounter({
 				createUi,
-				createRenderer: (container) => createReactRenderer(container, ai),
+				createRenderer: (container) =>
+					createReactRenderer(container, ai, accessCache),
 			}),
 			getLocale,
 		});
@@ -94,6 +104,7 @@ export default defineContentScript({
 			doc: document,
 			getUrl: () => new URL(location.href),
 			ai,
+			accessCache,
 			mountCard: createCardMounter({
 				createUi,
 				createRenderer: createCardRenderer,

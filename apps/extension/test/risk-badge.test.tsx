@@ -13,6 +13,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { browser } from "wxt/browser";
 import { RiskBadge } from "../components/RiskBadge";
+import { createAccessCache, RECHECK_MS } from "../lib/content/access-policy";
 import type { AiClient } from "../lib/content/ai-client";
 import { aiErrorText, contentText } from "../lib/content-i18n";
 import type { Listing } from "../lib/listing/types";
@@ -338,15 +339,29 @@ describe("RiskBadge : analyse IA", () => {
 		await vi.waitFor(() => expect(ai.access).toHaveBeenCalledTimes(2));
 	});
 
-	test("accès en erreur, panneau rouvert : nouvel essai, puis le bouton d'analyse", async () => {
+	test("R8 : accès en erreur, panneau rouvert : nouvel essai après 30 s seulement, puis le bouton d'analyse", async () => {
 		const user = userEvent.setup();
+		let clock = 0;
+		const accessCache = createAccessCache(() => clock);
 		ai.access.mockResolvedValueOnce({
 			ok: false,
 			error: { code: "background_unavailable" },
 		});
-		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={accessCache}
+			/>,
+		);
 		await user.click(toggle());
 		await screen.findByText(aiErrorText("fr", "background_unavailable"));
+		await user.click(toggle());
+		await user.click(toggle());
+		expect(ai.access).toHaveBeenCalledTimes(1);
+		clock += RECHECK_MS;
 		await user.click(toggle());
 		await user.click(toggle());
 		await findRun();

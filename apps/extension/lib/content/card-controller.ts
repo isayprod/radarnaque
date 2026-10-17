@@ -3,7 +3,13 @@ import { canUse } from "../access";
 import { adapterFor } from "../adapters/registry";
 import type { CardRef, MarketplaceAdapter } from "../adapters/types";
 import type { Site } from "../listing/types";
-import type { ContentAccess } from "../messages";
+import {
+	type AccessCache,
+	type AccessReading,
+	createAccessCache,
+	isContentAccess,
+	RELOGIN_CODES,
+} from "./access-policy";
 import type { AiClient, ScanState } from "./ai-client";
 import { defaultFetchPage, scanCard } from "./card-scan";
 import { BADGE_HOST_TAG, CARD_HOST_TAG } from "./controller";
@@ -16,14 +22,8 @@ const MARK_ATTR = "data-radarnaque-card";
 /** Les mutations du DOM déclenchent au plus un `refresh` toutes les 250 ms. */
 const THROTTLE_MS = 250;
 
-/** Erreurs de session : l'accès est relu (il peut être devenu `signedOut`). */
-const RELOGIN_CODES = new Set(["session_expired", "unauthenticated"]);
-
 /** Hôte retiré par le site, même carte et même ancre : remontages par annonce et par URL. */
 const MAX_REMOUNTS = 3;
-
-/** Accès `noSubscription` ou en erreur : relu au plus une fois toutes les 30 s (R5). */
-const RECHECK_MS = 30_000;
 
 const IDLE: ScanState = { status: "idle" };
 
@@ -51,6 +51,8 @@ export interface CardControllerDeps {
 	getLocale(site: Site): Promise<Locale>;
 	/** Fenêtre dont le `focus` relit un accès inactif ; `doc.defaultView` par défaut. */
 	win?: Pick<Window, "addEventListener" | "removeEventListener"> | null;
+	/** Accès partagé avec la pastille de fiche (R8) ; un cache propre par défaut. */
+	accessCache?: AccessCache;
 	scan?: typeof scanCard;
 	fetchPage?: (url: string) => Promise<string>;
 	log?: (msg: string) => void;
@@ -119,12 +121,18 @@ export function createCardController(deps: CardControllerDeps): {
 	const win = deps.win === undefined ? doc.defaultView : deps.win;
 	const tracked = new Map<string, Tracked>();
 	const states = new Map<string, ScanState>();
-	/** Accès lu pour l'URL `href` ; `value` null : lecture en échec. */
-	let access: { href: string; value: ContentAccess | null } | null = null;
-	/** Incrémenté à chaque invalidation : une lecture plus ancienne est ignorée. */
-	let accessGen = 0;
-	/** Début de la dernière lecture de l'accès (`Date.now()`). */
-	let accessReadAt = 0;
+	const accessCache = deps.accessCache ?? createAccessCache();
+	/**
+	 * URL pour laquelle l'accès en cache a été validé. Une nouvelle URL (ou un
+	 * retour sur l'onglet, qui la vide) est l'occasion d'appliquer la politique
+	 * R8 ; les passages déclenchés par les mutations ne relisent jamais l'accès.
+	 */
+	let checkedHref = "";
+	/**
+	 * R8 : carte dont le scan a répondu « session expirée ». Son icône reste,
+	 * avec ce message, sur cette URL ; les autres sont retirées.
+	 */
+	let pinned: { id: string; href: string } | null = null;
 	/** Remontages après un hôte retiré, par annonce, pour l'URL `remountsUrl`. */
 	const remounts = new Map<string, number>();
 	let remountsUrl = "";
@@ -156,9 +164,19 @@ export function createCardController(deps: CardControllerDeps): {
 		for (const id of [...tracked.keys()]) unmountCard(id);
 	}
 
-	function invalidateAccess() {
-		accessGen++;
-		access = null;
+	/** Carte épinglée retirée de l'épingle ; son erreur de session est oubliée. */
+	function unpin(): string | null {
+		if (!pinned) return null;
+		const { id } = pinned;
+		pinned = null;
+		if (stateOf(id).status === "error") states.delete(id);
+		return id;
+	}
+
+	function leaveSearch() {
+		onSearch = false;
+		unpin();
+		clearAll();
 	}
 
 	function setState(id: string, state: ScanState) {
@@ -187,18 +205,21 @@ export function createCardController(deps: CardControllerDeps): {
 				if (disposed) return;
 				setState(id, state);
 				if (state.status === "error" && RELOGIN_CODES.has(state.code)) {
-					invalidateAccess();
+					// R8 : accès oublié et relu sans délai ; l'icône cliquée garde
+					// son message tant que l'URL ne change pas.
+					accessCache.invalidate();
+					pinned = { id, href: pageUrl.href };
 					void refresh();
 				}
 			});
 	}
 
-	async function readAccess(): Promise<ContentAccess | null> {
+	async function readAccess(): Promise<AccessReading> {
 		try {
 			const response = await deps.ai.access();
-			return response.ok ? response.data : null;
+			return response.ok ? response.data : { error: response.error.code };
 		} catch {
-			return null;
+			return { error: "background_unavailable" };
 		}
 	}
 
@@ -207,13 +228,16 @@ export function createCardController(deps: CardControllerDeps): {
 		stepUrl = url.href;
 		const adapter = adapterFor(url);
 		const site = adapter?.siteOf(url);
+		// Navigation : la carte épinglée après une session expirée est retirée.
+		if (pinned && pinned.href !== url.href) {
+			const id = unpin();
+			if (id) unmountCard(id);
+		}
 		// R7 : fiche en modale sur la grille, qui reste visible à sa fermeture.
 		// Les icônes restent telles quelles : ni retrait, ni nouveau montage.
 		if (adapter?.isOverlayListing?.(doc, url)) return;
 		if (!adapter || !site || adapter.pageType(url, doc) !== "search") {
-			onSearch = false;
-			invalidateAccess();
-			clearAll();
+			leaveSearch();
 			return;
 		}
 		onSearch = true;
@@ -222,22 +246,31 @@ export function createCardController(deps: CardControllerDeps): {
 			remounts.clear();
 		}
 
-		if (access?.href !== url.href) {
-			const gen = accessGen;
-			accessReadAt = Date.now();
-			const value = await readAccess();
-			// Page changée ou accès invalidé pendant la lecture : un autre passage suit.
-			if (disposed || gen !== accessGen || deps.getUrl().href !== url.href)
-				return;
-			access = { href: url.href, value };
+		if (
+			accessCache.current() === null ||
+			(checkedHref !== url.href && accessCache.needsRead())
+		) {
+			const ticket = accessCache.begin();
+			const reading = await readAccess();
+			accessCache.settle(ticket, reading);
+			// Page changée pendant la lecture : un autre passage suit.
+			if (disposed || deps.getUrl().href !== url.href) return;
 		}
-		if (!access.value || !canUse(access.value, "cards")) {
-			clearAll();
+		const access = accessCache.current();
+		// Accès invalidé pendant la lecture : le passage demandé par `activate` suit.
+		if (access === null) return;
+		checkedHref = url.href;
+		if (!isContentAccess(access) || !canUse(access, "cards")) {
+			for (const id of [...tracked.keys()])
+				if (id !== pinned?.id) unmountCard(id);
 			// Une erreur de session ne doit pas rester affichée après reconnexion.
 			for (const [id, state] of states)
-				if (state.status === "error") states.delete(id);
+				if (state.status === "error" && id !== pinned?.id) states.delete(id);
 			return;
 		}
+		// Accès retrouvé : la carte épinglée revient à l'état initial.
+		const repinned = unpin();
+		if (repinned) tracked.get(repinned)?.mount.update(viewOf(repinned));
 
 		// Lue à chaque passage : un changement de langue atteint les icônes montées.
 		const nextLocale = await deps.getLocale(site);
@@ -297,21 +330,19 @@ export function createCardController(deps: CardControllerDeps): {
 		return queue;
 	}
 
-	/** R5 : accès inactif sur une page de résultats, relu au retour sur l'onglet. */
-	function recheckInactiveAccess() {
-		if (disposed || !onSearch || !access) return;
-		const status = access.value?.status;
-		if (status === "active") return;
-		// signedOut : réponse locale du service worker, relue sans délai. Sinon
-		// (`noSubscription`, erreur), chaque relecture coûte un appel à l'API.
-		if (status !== "signedOut" && Date.now() - accessReadAt < RECHECK_MS)
-			return;
-		invalidateAccess();
+	/**
+	 * R5, R8 : sur une page de résultats, l'accès est relu au retour sur
+	 * l'onglet si la politique le dit périmé (signedOut : toujours ;
+	 * noSubscription, erreur : 30 s ; active : 5 min).
+	 */
+	function recheckAccess() {
+		if (disposed || !onSearch || !accessCache.needsRead()) return;
+		checkedHref = "";
 		void refresh();
 	}
-	const onFocus = () => recheckInactiveAccess();
+	const onFocus = () => recheckAccess();
 	const onVisibility = () => {
-		if (doc.visibilityState === "visible") recheckInactiveAccess();
+		if (doc.visibilityState === "visible") recheckAccess();
 	};
 	win?.addEventListener("focus", onFocus);
 	doc.addEventListener("visibilitychange", onVisibility);

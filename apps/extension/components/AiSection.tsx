@@ -1,13 +1,13 @@
 import type { AnalysisResult, Locale } from "@radarnaque/shared";
 import { useId } from "react";
 import { canUse } from "../lib/access";
+// Erreurs qui demandent une reconnexion (RELOGIN_CODES) : on propose le bouton « Se connecter ».
+import { RELOGIN_CODES } from "../lib/content/access-policy";
 import type { ScanState } from "../lib/content/ai-client";
 import { aiErrorText, contentText } from "../lib/content-i18n";
 import type { ContentAccess, ScanKind } from "../lib/messages";
 import { LEVEL_KEY, LEVEL_STYLE, SEVERITY_STYLE } from "./risk-styles";
 
-// Erreurs qui demandent une reconnexion : on propose le bouton « Se connecter ».
-const LOGIN_CODES = new Set(["session_expired", "unauthenticated"]);
 // Erreurs de droits : on propose le lien vers les formules.
 const PRICING_CODES = new Set([
 	"no_active_subscription",
@@ -124,7 +124,7 @@ function ErrorNotice(props: AiSectionProps & { code: string }) {
 			<p role="alert" className="m-0 text-red-800">
 				{aiErrorText(locale, code)}
 			</p>
-			{LOGIN_CODES.has(code) && <LoginButton {...props} />}
+			{RELOGIN_CODES.has(code) && <LoginButton {...props} />}
 			{PRICING_CODES.has(code) && (
 				<a
 					href={props.pricingUrl}

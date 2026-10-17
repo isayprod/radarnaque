@@ -3,6 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiSectionProps } from "../../components/AiSection";
 import { PUBLIC_URL } from "../config";
 import type { ScanKind, ScanRequest } from "../messages";
+import {
+	type AccessCache,
+	type AccessReading,
+	createAccessCache,
+	RELOGIN_CODES,
+} from "./access-policy";
 import type { AiClient, ScanState } from "./ai-client";
 import type { BadgeView } from "./controller";
 
@@ -29,17 +35,15 @@ interface Scope {
 	inflight: Set<ScanKind>;
 	/** Une lecture de l'accès est en cours. */
 	reading: boolean;
-	/** Dernier accès lu pour cette annonce (`null` : jamais lu). */
-	access: AccessState | null;
 	/** Numéro de la dernière lecture de l'accès : seules ses réponses comptent. */
 	accessSeq: number;
 }
 
 const IDLE: ScanState = { status: "idle" };
 
-const freshSlots = (key: string): Slots => ({
+const freshSlots = (key: string, access: AccessState | null): Slots => ({
 	key,
-	access: null,
+	access,
 	text: IDLE,
 	image: IDLE,
 	loginUnavailable: false,
@@ -49,15 +53,8 @@ const freshScope = (key: string): Scope => ({
 	key,
 	inflight: new Set(),
 	reading: false,
-	access: null,
 	accessSeq: 0,
 });
-
-const isActive = (access: AccessState | null) =>
-	access !== null &&
-	typeof access === "object" &&
-	"status" in access &&
-	access.status === "active";
 
 const keyOf = (view: BadgeView) =>
 	`${view.listing.site}|${view.listing.externalId}`;
@@ -69,9 +66,11 @@ export interface AiScan {
 	loginUnavailable: boolean;
 	pricingUrl: string;
 	/**
-	 * Lit l'accès, sauf s'il est déjà `active` ou qu'une lecture est en cours.
-	 * Appelée à l'ouverture du panneau et au retour sur l'onglet : après une
-	 * connexion dans la popup, le panneau passe à `active` sans rechargement.
+	 * Lit l'accès si la politique R8 le demande (signedOut : toujours ;
+	 * noSubscription, erreur : 30 s ; active : 5 min) et qu'aucune lecture
+	 * n'est en cours ; sinon affiche l'accès en cache. Appelée à l'ouverture du
+	 * panneau et au retour sur l'onglet : après une connexion dans la popup, le
+	 * panneau passe à `active` sans rechargement.
 	 */
 	loadAccess(): void;
 	scan(kind: ScanKind): void;
@@ -81,21 +80,29 @@ export interface AiScan {
 /**
  * État des analyses IA de la pastille. Il vit dans le composant de la pastille :
  * fermer le panneau ne le perd pas. Aucun scan n'est lancé sans appel à `scan`.
+ * L'accès vient de `accessCache`, partagé avec les icônes de cartes et gardé
+ * d'une annonce à l'autre (R8) ; à défaut, un cache propre à la pastille.
  */
 export function useAiScan(
 	client: AiClient,
 	view: BadgeView,
 	locale: Locale,
+	accessCache?: AccessCache,
 ): AiScan {
+	const [ownCache] = useState(createAccessCache);
+	const cache = accessCache ?? ownCache;
 	const key = keyOf(view);
-	const [stored, setSlots] = useState<Slots>(() => freshSlots(key));
+	const [stored, setSlots] = useState<Slots>(() =>
+		freshSlots(key, cache.current()),
+	);
 	const scopeRef = useRef<Scope>(freshScope(key));
 	// Nouvelle annonce : nouvelle portée, les réponses de l'ancienne sont ignorées.
 	if (scopeRef.current.key !== key) scopeRef.current = freshScope(key);
 	// Et retour immédiat à l'état initial, sans un rendu avec l'ancien résultat.
+	// L'accès en cache reste affiché : il ne dépend pas de l'annonce.
 	let slots = stored;
 	if (stored.key !== key) {
-		slots = freshSlots(key);
+		slots = freshSlots(key, cache.current());
 		setSlots(slots);
 	}
 
@@ -126,11 +133,12 @@ export function useAiScan(
 			if (!mountedRef.current) return;
 			const seq = ++scope.accessSeq;
 			scope.reading = true;
+			const ticket = cache.begin();
 			// L'accès précédent reste affiché pendant la lecture : pas de « Chargement… ».
-			const settle = (access: AccessState) => {
+			const settle = (access: AccessReading) => {
+				cache.settle(ticket, access);
 				if (scope.accessSeq !== seq) return;
 				scope.reading = false;
-				scope.access = access;
 				patch(scope, { access });
 			};
 			void client.access().then(
@@ -139,15 +147,21 @@ export function useAiScan(
 				() => settle({ error: "background_unavailable" }),
 			);
 		},
-		[client, patch],
+		[client, patch, cache],
 	);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: `key` renouvelle la fonction à chaque annonce
 	const loadAccess = useCallback(() => {
 		const scope = scopeRef.current;
-		if (scope.reading || isActive(scope.access)) return;
-		readAccess(scope);
-	}, [readAccess, key]);
+		if (scope.reading) return;
+		if (cache.needsRead()) {
+			readAccess(scope);
+			return;
+		}
+		// Accès encore valable, peut-être lu ailleurs (icônes de cartes).
+		const access = cache.current();
+		if (access) patch(scope, { access });
+	}, [readAccess, patch, cache, key]);
 
 	const scan = useCallback(
 		(kind: ScanKind) => {
@@ -169,8 +183,12 @@ export function useAiScan(
 			const finish = (state: ScanState) => {
 				scope.inflight.delete(kind);
 				patch(scope, { [kind]: state });
+				// R8 : session expirée, l'accès en cache ne vaut plus, pour les
+				// icônes de cartes aussi.
+				if (state.status === "error" && RELOGIN_CODES.has(state.code))
+					cache.invalidate();
 				// Quota consommé, session expirée (R3 : l'accès relu dit alors signedOut) :
-				// l'accès est relu après chaque scan, réussi ou non.
+				// l'accès est relu après chaque scan, réussi ou non, même actif en cache.
 				if (mountedRef.current && scopeRef.current === scope) readAccess(scope);
 			};
 			void client.scan(request).then(
@@ -183,7 +201,7 @@ export function useAiScan(
 				() => finish({ status: "error", code: "background_unavailable" }),
 			);
 		},
-		[client, patch, readAccess],
+		[client, patch, readAccess, cache],
 	);
 
 	const login = useCallback(() => {
