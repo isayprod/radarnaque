@@ -14,8 +14,8 @@ const CONFIG_PREFIX_RE = /^\s*window\.__CONFIG__\s*=/;
 const SEARCH_PATH_RE = /^\/(l|q)\//i;
 /**
  * Lien de carte : repéré par le motif d'URL de la fiche, pas par les classes du
- * site (hachées). Les annonces sponsorisées (Admarkt) ont un id `a<chiffres>`,
- * que `LISTING_PATH_RE` écarte.
+ * site (hachées). Une annonce professionnelle (`a…`), dont la fiche n'est pas
+ * encore prise en charge, a un id `a<chiffres>`, que `LISTING_PATH_RE` écarte.
  */
 const CARD_LINK = 'a[href*="/v/"]';
 

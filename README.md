@@ -333,8 +333,8 @@ Facebook Marketplace.
   souvent pas les données complètes : l'analyse se fait alors avec les seules informations de
   la carte et le résumé indique « Analyse partielle ». Pour une analyse complète, ouvrir
   l'annonce et l'analyser depuis le panneau.
-- **Annonces professionnelles de 2ememain** (identifiants en `a…`) : pas d'icône, et leur
-  fiche n'est pas prise en charge.
+- **Annonces professionnelles de 2ememain** (`a…`), dont la fiche n'est pas encore prise en
+  charge : pas d'icône.
 - **Carte sans icône sur 2ememain.** Certaines cartes reçoivent leur lien tard : l'icône
   apparaît dès que le site l'a renseigné (au défilement, ou après quelques instants).
 - **Fiche Facebook ouverte en fenêtre modale.** Les icônes de la grille disparaissent tant
@@ -355,8 +355,8 @@ Facebook Marketplace.
   scans au total, texte et photos confondus ; se connecter depuis la popup avec une
   nouvelle adresse email crée un compte neuf, donc un nouvel essai de 3 scans.
 - **Pas d'icône « R » sur une recherche** : le compte est-il en essai, premium ou admin ? la
-  page est-elle bien une recherche (`/q/…`, `/l/…`) et non une fiche ? Les cartes sponsorisées
-  (`a…`) n'en ont jamais.
+  page est-elle bien une recherche (`/q/…`, `/l/…`) et non une fiche ? Une annonce
+  professionnelle (`a…`), dont la fiche n'est pas encore prise en charge, n'en a jamais.
 
 ## Changer de fournisseur
 

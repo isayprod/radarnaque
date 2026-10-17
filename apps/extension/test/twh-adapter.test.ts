@@ -561,7 +561,7 @@ describe("twhAdapter — page de résultats", () => {
 		expect(twhAdapter.pageType(FIXED_URL, fixed())).toBe("listing");
 	});
 
-	test("findCards rend les cartes non sponsorisées, dans l'ordre, sans suivi", () => {
+	test("findCards rend les cartes hors annonces professionnelles (`a…`), dans l'ordre, sans suivi", () => {
 		const doc = search();
 		const cards = searchCards(doc);
 		expect(cards.map((c) => c.externalId)).toEqual(SEARCH_IDS);
@@ -580,7 +580,7 @@ describe("twhAdapter — page de résultats", () => {
 		expect(new Set(cards.map((c) => c.element)).size).toBe(cards.length);
 	});
 
-	test("la carte sponsorisée et la carte sans lien sont ignorées", () => {
+	test("l'annonce professionnelle (`a…`), dont la fiche n'est pas encore prise en charge, et la carte sans lien sont ignorées", () => {
 		const doc = search();
 		const items = [...doc.querySelectorAll("ul > li")];
 		const cards = searchCards(doc);
