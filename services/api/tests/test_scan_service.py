@@ -1,5 +1,6 @@
 import asyncio
 import io
+import logging
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -27,6 +28,7 @@ from radarnaque_api.models import (
     Subscription,
 )
 from radarnaque_api.schemas import AnalysisResultOut, ScanIn
+from radarnaque_api.services import scans as scans_service
 from radarnaque_api.services.scans import ScanError, from_cache_expr, risk_level, run_scan
 from radarnaque_api.services.usage import compute_usage
 
@@ -552,6 +554,65 @@ async def test_cancellation_during_the_analysis_returns_the_scan(engine, http, c
     clock.advance(seconds=1)
     result = await asyncio.wait_for(_scan_once(engine, user, _scan(), FakeLLM(), http, clock), 10)
     assert result.from_cache is False and result.remaining.total == 2
+
+
+class _FailureWriteError(RuntimeError):
+    """Échec simulé de l'écriture du `scan_failures` ; son message n'est jamais journalisé."""
+
+
+@pytest.fixture
+def failing_failure_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _raise(**_kw):
+        raise _FailureWriteError("secret-db-message-4471")
+
+    monkeypatch.setattr(scans_service, "ScanFailure", _raise)
+
+
+async def test_failed_give_back_is_logged_without_the_message(
+    engine, http, clock, caplog, failing_failure_write
+):
+    caplog.set_level(logging.DEBUG)
+    llm = FakeLLM(error=LLMError("transport", "fake"))
+    user = await _user(engine)
+
+    # Comportement d'origine conservé : l'erreur de l'écriture remonte.
+    with pytest.raises(_FailureWriteError):
+        await _scan_once(engine, user, _scan(), llm, http, clock)
+
+    event_id = await _scalar(engine, select(ScanEvent.id))
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert [r.getMessage() for r in errors] == [
+        f"remboursement impossible pour scan_event_id={event_id} (_FailureWriteError)"
+    ]
+    assert errors[0].exc_info is None
+    assert "secret-db-message-4471" not in caplog.text
+    assert await _count(engine, ScanFailure) == 0
+
+
+async def test_failed_give_back_after_cancellation_is_logged(
+    engine, http, clock, caplog, failing_failure_write
+):
+    caplog.set_level(logging.DEBUG)
+    started = asyncio.Event()
+
+    class BlockingLLM(FakeLLM):
+        async def analyze(self, *, model: str, system_prompt: str, messages: list[dict]):
+            started.set()
+            await asyncio.Event().wait()
+
+    user = await _user(engine)
+    task = asyncio.create_task(_scan_once(engine, user, _scan(), BlockingLLM(), http, clock))
+    await asyncio.wait_for(started.wait(), 5)
+    task.cancel()
+    with pytest.raises(_FailureWriteError):
+        await task
+
+    event_id = await _scalar(engine, select(ScanEvent.id))
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert errors == [
+        f"remboursement impossible pour scan_event_id={event_id} (_FailureWriteError)"
+    ]
+    assert "secret-db-message-4471" not in caplog.text
 
 
 # --- Photos ------------------------------------------------------------------------------------

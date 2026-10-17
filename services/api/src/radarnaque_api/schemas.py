@@ -1,7 +1,15 @@
 from datetime import datetime
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    StrictInt,
+    StringConstraints,
+    model_validator,
+)
 from pydantic.alias_generators import to_camel
 
 
@@ -46,10 +54,21 @@ class PriceIn(CamelInModel):
     currency: Literal["EUR"]
 
 
+# Bornes des champs texte transmis au LLM (règle R14). L'extension (phase 3b) tronque côté
+# client aux mêmes valeurs : une annonce réelle n'est jamais refusée.
+LOCATION_MAX = 100
+CATEGORY_MAX = 200
+CONDITION_MAX = 100
+POSTED_AT_MAX = 64
+PARAMS_MAX_ENTRIES = 10
+PARAM_KEY_MAX = 40
+PARAM_VALUE_MAX = 200
+
+
 class LocationIn(CamelInModel):
-    city: str | None = None
-    region: str | None = None
-    country: str | None = None
+    city: str | None = Field(default=None, max_length=LOCATION_MAX)
+    region: str | None = Field(default=None, max_length=LOCATION_MAX)
+    country: str | None = Field(default=None, max_length=LOCATION_MAX)
 
 
 class ListingIn(CamelInModel):
@@ -60,19 +79,25 @@ class ListingIn(CamelInModel):
     description: str = Field(max_length=5000)
     price: PriceIn | None = None
     price_type: Literal["fixed", "bidding", "free", "unknown"]
-    category: str | None = None
-    condition: str | None = None
-    posted_at: str | None = None
+    category: str | None = Field(default=None, max_length=CATEGORY_MAX)
+    condition: str | None = Field(default=None, max_length=CONDITION_MAX)
+    posted_at: str | None = Field(default=None, max_length=POSTED_AT_MAX)
     location: LocationIn
     images: list[HttpUrl] = Field(default_factory=list, max_length=10)
     seller: SellerFactsIn
+
+
+ParamKey = Annotated[str, StringConstraints(min_length=1, max_length=PARAM_KEY_MAX)]
+# Entier strict : une longue chaîne de chiffres n'est pas convertie en entier, ce qui
+# contournerait la borne des chaînes.
+ParamValue = Annotated[str, StringConstraints(max_length=PARAM_VALUE_MAX)] | StrictInt
 
 
 class SignalIn(CamelInModel):
     id: str = Field(min_length=1, max_length=40)
     weight: int = Field(ge=0, le=100)
     severity: Severity
-    params: dict[str, str | int] | None = None
+    params: dict[ParamKey, ParamValue] | None = Field(default=None, max_length=PARAMS_MAX_ENTRIES)
 
 
 class RulesIn(CamelInModel):

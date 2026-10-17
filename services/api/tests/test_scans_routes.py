@@ -360,3 +360,127 @@ def test_http_loggers_are_quiet(settings):
     create_app(settings)
     for name in ("httpx", "httpcore", "openai"):
         assert logging.getLogger(name).getEffectiveLevel() >= logging.WARNING
+
+
+# --- Bornes des champs envoyés au LLM (règle R14) ---------------------------------------------
+
+
+def _with_signal_params(params: dict) -> dict:
+    body = _body()
+    body["rules"]["signals"] = [
+        {"id": "foreign_location", "weight": 20, "severity": "warning", "params": params}
+    ]
+    return body
+
+
+_LISTING_BOUNDS = [
+    ("category", 200),
+    ("condition", 100),
+    ("postedAt", 64),
+]
+_LOCATION_BOUNDS = [("city", 100), ("region", 100), ("country", 100)]
+
+
+@pytest.mark.parametrize(("field", "limit"), _LISTING_BOUNDS)
+async def test_listing_text_field_over_its_bound_is_invalid_listing(
+    client, bearer, user, llm, field, limit
+):
+    uid = await user()
+    r = await client.post(
+        "/api/scans", json=_body(**{field: "x" * (limit + 1)}), headers=bearer(uid)
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "invalid_listing"
+    assert r.json()["error"]["details"]["field"] == f"listing.{field}"
+    assert llm.calls == 0
+
+
+@pytest.mark.parametrize(("field", "limit"), _LOCATION_BOUNDS)
+async def test_location_field_over_its_bound_is_invalid_listing(
+    client, bearer, user, llm, field, limit
+):
+    uid = await user()
+    body = _body(location={field: "x" * (limit + 1)})
+    r = await client.post("/api/scans", json=body, headers=bearer(uid))
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "invalid_listing"
+    assert r.json()["error"]["details"]["field"] == f"listing.location.{field}"
+    assert llm.calls == 0
+
+
+async def test_listing_fields_at_their_exact_bounds_are_accepted(client, bearer, user, llm):
+    uid = await user()
+    body = _body(
+        **{field: "x" * limit for field, limit in _LISTING_BOUNDS},
+        location={field: "x" * limit for field, limit in _LOCATION_BOUNDS},
+    )
+    r = await client.post("/api/scans", json=body, headers=bearer(uid))
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {f"k{n}": n for n in range(11)},
+        {"k" * 41: 1},
+        {"": 1},
+        {"country": "x" * 201},
+    ],
+    ids=["11-entries", "41-char-key", "empty-key", "201-char-value"],
+)
+async def test_signal_params_over_their_bounds_are_invalid_listing(
+    client, bearer, user, llm, params
+):
+    uid = await user()
+    r = await client.post("/api/scans", json=_with_signal_params(params), headers=bearer(uid))
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "invalid_listing"
+    assert r.json()["error"]["details"]["field"].startswith("rules.signals.0.params")
+    assert llm.calls == 0
+
+
+async def test_signal_params_at_their_exact_bounds_are_accepted(client, bearer, user, llm):
+    uid = await user()
+    params: dict = {f"{n:02d}" + "k" * 38: n for n in range(9)}
+    params["v" * 40] = "x" * 200
+    assert len(params) == 10
+    r = await client.post("/api/scans", json=_with_signal_params(params), headers=bearer(uid))
+    assert r.status_code == 200, r.text
+
+
+async def test_real_extension_signal_params_are_accepted(client, bearer, user, llm):
+    """Paramètres réellement émis par les règles de l'extension (apps/extension/lib/rules)."""
+    uid = await user()
+    body = _body()
+    body["rules"]["signals"] = [
+        {"id": "few_photos", "weight": 15, "severity": "warning", "params": {"count": 0}},
+        {
+            "id": "foreign_location",
+            "weight": 20,
+            "severity": "warning",
+            "params": {"country": "NL"},
+        },
+        {"id": "contact_outside", "weight": 25, "severity": "danger", "params": {"kind": "phone"}},
+    ]
+    r = await client.post("/api/scans", json=body, headers=bearer(uid))
+    assert r.status_code == 200, r.text
+
+
+# --- Scan « image » sans photo -------------------------------------------------------------
+
+
+async def test_image_scan_without_images_is_invalid_listing_before_reserving(
+    client, bearer, user, llm, db
+):
+    uid = await user()
+    body = {**_body(), "scanKind": "image"}
+    r = await client.post("/api/scans", json=body, headers=bearer(uid))
+    assert r.status_code == 422, r.text
+    error = r.json()["error"]
+    assert error["code"] == "invalid_listing"
+    assert error["details"]["field"] == "listing.images"
+    assert llm.calls == 0
+    events = await db.scalar(
+        text("select count(*) from app.scan_events where user_id = :uid"), {"uid": uid}
+    )
+    assert events == 0
