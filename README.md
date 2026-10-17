@@ -137,7 +137,7 @@ nécessaire, seul `apps/extension/.env` doit exister (voir « 1. Configuration �
 Si une fiche n'est pas reconnue, rien ne s'affiche et la console de la page (niveau
 « Verbose ») contient une seule ligne `radarnaque: extraction impossible (<adaptateur>)`.
 
-## Analyses IA en dev (OmniRoute, Ollama ou faux fournisseur)
+## Analyses IA en dev (Groq, abonnement ChatGPT, OmniRoute, Ollama ou faux fournisseur)
 
 Les fournisseurs LLM sont décrits dans `services/api/providers.toml` : URL, format de sortie
 structurée, source du coût et **nom** de la variable d'environnement de la clé (jamais la
@@ -189,7 +189,57 @@ tant qu'aucun type de scan ne l'utilise. Après `radarnaque-llm use stub stub-mo
 `stub/stub-model` reste dans la table `models`, même une fois un autre modèle activé : tant
 qu'elle existe, l'API refuse de démarrer si `stub` est retiré de `providers.toml`.
 
-### OmniRoute (routeur local vers des modèles gratuits ou par abonnement)
+### Groq (fournisseur de dev par défaut, gratuit)
+
+1. Créer une clé gratuite sur [console.groq.com](https://console.groq.com) → **API Keys**.
+2. Dans `infra/.env` : `GROQ_API_KEY=<clé>`, puis redémarrer `pnpm dev:api`.
+3. Activer Groq pour les deux types de scan :
+
+   ```sh
+   cd services/api
+   uv run --env-file ../../infra/.env radarnaque-llm use groq llama-3.3-70b-versatile --kind text
+   uv run --env-file ../../infra/.env radarnaque-llm use groq qwen/qwen3.8-27b --kind image
+   ```
+
+4. `pnpm e2e:scan` doit afficher `E2E SCAN OK (provider=groq, model=llama-3.3-70b-versatile, …)`.
+
+L'offre gratuite limite les requêtes et les tokens par minute et par jour (une réponse 429 de
+Groq donne un scan en échec `502`, rendu à l'utilisateur). Groq reçoit une sortie
+`json_object`, avec le schéma attendu dans le prompt système : la sortie stricte
+(`json_schema`) n'est acceptée que par certains de ses modèles. Son modèle vision accepte au
+plus 3 images par requête : `max_images = 3` dans `providers.toml` limite les photos
+envoyées. La liste des modèles change souvent : la vérifier sur
+[console.groq.com/docs/models](https://console.groq.com/docs/models) (modèles vision :
+[console.groq.com/docs/vision](https://console.groq.com/docs/vision)). Le coût enregistré est
+nul.
+
+### Abonnement ChatGPT/Codex (`openai-oauth`), en local uniquement
+
+[openai-oauth](https://github.com/EvanZhouDev/openai-oauth) est un proxy local, non officiel,
+qui expose l'abonnement ChatGPT (Plus/Pro) comme une API compatible OpenAI, en réutilisant la
+session de Codex (`~/.codex/auth.json`).
+
+1. Se connecter si ce n'est pas déjà fait (`npx openai-oauth login`, ou `codex login`), puis
+   lancer le proxy dans un terminal à part : `npx openai-oauth`. Il écoute sur
+   `http://127.0.0.1:10531/v1` et affiche les modèles de l'abonnement.
+2. Activer un de ces modèles, par exemple :
+
+   ```sh
+   cd services/api
+   uv run --env-file ../../infra/.env radarnaque-llm use openai-oauth gpt-5.4-mini --kind text
+   uv run --env-file ../../infra/.env radarnaque-llm use openai-oauth gpt-5.4-mini --kind image
+   ```
+
+3. `pnpm e2e:scan` doit afficher `E2E SCAN OK (provider=openai-oauth, …)`.
+
+Le proxy n'a pas de clé et ignore `response_format` : l'entrée `openai-oauth` est donc en
+`json_object` (schéma dans le prompt système, réponse validée par l'API, une nouvelle
+tentative si elle est invalide). **À n'utiliser qu'en local** : toute requête qui atteint le
+proxy est décomptée de l'abonnement, OpenAI peut changer ou fermer ce service interne à tout
+moment, et ses conditions d'utilisation ne prévoient pas cet usage. Il n'est jamais passé à
+la composition de production. Le coût enregistré est nul.
+
+### OmniRoute (alternative : routeur local vers des modèles gratuits ou par abonnement)
 
 1. Lancer OmniRoute sur le port 20128 : `npx omniroute`, ou avec Docker
    `docker run -d --name omniroute -p 20128:20128 diegosouzapw/omniroute` (commande à
@@ -238,7 +288,8 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env exec api \
 
 En dev, mêmes commandes avec `cd services/api && uv run --env-file ../../infra/.env
 radarnaque-llm …`. La composition de production passe à l'API `OPENROUTER_API_KEY`,
-`OMNIROUTE_API_KEY`, `OMNIROUTE_BASE_URL` et `OLLAMA_BASE_URL`, toutes facultatives.
+`GROQ_API_KEY`, `OMNIROUTE_API_KEY`, `OMNIROUTE_BASE_URL` et `OLLAMA_BASE_URL`, toutes
+facultatives.
 
 **Changer de modèle change la clé du cache.** Une analyse est réutilisée pour la même
 annonce, le même modèle et la même version de prompt : après un changement de modèle, les
@@ -257,8 +308,10 @@ Ajouter un fournisseur compatible OpenAI (`POST <base_url>/chat/completions`) :
    cost_source = "none"                     # ou "usage_cost" (usage.cost, comme OpenRouter)
    ```
 
-   `base_url_env` (facultatif) nomme une variable qui remplace `base_url`, et `extra_body`
-   (facultatif) ajoute des champs à chaque requête (voir l'entrée `openrouter`).
+   `base_url_env` (facultatif) nomme une variable qui remplace `base_url`, `extra_body`
+   (facultatif) ajoute des champs à chaque requête (voir l'entrée `openrouter`), et
+   `max_images` (facultatif) réduit le nombre de photos envoyées si le fournisseur en accepte
+   moins de 4 par requête (voir l'entrée `groq`).
 2. Définir la variable dans `infra/.env` ; en production, l'ajouter aussi à l'environnement
    du service `api` dans `infra/docker-compose.yml` (`MONFOURNISSEUR_API_KEY:
    ${MONFOURNISSEUR_API_KEY:-}`).
