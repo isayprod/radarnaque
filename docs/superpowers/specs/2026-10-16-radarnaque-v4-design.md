@@ -165,7 +165,7 @@ type Listing = {
   category?: string;
   condition?: string;
   postedAt?: string;            // ISO 8601
-  location: { city?: string; region?: string; postalCode?: string; country?: string };
+  location: { city?: string; region?: string; country?: string };
   images: string[];             // URLs absolues, dans l'ordre d'affichage
   seller: {
     id?: string; name?: string; profileUrl?: string;  // utilisés côté client uniquement
