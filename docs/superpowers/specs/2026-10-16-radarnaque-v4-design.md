@@ -365,7 +365,8 @@ analysis_reason_texts(reason_id FK, locale FK, text, PK(reason_id, locale))
 ```
 
 - **`content_hash`** = SHA-256 de la forme canonique de `{ title, description, price, priceType, images }`. Il est **toujours recalculé par le serveur**.
-- **`input_hash`** = SHA-256 de la forme canonique de `{ sellerFacts sans identité, rules.version, rules.signals triés, partial }`. Ces données ne sont pas stockées. Ce hash empêche d'empoisonner le cache avec de faux signaux : des données différentes donnent une autre clé de cache.
+- **`input_hash`** = SHA-256 de la forme canonique de `{ sellerFacts sans identité, category, condition, postedAt, location, rules.version, rules.signals triés, partial }`. Ces données ne sont pas stockées. Ce hash empêche d'empoisonner le cache avec de faux signaux : des données différentes donnent une autre clé de cache.
+- **Invariant :** tout champ envoyé au LLM est couvert par `content_hash` ou par `input_hash` (le site et l'identifiant de l'annonce le sont par le snapshot lui-même). Sinon, une annonce forgée, par exemple une injection dans la catégorie, empoisonnerait le cache de tous les utilisateurs.
 - **Le type de scan** d'une analyse se déduit via `prompt_version_id → scan_kind`. Il n'est pas dupliqué.
 - **Le niveau de risque** se calcule à partir de `score`, avec les mêmes seuils que §4.4. Il n'est pas stocké.
 - **La validité d'une entrée de cache** se calcule : `created_at + settings.cache_ttl_hours > now()`. Elle n'est pas stockée.

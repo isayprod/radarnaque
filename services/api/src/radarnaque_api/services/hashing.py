@@ -34,13 +34,22 @@ def content_hash(listing: ListingIn, masked_title: str, masked_description: str)
 
 
 def input_hash(scan: ScanIn) -> str:
-    """Empreinte de ce qui, hors contenu, change l'analyse : faits sur le vendeur (le schéma
-    d'entrée refuse son identité), version des règles, signaux triés par identifiant (avec leurs
-    paramètres) et scan partiel. Des signaux forgés donnent donc une autre clé de cache."""
+    """Empreinte de ce qui, hors contenu du snapshot, change l'analyse : faits sur le vendeur (le
+    schéma d'entrée refuse son identité), catégorie, état, date de publication et lieu, version
+    des règles, signaux triés par identifiant (avec leurs paramètres) et scan partiel.
+
+    Invariant (règle R12) : tout champ envoyé au LLM (`llm.payload.build_messages`) est couvert
+    par `content_hash` ou par cette empreinte, sinon une annonce forgée (signaux, catégorie…)
+    empoisonnerait le cache de tous les utilisateurs. Vérifié par tests/test_hashing.py."""
+    listing = scan.listing
     signals = [s.model_dump(mode="json", by_alias=True) for s in scan.rules.signals]
     return _sha256(
         {
-            "seller": scan.listing.seller.model_dump(mode="json", by_alias=True),
+            "seller": listing.seller.model_dump(mode="json", by_alias=True),
+            "category": listing.category,
+            "condition": listing.condition,
+            "postedAt": listing.posted_at,
+            "location": listing.location.model_dump(mode="json", by_alias=True),
             "rulesVersion": scan.rules.version,
             "signals": sorted(signals, key=lambda s: (s["id"], canonical_json(s))),
             "partial": scan.partial,
