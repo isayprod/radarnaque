@@ -176,19 +176,14 @@ def _check_deferred_constraints() -> None:
 
 
 def upgrade() -> None:
-    op.bulk_insert(
-        sa.table(
-            "prompt_versions",
-            sa.column("scan_kind", sa.Text),
-            sa.column("version", sa.Integer),
-            sa.column("system_prompt", sa.Text),
-            schema=S,
-        ),
-        [
-            {"scan_kind": "text", "version": 2, "system_prompt": TEXT_PROMPT_V2},
-            {"scan_kind": "image", "version": 2, "system_prompt": IMAGE_PROMPT_V2},
-        ],
+    # Insertion idempotente (cas d'une ligne v2 conservée par un downgrade) ; les paramètres liés
+    # laissent les accolades du texte intactes.
+    insert = sa.text(
+        f"insert into {S}.prompt_versions(scan_kind, version, system_prompt)"
+        " values (:k, 2, :p) on conflict (scan_kind, version) do nothing"
     )
+    for kind, prompt in (("text", TEXT_PROMPT_V2), ("image", IMAGE_PROMPT_V2)):
+        op.execute(insert.bindparams(k=kind, p=prompt))
     # La clé étrangère est différée, mais les lignes v2 existent déjà à ce stade.
     op.execute(
         f"update {S}.scan_kinds k set active_prompt_version_id = p.id"
@@ -199,9 +194,14 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # On réactive v1 avant de supprimer v2 : plus aucune référence active vers les lignes v2.
+    # Une v2 déjà référencée par une analyse est conservée (la supprimer violerait la clé
+    # étrangère de `analyses` et effacerait l'historique) ; l'upgrade suivant la réutilise.
     op.execute(
         f"update {S}.scan_kinds k set active_prompt_version_id = p.id"
         f" from {S}.prompt_versions p where p.scan_kind = k.code and p.version = 1"
     )
-    op.execute(f"delete from {S}.prompt_versions where version = 2")
+    op.execute(
+        f"delete from {S}.prompt_versions p where p.version = 2"
+        f" and not exists (select 1 from {S}.analyses a where a.prompt_version_id = p.id)"
+    )
     _check_deferred_constraints()
