@@ -31,6 +31,23 @@ describe("parité FR/NL", () => {
 	});
 });
 
+describe("abroad_seller", () => {
+	const signal = {
+		id: "abroad_seller",
+		weight: 20,
+		severity: "warning",
+	} as const;
+
+	test("texte FR et NL", () => {
+		expect(signalText("fr", signal)).toBe(
+			"Vendeur ou objet à l'étranger, envoi par transporteur",
+		);
+		expect(signalText("nl", signal)).toBe(
+			"Verkoper of voorwerp in het buitenland, verzending via koerier",
+		);
+	});
+});
+
 describe("contentText", () => {
 	test("renvoie les textes imposés", () => {
 		expect(contentText("fr", "level.high")).toBe("Risque élevé");

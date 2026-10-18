@@ -77,6 +77,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		new_account: "Compte vendeur très récent",
 		no_reviews: "Aucun avis sur le vendeur",
 		foreign_location: "Vendeur situé hors de Belgique ({country})",
+		abroad_seller: "Vendeur ou objet à l'étranger, envoi par transporteur",
 		short_description: "Description très courte",
 		contact_outside:
 			"Invite à continuer hors de la plateforme (téléphone, email ou messagerie)",
@@ -137,6 +138,8 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		new_account: "Zeer recent verkopersaccount",
 		no_reviews: "Geen beoordelingen voor de verkoper",
 		foreign_location: "Verkoper buiten België ({country})",
+		abroad_seller:
+			"Verkoper of voorwerp in het buitenland, verzending via koerier",
 		short_description: "Zeer korte beschrijving",
 		contact_outside:
 			"Vraagt om buiten het platform verder te gaan (telefoon, e-mail of chat)",
