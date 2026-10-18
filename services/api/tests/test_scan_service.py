@@ -22,6 +22,7 @@ from radarnaque_api.models import (
     AnalysisText,
     AuthUser,
     ListingSnapshot,
+    PromptVersion,
     ScanEvent,
     ScanFailure,
     ScanResult,
@@ -256,7 +257,7 @@ async def test_trial_text_scan_succeeds_and_consumes_one_scan(engine, http, cloc
     assert len(llm.calls) == 1
     assert llm.providers == ["openrouter"]
     assert llm.calls[0]["model"] == "google/gemini-2.5-flash-lite"
-    assert llm.calls[0]["system_prompt"].startswith("Tu es un expert anti-arnaque")
+    assert llm.calls[0]["system_prompt"].startswith("Tu aides un acheteur à repérer")
     assert result.score == 61 and result.level == "high"
     assert result.partial is False and result.from_cache is False
     assert (result.summary.fr, result.summary.nl) == ("Résumé 1", "Samenvatting 1")
@@ -273,6 +274,12 @@ async def test_trial_text_scan_succeeds_and_consumes_one_scan(engine, http, cloc
     analysis = await _scalar(engine, select(Analysis).where(Analysis.id == result.analysis_id))
     assert (analysis.tokens_in, analysis.tokens_out, analysis.cost_usd_micros) == (100, 10, 42)
     assert analysis.rules_version == 1 and analysis.created_at == T0
+    # L'analyse est enregistrée avec le prompt v2 (prompt actif du type « text »).
+    prompt = await _scalar(
+        engine, select(PromptVersion).where(PromptVersion.id == analysis.prompt_version_id)
+    )
+    assert (prompt.scan_kind, prompt.version) == ("text", 2)
+    assert prompt.system_prompt == llm.calls[0]["system_prompt"]
     event = await _scalar(engine, select(ScanEvent).where(ScanEvent.user_id == user.id))
     assert (event.scan_kind, event.trigger, event.created_at) == ("text", "button", T0)
 
