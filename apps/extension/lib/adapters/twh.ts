@@ -52,6 +52,21 @@ const PRICE_LABELS = new Map<string, Listing["priceType"]>([
 	["gereserveerd", "reserved"],
 ]);
 
+/**
+ * Valeurs de `sellerType` (R7), en majuscules. Liste fermée : une valeur inconnue
+ * reste indéterminée plutôt que de valoir « professionnel » par défaut. La valeur
+ * réelle d'un professionnel reste à relever sur une vraie annonce.
+ */
+const PRIVATE_SELLER_TYPES = new Set(["CONSUMER"]);
+const PROFESSIONAL_SELLER_TYPES = new Set([
+	"PROFESSIONAL",
+	"TRADER",
+	"BUSINESS",
+	"DEALER",
+	"COMPANY",
+	"PRO",
+]);
+
 /** Lien de la section vendeur qui ne s'affiche que pour un professionnel. */
 const WEBSITE_LINK_LABELS = new Set([
 	"visiter le site internet",
@@ -270,16 +285,19 @@ function readReviews(
 }
 
 /**
- * Particulier ou professionnel. `sellerType` de `__CONFIG__` fait foi ; sans
- * lui, un lien « Visiter le site internet » dans la section vendeur indique un
- * professionnel. Sinon : indéterminé.
+ * Particulier ou professionnel. Un `sellerType` de `__CONFIG__` connu (R7) fait
+ * foi, même face à un lien vers un site (R3 : la plateforme l'attribue, le vendeur
+ * ne peut pas acheter le traitement « professionnel » en ajoutant un lien). Absent
+ * ou inconnu : un lien « Visiter le site internet » dans la section vendeur
+ * indique un professionnel. Sinon : indéterminé.
  */
 function readSellerKind(
 	sellerType: unknown,
 	doc: Document,
 ): Listing["seller"]["sellerKind"] {
-	const type = str(sellerType);
-	if (type) return type === "CONSUMER" ? "private" : "professional";
+	const type = str(sellerType)?.toUpperCase();
+	if (type && PRIVATE_SELLER_TYPES.has(type)) return "private";
+	if (type && PROFESSIONAL_SELLER_TYPES.has(type)) return "professional";
 	const hasWebsite = SELLER_SCOPES.some((scope) =>
 		[...doc.querySelectorAll(`${scope} a`)].some((a) =>
 			WEBSITE_LINK_LABELS.has(foldText(a.textContent ?? "")),

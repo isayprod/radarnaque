@@ -147,8 +147,10 @@ export function useAiScan(
 	// Même annonce, autre version (prix, description…) : l'ancien verdict IA
 	// n'est plus affiché, sans un rendu avec lui.
 	const fingerprint = listingFingerprint(view.listing);
-	if (dropStale(slots, fingerprint) !== slots) {
-		slots = dropStale(slots, fingerprint);
+	const fresh = dropStale(slots, fingerprint);
+	if (fresh !== slots) {
+		slots = fresh;
+		// Appliqué à l'état le plus récent, qui peut différer de celui de ce rendu.
 		setSlots((prev) => dropStale(prev, fingerprint));
 	}
 
