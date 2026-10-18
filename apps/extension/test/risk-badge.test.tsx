@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { AnalysisResult } from "@radarnaque/shared";
 import {
 	act,
 	cleanup,
@@ -15,6 +16,11 @@ import { browser } from "wxt/browser";
 import { RiskBadge } from "../components/RiskBadge";
 import { createAccessCache, RECHECK_MS } from "../lib/content/access-policy";
 import type { AiClient } from "../lib/content/ai-client";
+import {
+	type AiResultStore,
+	listingFingerprint,
+	type StoredAiResult,
+} from "../lib/content/ai-results";
 import { aiErrorText, contentText } from "../lib/content-i18n";
 import type { Listing } from "../lib/listing/types";
 import type { ContentAccess } from "../lib/messages";
@@ -511,6 +517,259 @@ describe("RiskBadge : analyse IA", () => {
 		await screen.findByText(contentText("fr", "ai.loginFallback"));
 		// Le clic dans le panneau ne l'a pas fermé.
 		expect(screen.getByRole("dialog")).toBeTruthy();
+	});
+});
+
+describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
+	const medium: RiskReport = {
+		score: 40,
+		level: "medium",
+		rulesVersion: 1,
+		signals: [
+			{ id: "new_account", weight: 25, severity: "danger" },
+			{ id: "no_reviews", weight: 15, severity: "warning" },
+		],
+	};
+	const LOCAL_TEXTS = [
+		"Compte vendeur très récent",
+		"Aucun avis sur le vendeur",
+		contentText("fr", "panel.footer"),
+		contentText("fr", "panel.none"),
+	];
+	const aiHigh: AnalysisResult = {
+		...sampleAnalysis,
+		level: "high",
+		score: 82,
+		summary: { fr: "Arnaque probable.", nl: "Waarschijnlijk oplichting." },
+	};
+	const findRun = () =>
+		screen.findByRole("button", { name: contentText("fr", "ai.run") });
+	const described = () =>
+		(toggle().getAttribute("aria-describedby") ?? "")
+			.split(" ")
+			.map((id) => document.getElementById(id)?.textContent);
+
+	/** Magasin simulé : entrées par `site|externalId`. */
+	const storeWith = (
+		entries: Record<string, StoredAiResult>,
+	): AiResultStore => ({
+		get: async (site, id) => entries[`${site}|${id}`] ?? null,
+		put: async () => {},
+	});
+
+	test("avant le scan : pastille « Risque moyen 40/100 », panneau avec les signaux locaux", async () => {
+		const user = userEvent.setup();
+		render(<RiskBadge report={medium} listing={listing} locale="fr" ai={ai} />);
+		expect(toggle().textContent).toContain("Risque moyen");
+		expect(toggle().textContent).toContain("40/100");
+		expect(toggle().textContent).not.toContain(
+			contentText("fr", "ai.badgeTag"),
+		);
+		await user.click(toggle());
+		const dialog = screen.getByRole("dialog", {
+			name: contentText("fr", "panel.title"),
+		});
+		expect(dialog.textContent).toContain("Compte vendeur très récent");
+		expect(dialog.textContent).toContain(contentText("fr", "panel.footer"));
+		expect(screen.queryByRole("note")).toBeNull();
+	});
+
+	test("après un scan texte done (82, high) : pastille IA, panneau sans analyse locale", async () => {
+		const user = userEvent.setup();
+		ai.scan.mockResolvedValue({ ok: true, data: aiHigh });
+		render(<RiskBadge report={medium} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await user.click(await findRun());
+		await screen.findByText(aiHigh.summary.fr);
+
+		expect(toggle().textContent).toContain("Risque élevé");
+		expect(toggle().textContent).toContain("82/100");
+		expect(toggle().textContent).toContain("IA");
+		expect(toggle().textContent).not.toContain("40/100");
+		expect(toggle().getAttribute("aria-label")).toBe(
+			contentText("fr", "badge.ariaAi"),
+		);
+		expect(described()).toEqual(["Risque élevé", "82/100"]);
+
+		const dialog = screen.getByRole("dialog", {
+			name: "Analyse IA Radarnaque",
+		});
+		expect(within(dialog).getByRole("heading", { level: 2 }).textContent).toBe(
+			"Analyse IA Radarnaque",
+		);
+		for (const text of LOCAL_TEXTS)
+			expect(dialog.textContent).not.toContain(text);
+		expect(dialog.textContent).not.toContain("Analyse locale, sans IA");
+		expect(dialog.textContent).toContain("82/100");
+	});
+
+	test("en NL : mention « AI », libellé et titre NL", async () => {
+		const user = userEvent.setup();
+		ai.scan.mockResolvedValue({ ok: true, data: aiHigh });
+		render(<RiskBadge report={medium} listing={listing} locale="nl" ai={ai} />);
+		await user.click(toggle());
+		await user.click(
+			await screen.findByRole("button", { name: contentText("nl", "ai.run") }),
+		);
+		await screen.findByText(aiHigh.summary.nl);
+		expect(toggle().textContent).toContain("Hoog risico");
+		expect(toggle().textContent).toContain("AI");
+		expect(toggle().getAttribute("aria-label")).toBe(
+			"Radarnaque-AI-analyse openen",
+		);
+		expect(
+			screen.getByRole("dialog", { name: "Radarnaque-AI-analyse" }),
+		).toBeTruthy();
+		expect(screen.getByRole("dialog").textContent).not.toContain(
+			"Zeer recent verkopersaccount",
+		);
+	});
+
+	test("résultat repris du magasin : même rendu, sans clic ni scan", async () => {
+		const user = userEvent.setup();
+		const aiResults = storeWith({
+			"2ememain.be|m123": {
+				result: aiHigh,
+				scanKind: "text",
+				fingerprint: listingFingerprint(listing),
+				storedAt: 1,
+			},
+		});
+		render(
+			<RiskBadge
+				report={medium}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				aiResults={aiResults}
+			/>,
+		);
+		await vi.waitFor(() => expect(toggle().textContent).toContain("82/100"));
+		expect(toggle().textContent).toContain("Risque élevé");
+		expect(toggle().textContent).toContain("IA");
+		await user.click(toggle());
+		const dialog = screen.getByRole("dialog", {
+			name: "Analyse IA Radarnaque",
+		});
+		expect(dialog.textContent).toContain(aiHigh.summary.fr);
+		for (const text of LOCAL_TEXTS)
+			expect(dialog.textContent).not.toContain(text);
+		expect(ai.scan).not.toHaveBeenCalled();
+	});
+
+	test("scan en cours sans résultat précédent : l'analyse locale reste affichée", async () => {
+		const user = userEvent.setup();
+		ai.scan.mockImplementation(() => new Promise(() => {}));
+		render(<RiskBadge report={medium} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await user.click(await findRun());
+		expect(toggle().textContent).toContain("40/100");
+		expect(toggle().textContent).not.toContain("IA");
+		const dialog = screen.getByRole("dialog", {
+			name: contentText("fr", "panel.title"),
+		});
+		expect(dialog.textContent).toContain("Compte vendeur très récent");
+		expect(dialog.textContent).toContain(contentText("fr", "ai.loading"));
+	});
+
+	test("résultat texte, photos possibles : « Analyse avec photos », puis le résultat photos remplace le texte", async () => {
+		const user = userEvent.setup();
+		ai.access.mockResolvedValue({
+			ok: true,
+			data: { ...active, features: ["image_scan"] },
+		});
+		const imageResult: AnalysisResult = {
+			...aiHigh,
+			score: 91,
+			summary: { fr: "Photos volées.", nl: "Gestolen foto's." },
+		};
+		ai.scan
+			.mockResolvedValueOnce({ ok: true, data: aiHigh })
+			.mockResolvedValueOnce({ ok: true, data: imageResult });
+		const withPhotos = { ...listing, images: ["https://images.example/1.jpg"] };
+		render(
+			<RiskBadge report={medium} listing={withPhotos} locale="fr" ai={ai} />,
+		);
+		await user.click(toggle());
+		await user.click(await findRun());
+		await screen.findByText(aiHigh.summary.fr);
+		expect(
+			screen.queryByRole("button", { name: contentText("fr", "ai.run") }),
+		).toBeNull();
+		await user.click(
+			screen.getByRole("button", { name: contentText("fr", "ai.runPhotos") }),
+		);
+		await screen.findByText(imageResult.summary.fr);
+		expect(toggle().textContent).toContain("91/100");
+		expect(screen.queryByText(aiHigh.summary.fr)).toBeNull();
+		expect(
+			screen.queryByRole("button", { name: contentText("fr", "ai.runPhotos") }),
+		).toBeNull();
+	});
+});
+
+describe("RiskBadge : bandeau des annonces professionnelles", () => {
+	const medium: RiskReport = {
+		score: 40,
+		level: "medium",
+		rulesVersion: 1,
+		signals: [{ id: "new_account", weight: 25, severity: "danger" }],
+	};
+	const pro: Listing = {
+		...listing,
+		seller: { ...listing.seller, sellerKind: "professional" },
+	};
+
+	test("sellerKind professional sans IA : bandeau en tête du panneau, score local conservé", async () => {
+		const user = userEvent.setup();
+		render(<RiskBadge report={medium} listing={pro} locale="fr" ai={ai} />);
+		expect(toggle().textContent).toContain("40/100");
+		await user.click(toggle());
+		const dialog = screen.getByRole("dialog");
+		const note = within(dialog).getByRole("note");
+		expect(note.textContent).toBe(contentText("fr", "pro.notice"));
+		// Au-dessus de tout le reste du panneau.
+		expect(dialog.firstElementChild).toBe(note);
+		expect(dialog.textContent).toContain("Compte vendeur très récent");
+	});
+
+	test("en NL : texte NL du bandeau", async () => {
+		const user = userEvent.setup();
+		render(<RiskBadge report={medium} listing={pro} locale="nl" ai={ai} />);
+		await user.click(toggle());
+		expect(screen.getByRole("note").textContent).toBe(
+			contentText("nl", "pro.notice"),
+		);
+	});
+
+	test("vendeur particulier sans détection IA : pas de bandeau", async () => {
+		const user = userEvent.setup();
+		const priv: Listing = {
+			...listing,
+			seller: { ...listing.seller, sellerKind: "private" },
+		};
+		render(<RiskBadge report={medium} listing={priv} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		expect(screen.queryByRole("note")).toBeNull();
+	});
+
+	test("IA professional: true, score 75 : le bandeau et « 75/100 » sont tous deux présents", async () => {
+		const user = userEvent.setup();
+		ai.scan.mockResolvedValue({
+			ok: true,
+			data: { ...sampleAnalysis, professional: true, level: "high", score: 75 },
+		});
+		render(<RiskBadge report={medium} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		expect(screen.queryByRole("note")).toBeNull();
+		await user.click(
+			await screen.findByRole("button", { name: contentText("fr", "ai.run") }),
+		);
+		const note = await screen.findByRole("note");
+		expect(note.textContent).toBe(contentText("fr", "pro.notice"));
+		expect(toggle().textContent).toContain("75/100");
+		expect(toggle().textContent).toContain("Risque élevé");
+		expect(screen.getByRole("dialog").textContent).toContain("75/100");
 	});
 });
 

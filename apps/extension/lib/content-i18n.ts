@@ -12,7 +12,10 @@ type TextKey =
 	| "panel.title"
 	| "panel.none"
 	| "panel.footer"
+	| "panel.titleAi"
 	| "badge.aria"
+	| "badge.ariaAi"
+	| "pro.notice"
 	| "card.aria"
 	| "card.loading"
 	| "severity.danger"
@@ -41,6 +44,7 @@ type AiErrorKey = `ai.error.${(typeof AI_ERROR_CODES)[number]}`;
 // Textes de la section IA du panneau. `ai.remaining` utilise `{count}`.
 type AiKey =
 	| "ai.title"
+	| "ai.badgeTag"
 	| "ai.run"
 	| "ai.runPhotos"
 	| "ai.loading"
@@ -67,7 +71,11 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"panel.none": "Aucun signal d'alerte détecté.",
 		"panel.footer":
 			"Analyse locale, sans IA. Pour une analyse IA, utilisez le bouton ci-dessus.",
+		"panel.titleAi": "Analyse IA Radarnaque",
 		"badge.aria": "Ouvrir l'analyse Radarnaque",
+		"badge.ariaAi": "Ouvrir l'analyse IA Radarnaque",
+		"pro.notice":
+			"Annonce d'un professionnel : elle sert souvent de vitrine (prix sur demande, voir le site du vendeur). Ce n'est pas un signal d'arnaque.",
 		"card.aria": "Analyser cette annonce avec Radarnaque",
 		"card.loading": "Analyse…",
 		"severity.danger": "Grave",
@@ -86,6 +94,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 			"Mode de paiement à risque (paiement à l'avance ou hors plateforme)",
 		symbolic_price: "Prix symbolique, anormalement bas",
 		"ai.title": "Analyse IA",
+		"ai.badgeTag": "IA",
 		"ai.run": "Lancer une analyse IA",
 		"ai.runPhotos": "Analyse avec photos",
 		"ai.loading": "Analyse en cours…",
@@ -128,7 +137,11 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"panel.none": "Geen waarschuwingssignalen gevonden.",
 		"panel.footer":
 			"Lokale analyse, zonder AI. Gebruik de knop hierboven voor een AI-analyse.",
+		"panel.titleAi": "Radarnaque-AI-analyse",
 		"badge.aria": "Radarnaque-analyse openen",
+		"badge.ariaAi": "Radarnaque-AI-analyse openen",
+		"pro.notice":
+			"Advertentie van een professional: ze dient vaak als etalage (prijs op aanvraag, zie de website van de verkoper). Dat is geen teken van oplichting.",
 		"card.aria": "Deze advertentie analyseren met Radarnaque",
 		"card.loading": "Analyseren…",
 		"severity.danger": "Ernstig",
@@ -148,6 +161,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 			"Risicovolle betaalmethode (vooraf of buiten het platform)",
 		symbolic_price: "Symbolische, abnormaal lage prijs",
 		"ai.title": "AI-analyse",
+		"ai.badgeTag": "AI",
 		"ai.run": "AI-analyse starten",
 		"ai.runPhotos": "Analyse met foto's",
 		"ai.loading": "Analyse bezig…",

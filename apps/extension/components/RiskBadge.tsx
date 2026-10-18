@@ -10,6 +10,7 @@ import {
 import type { AccessCache } from "../lib/content/access-policy";
 import type { AiClient } from "../lib/content/ai-client";
 import type { AiResultStore } from "../lib/content/ai-results";
+import { shownResult } from "../lib/content/shown-result";
 import { useAiScan } from "../lib/content/use-ai-scan";
 import { contentText, signalText } from "../lib/content-i18n";
 import type { Listing } from "../lib/listing/types";
@@ -65,6 +66,47 @@ function useDismiss(
 	}, [open, ref, close]);
 }
 
+/** Signaux de l'analyse locale, par gravité ; `panel.none` s'il n'y en a aucun. */
+function LocalSignals({
+	locale,
+	signals,
+}: {
+	locale: Locale;
+	signals: Signal[];
+}) {
+	if (signals.length === 0)
+		return <p className="m-0">{contentText(locale, "panel.none")}</p>;
+	return (
+		<ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+			{[...signals].sort(byGravity).map((signal) => (
+				<li key={signal.id} className="flex items-start gap-2">
+					<span
+						className={`shrink-0 rounded-[4px] px-1.5 py-0.5 text-[11px] font-semibold ${SEVERITY_STYLE[signal.severity]}`}
+					>
+						{contentText(locale, `severity.${signal.severity}`)}
+					</span>
+					<span>{signalText(locale, signal)}</span>
+				</li>
+			))}
+		</ul>
+	);
+}
+
+/**
+ * Bandeau des annonces professionnelles : une information neutre (ardoise),
+ * jamais une alerte. Il s'ajoute au score, il ne le remplace pas.
+ */
+function ProNotice({ locale }: { locale: Locale }) {
+	return (
+		<p
+			role="note"
+			className="m-0 mb-2 rounded-[6px] border border-slate-300 bg-slate-50 px-2 py-1.5 text-[12px] leading-[1.4] text-slate-700"
+		>
+			{contentText(locale, "pro.notice")}
+		</p>
+	);
+}
+
 export function RiskBadge({
 	report,
 	listing,
@@ -116,8 +158,17 @@ export function RiskBadge({
 		};
 	}, [open, loadAccess]);
 
-	const style = LEVEL_STYLE[report.level];
-	const signals = [...report.signals].sort(byGravity);
+	// Dès qu'un résultat IA existe (photos d'abord, sinon texte), il remplace
+	// l'analyse locale dans la pastille et dans le panneau.
+	const shown = shownResult(scan.text, scan.image);
+	const level = shown ? shown.result.level : report.level;
+	const score = shown ? shown.result.score : report.score;
+	const style = LEVEL_STYLE[level];
+	const title = contentText(locale, shown ? "panel.titleAi" : "panel.title");
+	// Vendeur déclaré professionnel par le site, ou détecté par l'IA.
+	const professional =
+		listing.seller.sellerKind === "professional" ||
+		shown?.result.professional === true;
 
 	// Police en px et reset explicite : le site hôte ne doit ni agrandir ni styler la pastille.
 	return (
@@ -128,7 +179,7 @@ export function RiskBadge({
 			<button
 				type="button"
 				aria-expanded={open}
-				aria-label={contentText(locale, "badge.aria")}
+				aria-label={contentText(locale, shown ? "badge.ariaAi" : "badge.aria")}
 				aria-describedby={`${levelId} ${scoreId}`}
 				onClick={() => setOpen((value) => !value)}
 				className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[13px] leading-[1.4] font-semibold shadow-sm hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700"
@@ -138,37 +189,27 @@ export function RiskBadge({
 					className={`inline-block size-2.5 rounded-full ${style.dot}`}
 				/>
 				<span id={levelId} className={style.text}>
-					{contentText(locale, LEVEL_KEY[report.level])}
+					{contentText(locale, LEVEL_KEY[level])}
 				</span>
 				<span id={scoreId} className="text-slate-600">
-					{report.score}/100
+					{score}/100
 				</span>
+				{shown && (
+					<span className="rounded-[4px] bg-slate-100 px-1 py-px text-[11px] font-bold text-slate-700">
+						{contentText(locale, "ai.badgeTag")}
+					</span>
+				)}
 			</button>
 			{open && (
 				<div
 					role="dialog"
-					aria-label={contentText(locale, "panel.title")}
+					aria-label={title}
 					className="absolute top-full left-0 z-[2147483647] mt-1.5 w-[320px] max-w-[90vw] rounded-[8px] border border-slate-300 bg-white p-3 text-[13px] leading-[1.4] text-slate-900 shadow-lg"
 				>
-					<h2 className="m-0 mb-2 text-[14px] font-bold">
-						{contentText(locale, "panel.title")}
-					</h2>
-					{signals.length === 0 ? (
-						<p className="m-0">{contentText(locale, "panel.none")}</p>
-					) : (
-						<ul className="m-0 flex list-none flex-col gap-1.5 p-0">
-							{signals.map((signal) => (
-								<li key={signal.id} className="flex items-start gap-2">
-									<span
-										className={`shrink-0 rounded-[4px] px-1.5 py-0.5 text-[11px] font-semibold ${SEVERITY_STYLE[signal.severity]}`}
-									>
-										{contentText(locale, `severity.${signal.severity}`)}
-									</span>
-									<span>{signalText(locale, signal)}</span>
-								</li>
-							))}
-						</ul>
-					)}
+					{professional && <ProNotice locale={locale} />}
+					<h2 className="m-0 mb-2 text-[14px] font-bold">{title}</h2>
+					{/* Résultat IA présent : la liste des signaux locaux disparaît. */}
+					{!shown && <LocalSignals locale={locale} signals={report.signals} />}
 					<AiErrorBoundary
 						key={`${listing.site}|${listing.externalId}`}
 						locale={locale}
@@ -185,9 +226,11 @@ export function RiskBadge({
 							pricingUrl={scan.pricingUrl}
 						/>
 					</AiErrorBoundary>
-					<p className="m-0 mt-3 border-t border-slate-200 pt-2 text-[12px] text-slate-600">
-						{contentText(locale, "panel.footer")}
-					</p>
+					{!shown && (
+						<p className="m-0 mt-3 border-t border-slate-200 pt-2 text-[12px] text-slate-600">
+							{contentText(locale, "panel.footer")}
+						</p>
+					)}
 				</div>
 			)}
 		</div>

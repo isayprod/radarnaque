@@ -18,14 +18,22 @@ const cancel = (event: SyntheticEvent) => {
 	event.stopPropagation();
 };
 
-/** Texte de l'infobulle : résumé de l'IA ou message d'erreur ; rien sinon. */
-function tooltipText(state: ScanState, locale: Locale): string | null {
-	if (state.status === "error") return aiErrorText(locale, state.code);
+/**
+ * Contenu de l'infobulle : résumé de l'IA ou message d'erreur ; rien sinon.
+ * `professional` ajoute `pro.notice` sous le résumé.
+ */
+function tooltipOf(
+	state: ScanState,
+	locale: Locale,
+): { text: string; professional: boolean } | null {
+	if (state.status === "error")
+		return { text: aiErrorText(locale, state.code), professional: false };
 	if (state.status !== "done") return null;
-	const { summary, partial } = state.result;
-	return partial
+	const { summary, partial, professional } = state.result;
+	const text = partial
 		? `${summary[locale]} ${contentText(locale, "ai.partial")}`
 		: summary[locale];
+	return { text, professional };
 }
 
 function ButtonContent({ state, locale }: Omit<CardView, "onActivate">) {
@@ -72,7 +80,7 @@ export function CardBadge({ state, locale, onActivate }: CardView) {
 		if (button && event.target instanceof Node && button.contains(event.target))
 			button.focus({ preventScroll: true });
 	};
-	const tip = tooltipText(state, locale);
+	const tip = tooltipOf(state, locale);
 	// Inactif ou en erreur, le clic lance l'analyse : le nom du bouton le dit.
 	// Terminé, son nom est le niveau affiché ; en cours, le texte d'attente.
 	const label =
@@ -124,7 +132,12 @@ export function CardBadge({ state, locale, onActivate }: CardView) {
 					hidden={!open}
 					className="absolute top-full left-0 z-[2147483647] mt-1 w-[260px] max-w-[80vw] rounded-[6px] border border-slate-300 bg-white p-2 text-[12px] leading-[1.4] text-slate-900 shadow-lg"
 				>
-					{tip}
+					<span className="block">{tip.text}</span>
+					{tip.professional && (
+						<span className="mt-1 block border-t border-slate-200 pt-1 text-slate-700">
+							{contentText(locale, "pro.notice")}
+						</span>
+					)}
 				</span>
 			)}
 		</span>

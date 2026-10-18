@@ -4,6 +4,7 @@ import { canUse } from "../lib/access";
 // Erreurs qui demandent une reconnexion (RELOGIN_CODES) : on propose le bouton « Se connecter ».
 import { RELOGIN_CODES } from "../lib/content/access-policy";
 import type { ScanState } from "../lib/content/ai-client";
+import { type ShownResult, shownResult } from "../lib/content/shown-result";
 import { aiErrorText, contentText } from "../lib/content-i18n";
 import type { ContentAccess, ScanKind } from "../lib/messages";
 import { LEVEL_KEY, LEVEL_STYLE, SEVERITY_STYLE } from "./risk-styles";
@@ -48,8 +49,39 @@ export function AiSection(props: AiSectionProps) {
 			<h3 id={titleId} className="m-0 mb-2 text-[14px] font-bold">
 				{contentText(props.locale, "ai.title")}
 			</h3>
-			<AccessBody {...props} />
+			<SectionBody {...props} />
 		</section>
+	);
+}
+
+function SectionBody(props: AiSectionProps) {
+	const shown = shownResult(props.text, props.image);
+	return shown ? (
+		<ShownBody {...props} shown={shown} />
+	) : (
+		<AccessBody {...props} />
+	);
+}
+
+/**
+ * Un résultat IA existe : il est affiché quel que soit l'accès (repris du
+ * magasin avant la lecture de l'accès, ou session expirée depuis). Seule
+ * « Analyse avec photos » reste proposée, si le plan le permet et que le
+ * résultat affiché vient du texte ; relancer le texte ne servirait à rien.
+ */
+function ShownBody(props: AiSectionProps & { shown: ShownResult }) {
+	const { locale, access, shown } = props;
+	const photos =
+		shown.kind === "text" &&
+		props.hasPhotos &&
+		access !== "loading" &&
+		!("error" in access) &&
+		canUse(access, "image");
+	return (
+		<div className="flex flex-col gap-3">
+			<ResultView locale={locale} kind={shown.kind} result={shown.result} />
+			{photos && <ScanBlock {...props} kind="image" state={props.image} />}
+		</div>
 	);
 }
 
