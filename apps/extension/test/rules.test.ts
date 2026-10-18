@@ -359,15 +359,35 @@ describe("contact_outside par mail (v3)", () => {
 		},
 	);
 
-	test.each(["Mail me.", "mail me!", "Mail me svp", "(mail me)"])(
-		"« mail me » entre ponctuation : %s",
-		(text) => {
-			expect(kind(text)?.params).toEqual({ kind: "email" });
-		},
-	);
+	test.each([
+		"Mail me.",
+		"mail me!",
+		"Mail me svp",
+		"(mail me)",
+		"Email me svp",
+		"e-mail me",
+	])("« mail me » entre ponctuation : %s", (text) => {
+		expect(kind(text)?.params).toEqual({ kind: "email" });
+	});
 });
 
 describe("abroad_seller", () => {
+	test.each([
+		"Je suis muté à l'étranger",
+		"Je travaille à l'étranger",
+		"Je vis à l'étranger",
+		"J'habite à l'étranger",
+		"Je réside à l'étranger",
+		"En mission à l'étranger",
+		"Ik werk in het buitenland",
+		"Ik verblijf in het buitenland",
+		"Woonachtig in het buitenland",
+		"Verhuisd naar het buitenland",
+	])("vendeur à l'étranger (v4, rappel) : %s", (text) => {
+		const l = makeListing({ description: `${NEUTRAL_DESCRIPTION} ${text}` });
+		expect(ids(l)).toContain("abroad_seller");
+	});
+
 	const idsOf = (text: string) =>
 		ids(makeListing({ description: `${NEUTRAL_DESCRIPTION} ${text}` }));
 
@@ -710,6 +730,19 @@ describe("offsite_payment", () => {
 	])("faux positif (v4): %s", (text) => {
 		const l = makeListing({ description: `${NEUTRAL_DESCRIPTION} ${text}` });
 		expect(ids(l)).toEqual([]);
+	});
+
+	test.each([
+		"Sans visite, acompte de 100 € demandé",
+		"Geen bezichtiging, voorschot vereist",
+		"Zonder bezichtiging voorschot betalen",
+		"Aucun problème, acompte de 50 € par virement",
+		"Geen probleem, voorschot van 50 euro",
+		"Sans garantie. Acompte demandé.",
+		"Sans frais acompte 50",
+	])("négation qui ne porte pas sur l'acompte : %s", (text) => {
+		const l = makeListing({ description: `${NEUTRAL_DESCRIPTION} ${text}` });
+		expect(ids(l)).toEqual(["offsite_payment"]);
 	});
 
 	test("négation : au-delà de 2 mots, l'acompte compte", () => {
