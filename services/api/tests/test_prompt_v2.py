@@ -21,6 +21,7 @@ def _load_migration(filename: str):
 
 
 _0002 = _load_migration("0002_scans.py")
+_0004 = _load_migration("0004_prompt_v2.py")
 
 _ACTIVE = (
     "select k.code, p.version, p.scan_kind, p.system_prompt from app.scan_kinds k"
@@ -62,8 +63,20 @@ async def test_v2_prompts_carry_the_researched_rules(db, kind):
         '"fr" ET "nl" sont obligatoires',
         "5 raisons au plus",
         '{"score": <entier 0-100>,',
+        # Amendements R6 (vague finale, avant publication).
+        "N'invente jamais",
+        "sous forme de fourchette",
+        "signal modéré",
+        "animal, ticket",
+        "camping-cars et caravanes",
+        "électroménager neuf en boîte",
+        "Un prix « sur demande » seul ne suffit pas",
+        "sans facture ni numéro de cadre : score 55",
     ):
         assert fragment in prompt
+    # L'ancienne formulation (maskedContacts = signal fort à lui seul) a disparu.
+    assert "maskedContacts supérieur à 0) ;" not in prompt
+    assert "Vélo électrique récent à 250 €" not in prompt
     assert prompt.endswith("\n") and not prompt.endswith("\n\n")
 
 
@@ -165,3 +178,55 @@ async def test_downgrade_keeps_a_v2_row_referenced_by_an_analysis(db, alembic_co
         )
     ).scalar_one()
     assert active_text_id == v2_text_id
+
+
+async def test_upgrade_refuses_an_existing_v2_with_a_different_text(db, alembic_config):
+    """R6 : une v2 au texte différent (ancienne 0004) bloque l'upgrade au lieu d'être gardée."""
+    await db.rollback()
+    try:
+        command.downgrade(alembic_config, "0003")
+        await db.execute(
+            text(
+                "insert into app.prompt_versions(scan_kind, version, system_prompt)"
+                " values ('text', 2, 'ancien texte v2')"
+            )
+        )
+        await db.commit()
+        with pytest.raises(
+            RuntimeError,
+            match=r"prompt_versions \(text, 2\) existe avec un autre texte : réinitialiser la base"
+            r" de dev ou créer une v3",
+        ):
+            command.upgrade(alembic_config, "head")
+        # L'upgrade a échoué en entier : la base reste en 0003, v1 active.
+        rows = await _rows(db, _ACTIVE)
+        assert [(r[0], r[1]) for r in rows] == [("image", 1), ("text", 1)]
+        await db.rollback()
+    finally:
+        # Sans effet si la base est déjà en 0003 ; sinon v1 réactivée, v2 non référencée supprimée.
+        await db.rollback()
+        command.downgrade(alembic_config, "0003")
+        await db.execute(text("delete from app.prompt_versions where version = 2"))
+        await db.commit()
+        command.upgrade(alembic_config, "head")
+    prompts = await _prompts(db)
+    assert prompts[("text", 2)] == _0004.TEXT_PROMPT_V2
+    assert prompts[("image", 2)] == _0004.IMAGE_PROMPT_V2
+
+
+async def test_upgrade_accepts_an_existing_v2_with_the_same_text(db, alembic_config):
+    """Le cas idempotent (v2 identique conservée par un downgrade) passe toujours."""
+    await db.rollback()
+    try:
+        command.downgrade(alembic_config, "0003")
+        await db.execute(
+            text(
+                "insert into app.prompt_versions(scan_kind, version, system_prompt)"
+                " values ('text', 2, :p)"
+            ),
+            {"p": _0004.TEXT_PROMPT_V2},
+        )
+        await db.commit()
+    finally:
+        command.upgrade(alembic_config, "head")
+    assert [r[:3] for r in await _rows(db, _ACTIVE)] == [("image", 2, "image"), ("text", 2, "text")]
