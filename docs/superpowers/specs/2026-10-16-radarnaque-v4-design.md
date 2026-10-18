@@ -161,7 +161,7 @@ type Listing = {
   title: string;
   description: string;
   price: { amountCents: number; currency: "EUR" } | null;
-  priceType: "fixed" | "bidding" | "free" | "unknown";
+  priceType: "fixed" | "bidding" | "free" | "on_request" | "see_description" | "exchange" | "reserved" | "unknown";
   category?: string;
   condition?: string;
   postedAt?: string;            // ISO 8601
@@ -172,6 +172,7 @@ type Listing = {
     accountAgeMonths?: { min: number; max: number };  // fourchette en mois
     reviewCount?: number; rating?: number;
     otherListingsCount?: number; verified?: boolean;
+    sellerKind?: "private" | "professional";            // lu sur 2ememain/2dehands, inconnu sur Facebook
   };
 };
 ```
@@ -222,11 +223,20 @@ interface MarketplaceAdapter {
 
 Les poids ci-dessus sont les poids initiaux du MVP ; ils pourront être ajustés en testant sur des annonces réelles (chaque ajustement incrémente `RULES_VERSION`).
 
+**Règles v3 (phase 3c, `RULES_VERSION = 3`)**, d'après la recherche `docs/superpowers/research/2026-10-18-arnaques-acheteurs.md` :
+- **`abroad_seller`** (20, warning) : vendeur ou objet à l'étranger avec envoi par transporteur (« je suis à l'étranger », « envoi par transporteur », « in het buitenland », « via koerier »…).
+- **Listes de mots-clés enrichies** pour `offsite_payment` (acompte, caution ou réservation payée avant la visite ; « voorschot », « waarborg vooraf »…) et `contact_outside` (« uniquement par WhatsApp », « contactez-moi par mail », « enkel via WhatsApp »…).
+- **Objets de faible valeur :** pour un prix fixe de moins de 30 €, les signaux faibles (`few_photos`, `no_reviews`, `new_account`, `short_description`) comptent pour la moitié de leur poids (arrondi à l'entier inférieur). L'arnaque y est rare, le préjudice faible.
+- Les types de prix `on_request`, `see_description`, `exchange` et `reserved` ne déclenchent aucune règle.
+
 ### 4.5 Intégration dans les pages
 
 - **Toute l'interface est injectée dans un Shadow DOM** (`createShadowRootUi` de WXT). Ainsi, nos styles et ceux du site restent isolés dans les deux sens.
 - **Page d'une annonce (tout le monde) :**
-  - une pastille colorée près du prix, qui affiche le score des règles ;
+  - une pastille colorée près du prix, qui affiche le score des règles, **ou celui de l'analyse IA dès qu'elle existe** (mention « IA ») ;
+  - **l'analyse IA remplace l'analyse locale** : une fois le résultat IA disponible, le panneau n'affiche plus que lui, et la liste des signaux locaux disparaît ;
+  - **le résultat IA est gardé dans le navigateur pendant 24 h** (`chrome.storage.local`, par site et identifiant d'annonce, avec une empreinte du titre, de la description et du prix) : revenir sur l'annonce affiche directement l'IA, sans nouveau scan. Si l'annonce a changé, ou si le résultat était partiel, la page revient à l'analyse locale. Les icônes des cartes réutilisent le même stockage ;
+  - **un bandeau « annonce professionnelle »** s'affiche quand le vendeur est un professionnel (`seller.sellerKind`) ou quand l'IA le détecte (`professional`) : l'annonce sert souvent de vitrine (prix sur demande, voir le site du vendeur), ce n'est pas un signal d'arnaque. Il apparaît aussi dans l'infobulle des cartes ;
   - au clic, un panneau qui liste les signaux et propose :
     - « Lancer une analyse IA » ;
     - « Analyse avec photos », si le plan le permet ;
@@ -356,7 +366,7 @@ listing_snapshots(id PK, listing_id FK, content_hash, title, description,
                   UNIQUE(listing_id, content_hash))
 snapshot_images(snapshot_id FK, position, url, PK(snapshot_id, position))
 analyses(id PK, snapshot_id FK, model_id FK, prompt_version_id FK, rules_version,
-         input_hash, score CHECK (0..100), partial BOOL,
+         input_hash, score CHECK (0..100), partial BOOL, professional BOOL,
          tokens_in, tokens_out, cost_usd_micros, created_at,
          UNIQUE(snapshot_id, model_id, prompt_version_id, input_hash))   -- clé du cache
 analysis_texts(analysis_id FK, locale FK, summary, advice, PK(analysis_id, locale))
@@ -434,7 +444,7 @@ Corps de la requête : `{ listing: ListingIn, rules: { version, signals: SignalI
 
 **Réponse `AnalysisResult` :**
 ```json
-{ "analysisId": "…", "score": 72, "level": "high", "partial": false, "fromCache": true,
+{ "analysisId": "…", "score": 72, "level": "high", "partial": false, "professional": false, "fromCache": true,
   "summary": { "fr": "…", "nl": "…" }, "advice": { "fr": "…", "nl": "…" },
   "reasons": [{ "severity": "danger", "text": { "fr": "…", "nl": "…" } }],
   "analyzedAt": "2026-10-16T10:00:00Z",
@@ -469,7 +479,8 @@ Corps de la requête : `{ listing: ListingIn, rules: { version, signals: SignalI
   - délai de 30 s et **une** nouvelle tentative ;
   - paramètres propres au fournisseur (pour OpenRouter : `provider: { data_collection: "deny" }` et `usage: { include: true }`).
 - **Contenu envoyé :** le prompt système de la version active, puis l'annonce, où les téléphones et emails de la description sont **masqués** (`[téléphone]`, `[email]`). S'y ajoutent les informations du vendeur **sans son identité**, les signaux des règles et les images éventuelles.
-- **Sortie attendue :** `{ score, summary{fr, nl}, advice{fr, nl}, reasons[{severity, fr, nl}] }`, validée par Pydantic.
+- **Sortie attendue :** `{ score, professional, summary{fr, nl}, advice{fr, nl}, reasons[{severity, fr, nl}] }`, validée par Pydantic. `professional` (vrai si l'annonce vient visiblement d'un professionnel) est stocké dans `analyses.professional`.
+- **Prompt v2 (phase 3c)**, fondé sur `docs/superpowers/research/2026-10-18-arnaques-acheteurs.md` : rôle d'aide à l'acheteur et taux de base bas (score de départ ≈ 10), risque de base par catégorie, plafond de 25 pour un objet de moins de 30 €, fourchette de prix d'occasion estimée avec un niveau de confiance, liste fermée de signaux forts et de non-signaux, traitement des professionnels (vitrine, `professional: true`), conseil qui prévient des arnaques jouées dans la conversation, et exemples. Le payload ajoute `maskedContacts`, le nombre de téléphones et d'emails masqués dans la description (couvert par `content_hash`, dont il dérive).
 - **Le coût réel** est relevé selon la source déclarée par le fournisseur (`usage.cost` pour OpenRouter, en-têtes `X-OmniRoute-*` pour OmniRoute, 0 pour Groq, openai-oauth et Ollama), puis converti en micro-dollars.
 
 ### 7.4 Photos
