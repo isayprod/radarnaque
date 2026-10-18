@@ -1,15 +1,21 @@
 import { normalizeText } from "../listing/parse";
 import type { Listing } from "../listing/types";
 import {
+	ABROAD_CARRIER_KEYWORDS,
+	ABROAD_CONTEXT_KEYWORDS,
 	ABROAD_SELLER_KEYWORDS,
 	containsKeyword,
+	containsUnnegatedKeyword,
 	EMAIL_CONTACT_KEYWORDS,
+	foldText,
+	MAIL_ME_RE,
+	NEGATABLE_PAYMENT_KEYWORDS,
 	OFFSITE_PAYMENT_KEYWORDS,
 	OFFSITE_PAYMENT_WITH_PAYPAL_KEYWORDS,
 	SHIPPING_ONLY_KEYWORDS,
 } from "./keywords";
 
-export const RULES_VERSION = 3;
+export const RULES_VERSION = 4;
 
 export type Severity = "info" | "warning" | "danger";
 export type RuleId =
@@ -60,7 +66,11 @@ function contactKind(l: Listing): "phone" | "email" | "app" | null {
 	if (EMAIL_RE.test(text)) return "email";
 	if (APP_RES.some((re) => re.test(text))) return "app";
 	// Après les applis : « mail me sur signal » reste un contact par appli.
-	if (containsKeyword(text, EMAIL_CONTACT_KEYWORDS)) return "email";
+	if (
+		containsKeyword(text, EMAIL_CONTACT_KEYWORDS) ||
+		MAIL_ME_RE.test(foldText(text))
+	)
+		return "email";
 	return null;
 }
 
@@ -107,8 +117,14 @@ export const RULES: readonly Rule[] = [
 		const country = l.location.country;
 		return country !== undefined && country !== "BE" ? { country } : false;
 	}),
-	rule("abroad_seller", 20, "warning", (l) =>
-		containsKeyword(text(l), ABROAD_SELLER_KEYWORDS),
+	rule(
+		"abroad_seller",
+		20,
+		"warning",
+		(l) =>
+			containsKeyword(text(l), ABROAD_SELLER_KEYWORDS) ||
+			(containsKeyword(text(l), ABROAD_CARRIER_KEYWORDS) &&
+				containsKeyword(text(l), ABROAD_CONTEXT_KEYWORDS)),
 	),
 	rule(
 		"short_description",
@@ -129,6 +145,7 @@ export const RULES: readonly Rule[] = [
 		"danger",
 		(l) =>
 			containsKeyword(text(l), OFFSITE_PAYMENT_KEYWORDS) ||
+			containsUnnegatedKeyword(text(l), NEGATABLE_PAYMENT_KEYWORDS) ||
 			(containsKeyword(text(l), ["paypal"]) &&
 				containsKeyword(text(l), OFFSITE_PAYMENT_WITH_PAYPAL_KEYWORDS)),
 	),

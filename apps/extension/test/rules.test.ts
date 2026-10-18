@@ -67,7 +67,7 @@ describe("registry", () => {
 			"symbolic_price",
 			"price_anomaly",
 		]);
-		expect(RULES_VERSION).toBe(3);
+		expect(RULES_VERSION).toBe(4);
 	});
 
 	test("weights and severities match the table", () => {
@@ -351,6 +351,20 @@ describe("contact_outside par mail (v3)", () => {
 		expect(kind("Mailing list non fournie")).toBeUndefined();
 		expect(kind("Je réponds au mail de la boutique")).toBeUndefined();
 	});
+
+	test.each(["mail merci", "Gmail meubles", "mail mes amis", "hotmail me"])(
+		"« mail me » en mots entiers seulement (v4) : %s",
+		(text) => {
+			expect(kind(text)).toBeUndefined();
+		},
+	);
+
+	test.each(["Mail me.", "mail me!", "Mail me svp", "(mail me)"])(
+		"« mail me » entre ponctuation : %s",
+		(text) => {
+			expect(kind(text)?.params).toEqual({ kind: "email" });
+		},
+	);
 });
 
 describe("abroad_seller", () => {
@@ -360,17 +374,42 @@ describe("abroad_seller", () => {
 	test.each([
 		"Je suis à l'étranger, envoi possible",
 		"Actuellement à l'étranger",
-		"Envoi par transporteur",
-		"Livraison par transporteur",
-		"Via un transporteur agréé",
+		"Vendeur à l'étranger",
+		"Propriétaire à l'étranger",
 		"Je suis A L'ETRANGER",
+		"Ik woon in het buitenland",
 		"Ik zit in het buitenland",
+		"Ik ben in het buitenland",
 		"Momenteel in het buitenland",
-		"Verzending via koerier",
+		"Eigenaar in het buitenland",
+	])("positive FR/NL (seul): %s", (text) => {
+		expect(idsOf(text)).toEqual(["abroad_seller"]);
+	});
+
+	test.each([
+		"Je suis à l'étranger, envoi par transporteur",
+		"Verzending via een koerier, eigenaar in het buitenland",
+		"Livraison par transporteur, objet à l'étranger",
+		"Envoi par transporteur via un intermédiaire",
+		"Via een koerier van de tussenpersoon",
+		"Verzending via koerier door een transportbedrijf",
+		"Via transporteur, auto staat in het buitenland",
+		"Via un transporteur, véhicule à l'étranger",
+	])("transporteur + étranger/intermédiaire: %s", (text) => {
+		expect(idsOf(text)).toEqual(["abroad_seller"]);
+	});
+
+	test.each([
+		"Envoi par transporteur possible, frais à charge de l'acheteur",
+		"Livraison par transporteur possible",
+		"Via un transporteur agréé",
+		"Verzending via koerier mogelijk",
 		"Via een koerier",
 		"Via transporteur",
-	])("positive FR/NL: %s", (text) => {
-		expect(idsOf(text)).toEqual(["abroad_seller"]);
+		"Gekocht in het buitenland",
+		"In het buitenland gekocht, nooit gebruikt",
+	])("faux positif (v4): %s", (text) => {
+		expect(idsOf(text)).toEqual([]);
 	});
 
 	test("signal : poids 20, gravité warning", () => {
@@ -396,9 +435,18 @@ describe("abroad_seller", () => {
 	});
 
 	test("lit aussi le titre", () => {
-		expect(ids(makeListing({ title: "Vélo, via un transporteur" }))).toEqual([
+		expect(ids(makeListing({ title: "Vélo, je suis à l'étranger" }))).toEqual([
 			"abroad_seller",
 		]);
+		// Le transporteur dans le titre, l'étranger dans la description.
+		expect(
+			ids(
+				makeListing({
+					title: "Vélo, via un transporteur",
+					description: `${NEUTRAL_DESCRIPTION} Je suis à l'étranger.`,
+				}),
+			),
+		).toEqual(["abroad_seller"]);
 	});
 });
 
@@ -433,12 +481,30 @@ describe("objets de faible valeur", () => {
 		expect(report.level).toBe("low");
 	});
 
-	test("la gravité des signaux atténués ne change pas", () => {
+	test("new_account atténué (12) passe en warning, les autres gardent leur gravité", () => {
 		const report = evaluate(coque());
 		expect(report.signals.map((s) => [s.id, s.severity])).toEqual([
 			["few_photos", "warning"],
-			["new_account", "danger"],
+			["new_account", "warning"],
 		]);
+		const l = coque({
+			description: "",
+			images: ["a", "b"],
+			seller: { reviewCount: 0 },
+		});
+		expect(evaluate(l).signals.map((s) => [s.id, s.severity])).toEqual([
+			["no_reviews", "warning"],
+			["short_description", "info"],
+		]);
+	});
+
+	test("new_account non atténué reste danger", () => {
+		const l = coque({ price: { amountCents: 3000, currency: "EUR" } });
+		expect(signal(l, "new_account")).toEqual({
+			id: "new_account",
+			weight: 25,
+			severity: "danger",
+		});
 	});
 
 	test("no_reviews (10) et short_description (10) passent à 5", () => {
@@ -614,6 +680,12 @@ describe("offsite_payment", () => {
 		"Eerst betalen, dan verzenden",
 		"Paiement par carte cadeau",
 		"Betaling met cadeaukaart",
+		"Payer par carte cadeau uniquement",
+		"Paiement en carte cadeau accepté",
+		"Betalen met cadeaukaart",
+		"Cadeaukaart als betaling",
+		"Acompte de 50 € pour réserver",
+		"Pas d'acompte demandé, mais un acompte de 50 € pour réserver",
 	])("v3 keywords: %s", (text) => {
 		const l = makeListing({ description: `${NEUTRAL_DESCRIPTION} ${text}` });
 		expect(signal(l, "offsite_payment")).toEqual({
@@ -621,6 +693,30 @@ describe("offsite_payment", () => {
 			weight: 35,
 			severity: "danger",
 		});
+	});
+
+	test.each([
+		"Carte cadeau Fnac 50 € à vendre",
+		"Cadeaukaart Bol.com 25 €",
+		"Pas d'acompte",
+		"Pas d’acompte demandé",
+		"Sans acompte",
+		"Aucun acompte",
+		"Pas de acompte",
+		"Sans aucun acompte",
+		"Geen voorschot",
+		"Zonder voorschot",
+		"Geen enkel voorschot nodig",
+	])("faux positif (v4): %s", (text) => {
+		const l = makeListing({ description: `${NEUTRAL_DESCRIPTION} ${text}` });
+		expect(ids(l)).toEqual([]);
+	});
+
+	test("négation : au-delà de 2 mots, l'acompte compte", () => {
+		const l = makeListing({
+			description: `${NEUTRAL_DESCRIPTION} Pas de visite sans un gros acompte`,
+		});
+		expect(ids(l)).toEqual(["offsite_payment"]);
 	});
 
 	test("friends and family needs paypal in the same text", () => {
