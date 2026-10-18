@@ -342,11 +342,15 @@ contrairement à la pastille (voir « 6. Tester sur les vrais sites »), la stac
 
   Les lignes du prompt v2 déjà utilisées par des analyses sont conservées (l'historique reste
   lisible) ; le prompt v1 redevient le prompt actif. Revenir au prompt v2 : `alembic upgrade head`
-  (rejouable sans risque).
-- **Règles locales v3** (`RULES_VERSION = 3`) : une règle `abroad_seller` (vendeur ou objet à
-  l'étranger, avec envoi par transporteur), des listes de mots-clés plus riches, et, pour un
-  prix fixe de moins de 30 €, des signaux faibles (`few_photos`, `no_reviews`, `new_account`,
-  `short_description`) qui ne comptent que pour la moitié de leur poids.
+  (rejouable sans risque). La montée refuse une ligne v2 dont le texte diffère de celui de la
+  migration (base de dev qui a joué une version antérieure de 0004) : réinitialiser cette base.
+- **Règles locales v4** (`RULES_VERSION = 4`) : une règle `abroad_seller` (vendeur ou objet à
+  l'étranger ; un envoi par transporteur ne compte qu'avec « étranger », « buitenland » ou un
+  intermédiaire), des listes de mots-clés plus riches et plus précises (carte cadeau seulement
+  comme moyen de paiement, « acompte » et « voorschot » ignorés après une négation, « mail me »
+  en mots entiers), et, pour un prix fixe de moins de 30 €, des signaux faibles (`few_photos`,
+  `no_reviews`, `new_account`, `short_description`) qui ne comptent que pour la moitié de leur
+  poids ; un `new_account` ainsi atténué passe en `warning`.
 
 ### Sur une page de résultats
 

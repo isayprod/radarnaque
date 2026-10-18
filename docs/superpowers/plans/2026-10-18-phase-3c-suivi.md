@@ -4,9 +4,9 @@ Remarques relevées pendant les relectures de la phase 3c : l'IA prioritaire dan
 
 ## À vérifier sur les vrais sites (rien ne l'a encore été)
 
-- **`sellerType` de 2ememain :** relever la valeur réelle d'un vendeur professionnel. Le code ne connaît que `CONSUMER` (vendeur privé) ; toute autre valeur non vide donne « professionnel ». Si la valeur d'un professionnel est inattendue, ou si les particuliers en ont une autre, corriger l'adaptateur.
+- **`sellerType` de 2ememain :** relever la valeur réelle de `sellerType` chez un professionnel et l'ajouter à la liste fermée (R7). Aujourd'hui, une valeur hors liste donne un vendeur indéterminé : pas de bandeau, sauf si le lien « Visiter le site internet » est présent.
 - **Libellés de prix :** relever les libellés réels affichés à la place du prix (« Sur demande », « Voir la description », « À échanger », « Réservé », et leurs équivalents néerlandais) et la valeur réelle de `N.o.t.k.`. Vérifier qu'aucun ne retombe en `unknown`.
-- **Faux positifs des mots-clés :** chercher sur de vraies annonces honnêtes les phrases « acompte », « carte cadeau », « in het buitenland » et « via een koerier ». Les ajuster si elles se déclenchent à tort.
+- **Faux positifs des mots-clés (règles v4) :** chercher sur de vraies annonces honnêtes les phrases « acompte » (hors négation), « paiement par carte cadeau », « eigenaar in het buitenland », et un transporteur accompagné de « étranger », « buitenland » ou « intermédiaire ». Les ajuster si elles se déclenchent à tort.
 - **Prompt v2 sur 10 à 20 annonces réelles :**
   - les scores ;
   - le drapeau `professional` ;
@@ -15,16 +15,8 @@ Remarques relevées pendant les relectures de la phase 3c : l'IA prioritaire dan
 
 ## Plus tard
 
-- **Mots-clés des règles locales :**
-  - négation de « acompte » et « voorschot » (« pas d'acompte », « sans acompte », « aucun acompte », « geen voorschot », « zonder voorschot ») : aujourd'hui, elle déclenche `offsite_payment` ;
-  - frontière de mot sur « mail me », qui se déclenche à l'intérieur d'un autre mot ;
-  - « carte cadeau » et « cadeaukaart » : ne retenir que la tournure de paiement (« payer avec », « paiement par », « betalen met ») ;
-  - retirer « momenteel in het buitenland », redondant avec « in het buitenland » ;
-  - noter par un `TODO` le cast de `on_request` dans la règle des prix.
-- **Adaptateur 2ememain :**
-  - tester qu'un `sellerType` `CONSUMER` avec un lien de site internet donne bien un vendeur privé, et commenter la priorité (R3) ;
-  - comparer `CONSUMER` sans tenir compte de la casse ;
-  - vérifier sur la vraie page les libellés de prix et `N.o.t.k.` (voir plus haut).
+- **Mots-clés des règles locales :** noter par un `TODO` le cast de `on_request` dans la règle des prix.
+- **Adaptateur 2ememain :** vérifier sur la vraie page les libellés de prix et `N.o.t.k.` (voir plus haut).
 - **Tests de l'extension :**
   - le validateur de réponse : une assertion sur l'erreur de littéral de `sellerKind` ;
   - une frontière d'erreur avec un résultat adopté ;
@@ -46,3 +38,5 @@ Remarques relevées pendant les relectures de la phase 3c : l'IA prioritaire dan
 - **R3. `sellerType` contre lien de site internet :** le `sellerType` donné par 2ememain l'emporte sur le lien, que le vendeur peut ajouter lui-même ; un escroc ne peut donc pas acheter le traitement « professionnel ». Coût si c'est faux : un professionnel pris pour un particulier.
 - **R4. Stockage local des résultats :** une entrée par annonce, avec une place pour le texte et une pour les photos, adoptées chacune de leur côté ; les cartes préfèrent les photos, puis le texte. Coût si c'est faux : un peu plus de stockage.
 - **R5. Déconnexion :** elle vide aussi les résultats IA gardés dans le navigateur, pour un ordinateur partagé. Coût si c'est faux : l'utilisateur perd ses résultats locaux en se déconnectant.
+- **R6. Prompt v2 amendé sur place :** la v2 n'étant pas publiée, ses corrections de relecture finale sont faites dans 0004 au lieu d'une v3. La montée refuse une ligne (`kind`, 2) existante au texte différent. Coût si c'est faux : une base de dev qui a joué l'ancienne 0004 doit être réinitialisée.
+- **R7. `sellerType` en liste fermée :** `CONSUMER` (sans casse) donne un particulier ; `PROFESSIONAL`, `TRADER`, `BUSINESS`, `DEALER`, `COMPANY` ou `PRO`, un professionnel ; toute autre valeur, un vendeur indéterminé (puis le repli du lien de site, R3). Coût si c'est faux : un vrai professionnel n'a pas de bandeau tant que sa valeur n'est pas ajoutée.
