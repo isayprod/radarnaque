@@ -4,6 +4,7 @@ import {
 	parsePriceText,
 } from "../listing/parse";
 import type { Listing, PageType, Site } from "../listing/types";
+import { foldText } from "../rules/keywords";
 import type { CardRef, ExtractResult, MarketplaceAdapter } from "./types";
 
 const SITES: Site[] = ["2ememain.be", "2dehands.be"];
@@ -19,13 +20,45 @@ const SEARCH_PATH_RE = /^\/(l|q)\//i;
  */
 const CARD_LINK = 'a[href*="/v/"]';
 
-const PRICE_TYPES: Record<string, Listing["priceType"]> = {
-	FIXED: "fixed",
-	MIN_BID: "bidding",
-	FAST_BID: "bidding",
-	FREE_BID: "bidding",
-	FREE: "free",
-};
+/** Des `Map` : une clé lue sur la page (« constructor »…) ne tombe jamais sur le prototype. */
+const PRICE_TYPES = new Map<string, Listing["priceType"]>([
+	["FIXED", "fixed"],
+	["MIN_BID", "bidding"],
+	["FAST_BID", "bidding"],
+	["FREE_BID", "bidding"],
+	["FREE", "free"],
+	["SEE_DESCRIPTION", "see_description"],
+	["ON_REQUEST", "on_request"],
+	// « N.o.t.k. » (nader overeen te komen) : « à convenir », donc sur demande.
+	["NOTK", "on_request"],
+	["EXCHANGE", "exchange"],
+	["RESERVED", "reserved"],
+]);
+
+/**
+ * Libellé affiché à la place du prix, plié par `foldText` (casse, accents) :
+ * repli quand `__CONFIG__` ne donne pas de type de prix exploitable.
+ */
+const PRICE_LABELS = new Map<string, Listing["priceType"]>([
+	["prix sur demande", "on_request"],
+	["prijs op aanvraag", "on_request"],
+	["voir description", "see_description"],
+	["zie omschrijving", "see_description"],
+	["a convenir", "on_request"],
+	["n.o.t.k.", "on_request"],
+	["echange", "exchange"],
+	["ruilen", "exchange"],
+	["reserve", "reserved"],
+	["gereserveerd", "reserved"],
+]);
+
+/** Lien de la section vendeur qui ne s'affiche que pour un professionnel. */
+const WEBSITE_LINK_LABELS = new Set([
+	"visiter le site internet",
+	"bekijk website",
+]);
+/** Sections du vendeur : la sidebar et le bloc `#vendeur` (pas l'en-tête du site). */
+const SELLER_SCOPES = ["#seller-sidebar-root", "#vendeur"];
 
 const CONDITION_LABEL_RE = /^(État|Conditie|Staat)$/i;
 const VERIFICATION_TITLE_RE = /^(Vérification|Verificatie|Verification)/i;
@@ -52,6 +85,8 @@ interface TwhConfigListing {
 		name?: unknown;
 		sellerProfileUrl?: unknown;
 		activeSinceDiff?: unknown;
+		/** `CONSUMER` pour un particulier, autre chose pour un professionnel. */
+		sellerType?: unknown;
 		location?: { cityName?: unknown; countryAbbreviation?: unknown };
 	};
 }
@@ -134,7 +169,7 @@ function priceFromConfig(info: TwhConfigListing["priceInfo"]): {
 } | null {
 	const type = str(info?.priceType);
 	if (!type) return null;
-	const priceType = PRICE_TYPES[type] ?? "unknown";
+	const priceType = PRICE_TYPES.get(type) ?? "unknown";
 	const cents = info?.priceCents;
 	const hasAmount =
 		typeof cents === "number" &&
@@ -145,6 +180,15 @@ function priceFromConfig(info: TwhConfigListing["priceInfo"]): {
 		price: hasAmount ? { amountCents: cents, currency: "EUR" } : null,
 		priceType,
 	};
+}
+
+/** Type de prix lu sur le libellé affiché (« Prix sur demande »…), sans montant. */
+function priceFromLabel(text: string): {
+	price: Listing["price"];
+	priceType: Listing["priceType"];
+} | null {
+	const priceType = PRICE_LABELS.get(foldText(text));
+	return priceType ? { price: null, priceType } : null;
 }
 
 function priceFromProduct(product: JsonLdProduct | null): Listing["price"] {
@@ -223,6 +267,25 @@ function readReviews(
 		count: count === undefined ? undefined : Number(count),
 		rating: ratingValue >= 0 && ratingValue <= 5 ? ratingValue : undefined,
 	};
+}
+
+/**
+ * Particulier ou professionnel. `sellerType` de `__CONFIG__` fait foi ; sans
+ * lui, un lien « Visiter le site internet » dans la section vendeur indique un
+ * professionnel. Sinon : indéterminé.
+ */
+function readSellerKind(
+	sellerType: unknown,
+	doc: Document,
+): Listing["seller"]["sellerKind"] {
+	const type = str(sellerType);
+	if (type) return type === "CONSUMER" ? "private" : "professional";
+	const hasWebsite = SELLER_SCOPES.some((scope) =>
+		[...doc.querySelectorAll(`${scope} a`)].some((a) =>
+			WEBSITE_LINK_LABELS.has(foldText(a.textContent ?? "")),
+		),
+	);
+	return hasWebsite ? "professional" : undefined;
 }
 
 function readVerified(doc: Document): boolean | undefined {
@@ -383,9 +446,15 @@ function extract(doc: Document, url: URL, site: Site): ExtractResult | null {
 
 	const missing: string[] = [];
 
+	// Un type connu de `__CONFIG__` fait foi ; un type absent ou inconnu laisse
+	// le libellé affiché à la place du prix (« Prix sur demande »…) le préciser.
+	const priceText = h1?.nextElementSibling?.textContent ?? "";
+	const configPrice = priceFromConfig(config?.priceInfo);
 	const priceInfo =
-		priceFromConfig(config?.priceInfo) ??
-		parsePriceText(h1?.nextElementSibling?.textContent ?? "") ??
+		(configPrice?.priceType === "unknown" ? null : configPrice) ??
+		priceFromLabel(priceText) ??
+		configPrice ??
+		parsePriceText(priceText) ??
 		(() => {
 			const price = priceFromProduct(product);
 			return price ? { price, priceType: "unknown" as const } : null;
@@ -427,6 +496,7 @@ function extract(doc: Document, url: URL, site: Site): ExtractResult | null {
 		rating: reviews.rating,
 		otherListingsCount: readOtherListingsCount(doc),
 		verified: readVerified(doc),
+		sellerKind: readSellerKind(seller?.sellerType, doc),
 	};
 	for (const [key, value] of Object.entries(sellerFields)) {
 		if (value === undefined) missing.push(`seller.${key}`);

@@ -59,12 +59,40 @@ describe("toScanIn", () => {
 			rating: 4.5,
 			otherListingsCount: 3,
 			verified: false,
+			sellerKind: "professional" as const,
 		};
 		const body = toScanIn(
 			request({ listing: listing({ seller: { id: "9", ...seller } }) }),
 		);
 		expect(body.listing.seller).toEqual(seller);
 	});
+
+	test.each(["private", "professional"] as const)(
+		"sellerKind %s is passed through",
+		(sellerKind) => {
+			const body = toScanIn(
+				request({ listing: listing({ seller: { name: "X", sellerKind } }) }),
+			);
+			expect(body.listing.seller).toEqual({ sellerKind });
+		},
+	);
+
+	test("absent sellerKind stays absent", () => {
+		const body = toScanIn(
+			request({ listing: listing({ seller: { reviewCount: 2 } }) }),
+		);
+		expect(body.listing.seller).not.toHaveProperty("sellerKind");
+	});
+
+	test.each(["on_request", "see_description", "exchange", "reserved"] as const)(
+		"priceType %s is passed as is",
+		(priceType) => {
+			const body = toScanIn(
+				request({ listing: listing({ price: null, priceType }) }),
+			);
+			expect(body.listing.priceType).toBe(priceType);
+		},
+	);
 
 	test("text fields are truncated to the exact bounds", () => {
 		const long = "a".repeat(6000);

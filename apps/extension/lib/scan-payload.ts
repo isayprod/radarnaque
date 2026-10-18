@@ -62,6 +62,7 @@ function sellerFacts(seller: Listing["seller"]): SellerFactsIn {
 		out.otherListingsCount = seller.otherListingsCount;
 	}
 	if (seller.verified !== undefined) out.verified = seller.verified;
+	if (seller.sellerKind !== undefined) out.sellerKind = seller.sellerKind;
 	return out;
 }
 

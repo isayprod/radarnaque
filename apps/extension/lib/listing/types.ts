@@ -8,7 +8,19 @@ export interface Listing {
 	title: string;
 	description: string;
 	price: { amountCents: number; currency: "EUR" } | null;
-	priceType: "fixed" | "bidding" | "free" | "unknown";
+	/**
+	 * Même ensemble que l'API. `on_request`, `see_description`, `exchange` et
+	 * `reserved` n'ont jamais de montant fiable : aucune règle de prix ne s'y applique.
+	 */
+	priceType:
+		| "fixed"
+		| "bidding"
+		| "free"
+		| "on_request"
+		| "see_description"
+		| "exchange"
+		| "reserved"
+		| "unknown";
 	category?: string;
 	condition?: string;
 	/** ISO 8601 */
@@ -27,5 +39,7 @@ export interface Listing {
 		rating?: number;
 		otherListingsCount?: number;
 		verified?: boolean;
+		/** Particulier ou professionnel : un fait sur le vendeur, pas son identité. */
+		sellerKind?: "private" | "professional";
 	};
 }
