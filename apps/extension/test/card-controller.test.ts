@@ -11,6 +11,13 @@ import {
 } from "../lib/content/access-policy";
 import type { AiClient } from "../lib/content/ai-client";
 import {
+	AI_RESULT_TTL_MS,
+	type AiResultStore,
+	createAiResultStore,
+	listingFingerprint,
+	type StoredAiResult,
+} from "../lib/content/ai-results";
+import {
 	CARD_HOST_TAG,
 	type CardMount,
 	type CardView,
@@ -110,6 +117,7 @@ interface SetupOptions {
 	accessCache?: AccessCache;
 	/** Vrai : le vrai `scanCard`, qui appelle `ai.scan` (fiche illisible, repli sur la carte). */
 	realScan?: boolean;
+	aiResults?: AiResultStore;
 }
 
 function setup(
@@ -150,6 +158,7 @@ function setup(
 		scan: options.realScan ? undefined : scan,
 		fetchPage,
 		accessCache: options.accessCache,
+		aiResults: options.aiResults,
 		log: vi.fn(),
 	});
 	disposers.push(controller.dispose);
@@ -855,5 +864,183 @@ describe("createCardController — accès inactif relu (R5)", () => {
 		window.dispatchEvent(new Event("focus"));
 		await t.controller.refresh();
 		expect(t.ai.access).not.toHaveBeenCalled();
+	});
+});
+
+/** Magasin réel sur un stockage en mémoire, avec une horloge réglable. */
+function memoryStore(initial: Record<string, StoredAiResult> = {}) {
+	let value = initial;
+	let clock = Date.parse(sampleAnalysis.analyzedAt);
+	const store = createAiResultStore(
+		{
+			getValue: async () => value,
+			setValue: async (next) => {
+				value = next;
+			},
+		},
+		() => clock,
+	);
+	const spied = {
+		get: vi.fn<AiResultStore["get"]>((site, id) => store.get(site, id)),
+		put: vi.fn<AiResultStore["put"]>((site, id, e) => store.put(site, id, e)),
+	};
+	return {
+		store: spied,
+		value: () => value,
+		advance(ms: number) {
+			clock += ms;
+		},
+	};
+}
+
+/** Résultat partiel venu d'une carte, avec une empreinte qui ne correspond à rien. */
+const partialEntry = (): StoredAiResult => ({
+	result: { ...sampleAnalysis, partial: true },
+	scanKind: "text",
+	fingerprint: "autre empreinte",
+	storedAt: Date.parse(sampleAnalysis.analyzedAt),
+});
+
+describe("createCardController — résultats gardés 24 h", () => {
+	test("entrée stockée : icône montée puis done sans clic, ai.scan jamais appelé", async () => {
+		const id = FB_IDS[2] as string;
+		const mem = memoryStore({ [`facebook.com|${id}`]: partialEntry() });
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH, [withCards], {
+			realScan: true,
+			aiResults: mem.store,
+		});
+		await t.controller.refresh();
+		await vi.waitFor(() =>
+			expect(t.lastView(id).state).toEqual({
+				status: "done",
+				result: { ...sampleAnalysis, partial: true },
+			}),
+		);
+		expect(mem.store.get).toHaveBeenCalledWith("facebook.com", id);
+		expect(t.lastView(FB_IDS[0] as string).state).toEqual({ status: "idle" });
+		// Terminé : un clic ne lance rien.
+		t.lastView(id).onActivate();
+		await t.controller.refresh();
+		expect(t.ai.scan).not.toHaveBeenCalled();
+		expect(t.fetchPage).not.toHaveBeenCalled();
+	});
+
+	test("entrée expirée : l'icône reste idle", async () => {
+		const id = FB_IDS[2] as string;
+		const mem = memoryStore({ [`facebook.com|${id}`]: partialEntry() });
+		mem.advance(AI_RESULT_TTL_MS + 1_000);
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH, [withCards], { aiResults: mem.store });
+		await t.controller.refresh();
+		await vi.waitFor(() => expect(mem.store.get).toHaveBeenCalledTimes(6));
+		await t.controller.refresh();
+		expect(t.lastView(id).state).toEqual({ status: "idle" });
+	});
+
+	test("après un scan de carte réussi : entrée écrite, type text, empreinte de l'annonce analysée", async () => {
+		const mem = memoryStore();
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH, [withCards], {
+			realScan: true,
+			aiResults: mem.store,
+		});
+		await t.controller.refresh();
+		const id = FB_IDS[0] as string;
+		t.lastView(id).onActivate();
+		await vi.waitFor(() => expect(mem.store.put).toHaveBeenCalledTimes(1));
+		const scanned = t.ai.scan.mock.calls[0]?.[0];
+		expect(mem.store.put).toHaveBeenCalledWith("facebook.com", id, {
+			result: sampleAnalysis,
+			scanKind: "text",
+			fingerprint: listingFingerprint(scanned?.listing as never),
+			storedAt: expect.any(Number),
+		});
+	});
+
+	test("scan de carte en échec : rien n'est écrit", async () => {
+		const mem = memoryStore();
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH, [withCards], {
+			realScan: true,
+			aiResults: mem.store,
+		});
+		t.ai.scan.mockResolvedValueOnce({
+			ok: false,
+			error: { code: "rate_limited" },
+		});
+		await t.controller.refresh();
+		const id = FB_IDS[0] as string;
+		t.lastView(id).onActivate();
+		await vi.waitFor(() =>
+			expect(t.lastView(id).state).toMatchObject({ status: "error" }),
+		);
+		expect(mem.store.put).not.toHaveBeenCalled();
+	});
+
+	test("remontage d'une icône idle : le magasin est relu (entrée écrite entre-temps)", async () => {
+		const id = FB_IDS[3] as string;
+		const mem = memoryStore();
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH, [withCards], { aiResults: mem.store });
+		await t.controller.refresh();
+		await vi.waitFor(() => expect(mem.store.get).toHaveBeenCalledTimes(6));
+		expect(t.lastView(id).state).toEqual({ status: "idle" });
+
+		// Analysée sur la fiche entre-temps, puis l'hôte retiré par le site.
+		await mem.store.put("facebook.com", id, {
+			...partialEntry(),
+			result: sampleAnalysis,
+		});
+		t.liveOf(id).host.remove();
+		await t.controller.refresh();
+		await vi.waitFor(() =>
+			expect(t.lastView(id).state).toEqual({
+				status: "done",
+				result: sampleAnalysis,
+			}),
+		);
+		expect(t.ai.scan).not.toHaveBeenCalled();
+	});
+
+	test("clic pendant la lecture du magasin : la lecture tardive n'écrase pas le scan", async () => {
+		const id = FB_IDS[0] as string;
+		const pending = deferred<StoredAiResult | null>();
+		const mem = memoryStore();
+		mem.store.get.mockImplementation(async (_site, cardId) =>
+			cardId === id ? pending.promise : null,
+		);
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH, [withCards], { aiResults: mem.store });
+		const scanning = deferred<BgResponse<AnalysisResult>>();
+		t.scan.mockReturnValueOnce(scanning.promise);
+		await t.controller.refresh();
+		t.lastView(id).onActivate();
+		pending.resolve(partialEntry());
+		await t.controller.refresh();
+		expect(t.lastView(id).state).toEqual({ status: "loading" });
+	});
+
+	test("magasin indisponible : icônes idle, le clic fonctionne", async () => {
+		const failing: AiResultStore = {
+			get: vi.fn(async () => {
+				throw new Error("indisponible");
+			}),
+			put: vi.fn(async () => {
+				throw new Error("indisponible");
+			}),
+		};
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH, [withCards], { aiResults: failing });
+		await t.controller.refresh();
+		const id = FB_IDS[0] as string;
+		expect(t.lastView(id).state).toEqual({ status: "idle" });
+		t.lastView(id).onActivate();
+		await vi.waitFor(() =>
+			expect(t.lastView(id).state).toEqual({
+				status: "done",
+				result: sampleAnalysis,
+			}),
+		);
 	});
 });

@@ -30,6 +30,8 @@ export interface ScanCardDeps {
 	adapter: MarketplaceAdapter;
 	ai: AiClient;
 	fetchPage(url: string): Promise<string>;
+	/** Annonce envoyée à l'IA (fiche récupérée ou carte), juste avant le scan. */
+	onListing?(listing: Listing): void;
 }
 
 const fail = (code: string): BgResponse<never> => ({
@@ -108,6 +110,7 @@ export async function scanCard(
 	}
 
 	const report = evaluate(listing, { unknown });
+	deps.onListing?.(listing);
 	return deps.ai.scan({
 		listing,
 		signals: report.signals,

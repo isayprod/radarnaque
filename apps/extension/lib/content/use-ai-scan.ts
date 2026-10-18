@@ -10,6 +10,11 @@ import {
 	RELOGIN_CODES,
 } from "./access-policy";
 import type { AiClient, ScanState } from "./ai-client";
+import {
+	type AiResultStore,
+	listingFingerprint,
+	type StoredAiResult,
+} from "./ai-results";
 import type { BadgeView } from "./controller";
 
 export type { BadgeView } from "./controller";
@@ -37,6 +42,8 @@ interface Scope {
 	reading: boolean;
 	/** Numéro de la dernière lecture de l'accès : seules ses réponses comptent. */
 	accessSeq: number;
+	/** Le magasin des résultats IA a déjà été lu pour cette annonce. */
+	storeRead: boolean;
 }
 
 const IDLE: ScanState = { status: "idle" };
@@ -54,6 +61,7 @@ const freshScope = (key: string): Scope => ({
 	inflight: new Set(),
 	reading: false,
 	accessSeq: 0,
+	storeRead: false,
 });
 
 const keyOf = (view: BadgeView) =>
@@ -82,12 +90,18 @@ export interface AiScan {
  * fermer le panneau ne le perd pas. Aucun scan n'est lancé sans appel à `scan`.
  * L'accès vient de `accessCache`, partagé avec les icônes de cartes et gardé
  * d'une annonce à l'autre (R8) ; à défaut, un cache propre à la pastille.
+ *
+ * `aiResults` garde les résultats 24 h : à l'arrivée sur une annonce, un
+ * résultat complet dont l'empreinte est celle de l'annonce affichée est repris
+ * sans nouveau scan. Une annonce modifiée, ou un résultat partiel venu d'une
+ * carte, laisse la pastille sur l'analyse locale.
  */
 export function useAiScan(
 	client: AiClient,
 	view: BadgeView,
 	locale: Locale,
 	accessCache?: AccessCache,
+	aiResults?: AiResultStore,
 ): AiScan {
 	const [ownCache] = useState(createAccessCache);
 	const cache = accessCache ?? ownCache;
@@ -127,6 +141,30 @@ export function useAiScan(
 			prev.key === scope.key ? { ...prev, ...update } : prev,
 		);
 	}, []);
+
+	// Une seule lecture du magasin par annonce (portée), jamais un scan.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `key` déclenche la lecture pour chaque annonce
+	useEffect(() => {
+		const scope = scopeRef.current;
+		if (!aiResults || scope.storeRead) return;
+		scope.storeRead = true;
+		const { site, externalId } = viewRef.current.listing;
+		const adopt = (entry: StoredAiResult | null) => {
+			if (!entry || !mountedRef.current || scopeRef.current !== scope) return;
+			// Résultat partiel (carte) ou annonce changée depuis l'analyse : pastille locale.
+			if (entry.result.partial) return;
+			if (entry.fingerprint !== listingFingerprint(viewRef.current.listing))
+				return;
+			const kind = entry.scanKind;
+			// Un scan de ce type, en cours ou fini (pas `idle`), l'emporte sur l'entrée lue.
+			setSlots((prev) =>
+				prev.key === scope.key && prev[kind].status === "idle"
+					? { ...prev, [kind]: { status: "done", result: entry.result } }
+					: prev,
+			);
+		};
+		void aiResults.get(site, externalId).then(adopt, () => {});
+	}, [aiResults, key]);
 
 	const readAccess = useCallback(
 		(scope: Scope) => {
@@ -182,6 +220,17 @@ export function useAiScan(
 			patch(scope, { [kind]: { status: "loading" } });
 			const finish = (state: ScanState) => {
 				scope.inflight.delete(kind);
+				// Gardé 24 h, même si l'annonce affichée a changé entre-temps :
+				// l'entrée porte l'empreinte de l'annonce lue au clic.
+				if (state.status === "done")
+					void aiResults
+						?.put(listing.site, listing.externalId, {
+							result: state.result,
+							scanKind: kind,
+							fingerprint: listingFingerprint(listing),
+							storedAt: Date.now(),
+						})
+						.catch(() => {});
 				patch(scope, { [kind]: state });
 				// R8 : session expirée, l'accès en cache ne vaut plus, pour les
 				// icônes de cartes aussi.
@@ -201,7 +250,7 @@ export function useAiScan(
 				() => finish({ status: "error", code: "background_unavailable" }),
 			);
 		},
-		[client, patch, readAccess, cache],
+		[client, patch, readAccess, cache, aiResults],
 	);
 
 	const login = useCallback(() => {
