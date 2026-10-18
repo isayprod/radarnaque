@@ -323,6 +323,54 @@ describe("twhAdapter.extractListing — type de vendeur", () => {
 		);
 	});
 
+	// R7 : liste fermée, comparée sans casse et sans espaces autour.
+	test.each([
+		["consumer", "private"],
+		[" Consumer ", "private"],
+		["PROFESSIONAL", "professional"],
+		["trader", "professional"],
+		["BUSINESS", "professional"],
+		["Dealer", "professional"],
+		["COMPANY", "professional"],
+		[" pro ", "professional"],
+	])("sellerType %j → %s", (type, kind) => {
+		const doc = fixed();
+		replaceInConfig(
+			doc,
+			'"sellerType":"CONSUMER"',
+			`"sellerType":${JSON.stringify(type)}`,
+		);
+		const { listing, missing } = extract(doc, FIXED_URL);
+		expect(listing.seller.sellerKind).toBe(kind);
+		expect(missing).not.toContain("seller.sellerKind");
+	});
+
+	test.each(["UNKNOWN", "PRIVATE_PLUS", "PROS"])(
+		"sellerType %s hors liste → indéterminé",
+		(type) => {
+			const doc = fixed();
+			replaceInConfig(doc, '"sellerType":"CONSUMER"', `"sellerType":"${type}"`);
+			const { listing, missing } = extract(doc, FIXED_URL);
+			expect(listing.seller).not.toHaveProperty("sellerKind");
+			expect(missing).toContain("seller.sellerKind");
+		},
+	);
+
+	test("sellerType UNKNOWN + lien « site internet » → professional (repli R3)", () => {
+		const doc = fixed();
+		replaceInConfig(doc, '"sellerType":"CONSUMER"', '"sellerType":"UNKNOWN"');
+		addWebsiteLink(doc, "#seller-sidebar-root", "Visiter le site internet");
+		const { listing, missing } = extract(doc, FIXED_URL);
+		expect(listing.seller.sellerKind).toBe("professional");
+		expect(missing).not.toContain("seller.sellerKind");
+	});
+
+	test("sellerType CONSUMER + lien « site internet » → private (R3 : la plateforme l'emporte)", () => {
+		const doc = fixed();
+		addWebsiteLink(doc, "#seller-sidebar-root", "Visiter le site internet");
+		expect(extract(doc, FIXED_URL).listing.seller.sellerKind).toBe("private");
+	});
+
 	test.each([
 		["#seller-sidebar-root", "Visiter le site internet"],
 		["#vendeur", " visiter  le SITE internet "],
