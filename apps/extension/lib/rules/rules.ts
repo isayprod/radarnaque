@@ -1,13 +1,15 @@
 import { normalizeText } from "../listing/parse";
 import type { Listing } from "../listing/types";
 import {
+	ABROAD_SELLER_KEYWORDS,
 	containsKeyword,
+	EMAIL_CONTACT_KEYWORDS,
 	OFFSITE_PAYMENT_KEYWORDS,
 	OFFSITE_PAYMENT_WITH_PAYPAL_KEYWORDS,
 	SHIPPING_ONLY_KEYWORDS,
 } from "./keywords";
 
-export const RULES_VERSION = 2;
+export const RULES_VERSION = 3;
 
 export type Severity = "info" | "warning" | "danger";
 export type RuleId =
@@ -15,6 +17,7 @@ export type RuleId =
 	| "new_account"
 	| "no_reviews"
 	| "foreign_location"
+	| "abroad_seller"
 	| "short_description"
 	| "contact_outside"
 	| "shipping_only"
@@ -56,6 +59,8 @@ function contactKind(l: Listing): "phone" | "email" | "app" | null {
 	if (PHONE_RES.some((re) => re.test(text))) return "phone";
 	if (EMAIL_RE.test(text)) return "email";
 	if (APP_RES.some((re) => re.test(text))) return "app";
+	// Après les applis : « mail me sur signal » reste un contact par appli.
+	if (containsKeyword(text, EMAIL_CONTACT_KEYWORDS)) return "email";
 	return null;
 }
 
@@ -102,6 +107,9 @@ export const RULES: readonly Rule[] = [
 		const country = l.location.country;
 		return country !== undefined && country !== "BE" ? { country } : false;
 	}),
+	rule("abroad_seller", 20, "warning", (l) =>
+		containsKeyword(text(l), ABROAD_SELLER_KEYWORDS),
+	),
 	rule(
 		"short_description",
 		10,

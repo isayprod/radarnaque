@@ -3,7 +3,12 @@ import type { Listing } from "../lib/listing/types";
 import type { RuleId } from "../lib/rules/rules";
 import { RULES, RULES_VERSION } from "../lib/rules/rules";
 import type { UnknownField } from "../lib/rules/score";
-import { evaluate, levelOf } from "../lib/rules/score";
+import {
+	evaluate,
+	LOW_VALUE_PRICE_CENTS,
+	LOW_VALUE_WEAK_SIGNALS,
+	levelOf,
+} from "../lib/rules/score";
 
 const NEUTRAL_DESCRIPTION =
 	"Très bon état, vendu car plus utilisé, visible sur place à Bruxelles en semaine.";
@@ -54,6 +59,7 @@ describe("registry", () => {
 			"new_account",
 			"no_reviews",
 			"foreign_location",
+			"abroad_seller",
 			"short_description",
 			"contact_outside",
 			"shipping_only",
@@ -61,7 +67,7 @@ describe("registry", () => {
 			"symbolic_price",
 			"price_anomaly",
 		]);
-		expect(RULES_VERSION).toBe(2);
+		expect(RULES_VERSION).toBe(3);
 	});
 
 	test("weights and severities match the table", () => {
@@ -75,6 +81,7 @@ describe("registry", () => {
 			["new_account", 25, "danger"],
 			["no_reviews", 10, "warning"],
 			["foreign_location", 20, "warning"],
+			["abroad_seller", 20, "warning"],
 			["short_description", 10, "info"],
 			["contact_outside", 25, "danger"],
 			["shipping_only", 15, "warning"],
@@ -305,6 +312,238 @@ describe("contact_outside", () => {
 	});
 });
 
+describe("contact_outside par mail (v3)", () => {
+	const kind = (text: string) =>
+		signal(
+			makeListing({ description: `${NEUTRAL_DESCRIPTION} ${text}` }),
+			"contact_outside",
+		);
+
+	test.each([
+		"Contactez-moi par mail",
+		"Uniquement par mail",
+		"Enkel via mail",
+		"Mail me",
+		"CONTACTEZ-MOI PAR MAIL",
+	])("positive: %s", (text) => {
+		expect(kind(text)).toEqual({
+			id: "contact_outside",
+			weight: 25,
+			severity: "danger",
+			params: { kind: "email" },
+		});
+	});
+
+	test("un téléphone ou un vrai email passent avant", () => {
+		expect(kind("Contactez-moi par mail au 0472 12 34 56")?.params).toEqual({
+			kind: "phone",
+		});
+		expect(kind("Contactez-moi par mail : a@b.com")?.params).toEqual({
+			kind: "email",
+		});
+	});
+
+	test("« mail me » suivi d'une appli reste une appli", () => {
+		expect(kind("mail me sur signal")?.params).toEqual({ kind: "app" });
+	});
+
+	test("négatif : mot « mail » seul", () => {
+		expect(kind("Mailing list non fournie")).toBeUndefined();
+		expect(kind("Je réponds au mail de la boutique")).toBeUndefined();
+	});
+});
+
+describe("abroad_seller", () => {
+	const idsOf = (text: string) =>
+		ids(makeListing({ description: `${NEUTRAL_DESCRIPTION} ${text}` }));
+
+	test.each([
+		"Je suis à l'étranger, envoi possible",
+		"Actuellement à l'étranger",
+		"Envoi par transporteur",
+		"Livraison par transporteur",
+		"Via un transporteur agréé",
+		"Je suis A L'ETRANGER",
+		"Ik zit in het buitenland",
+		"Momenteel in het buitenland",
+		"Verzending via koerier",
+		"Via een koerier",
+		"Via transporteur",
+	])("positive FR/NL: %s", (text) => {
+		expect(idsOf(text)).toEqual(["abroad_seller"]);
+	});
+
+	test("signal : poids 20, gravité warning", () => {
+		const l = makeListing({
+			description: `${NEUTRAL_DESCRIPTION} Je suis à l'étranger`,
+		});
+		expect(signal(l, "abroad_seller")).toEqual({
+			id: "abroad_seller",
+			weight: 20,
+			severity: "warning",
+		});
+		expect(evaluate(l).score).toBe(20);
+	});
+
+	test("faux positif : « Je rentre de l'étranger »", () => {
+		const l = makeListing({
+			description: `${NEUTRAL_DESCRIPTION} Je rentre de l'étranger, vélo révisé`,
+		});
+		expect(ids(l)).toEqual([]);
+		expect(
+			ids(makeListing({ title: "Je rentre de l'étranger, vélo révisé" })),
+		).toEqual([]);
+	});
+
+	test("lit aussi le titre", () => {
+		expect(ids(makeListing({ title: "Vélo, via un transporteur" }))).toEqual([
+			"abroad_seller",
+		]);
+	});
+});
+
+describe("objets de faible valeur", () => {
+	const coque = (overrides: Partial<Listing> = {}) =>
+		makeListing({
+			title: "Coque de téléphone",
+			price: { amountCents: 800, currency: "EUR" },
+			priceType: "fixed",
+			images: ["https://img/1.jpg"],
+			seller: { accountAgeMonths: { min: 1, max: 1 } },
+			...overrides,
+		});
+
+	test("constantes exportées", () => {
+		expect(LOW_VALUE_PRICE_CENTS).toBe(3000);
+		expect([...LOW_VALUE_WEAK_SIGNALS].sort()).toEqual([
+			"few_photos",
+			"new_account",
+			"no_reviews",
+			"short_description",
+		]);
+	});
+
+	test("coque à 8 € : few_photos 7, new_account 12, score 19", () => {
+		const report = evaluate(coque());
+		const weights = Object.fromEntries(
+			report.signals.map((s) => [s.id, s.weight]),
+		);
+		expect(weights).toEqual({ few_photos: 7, new_account: 12 });
+		expect(report.score).toBe(19);
+		expect(report.level).toBe("low");
+	});
+
+	test("la gravité des signaux atténués ne change pas", () => {
+		const report = evaluate(coque());
+		expect(report.signals.map((s) => [s.id, s.severity])).toEqual([
+			["few_photos", "warning"],
+			["new_account", "danger"],
+		]);
+	});
+
+	test("no_reviews (10) et short_description (10) passent à 5", () => {
+		const l = coque({
+			description: "",
+			images: ["a", "b"],
+			seller: { reviewCount: 0 },
+		});
+		const weights = Object.fromEntries(
+			evaluate(l).signals.map((s) => [s.id, s.weight]),
+		);
+		expect(weights).toEqual({ no_reviews: 5, short_description: 5 });
+	});
+
+	test("offsite_payment reste à 35 et contact_outside à 25", () => {
+		const paiement = coque({
+			description: `${NEUTRAL_DESCRIPTION} paiement à l'avance`,
+		});
+		expect(signal(paiement, "offsite_payment")?.weight).toBe(35);
+		expect(signal(paiement, "few_photos")?.weight).toBe(7);
+		const contact = coque({
+			description: `${NEUTRAL_DESCRIPTION} whatsapp`,
+		});
+		expect(signal(contact, "contact_outside")?.weight).toBe(25);
+	});
+
+	test("les autres signaux restent intacts", () => {
+		const l = coque({
+			location: { country: "FR" },
+			description: `${NEUTRAL_DESCRIPTION} Je suis à l'étranger, envoi uniquement`,
+		});
+		expect(signal(l, "foreign_location")?.weight).toBe(20);
+		expect(signal(l, "abroad_seller")?.weight).toBe(20);
+		expect(signal(l, "shipping_only")?.weight).toBe(15);
+	});
+
+	test("29,99 € est atténué, 30,00 € ne l'est pas", () => {
+		const at = (amountCents: number) =>
+			signal(coque({ price: { amountCents, currency: "EUR" } }), "few_photos")
+				?.weight;
+		expect(at(2999)).toBe(7);
+		expect(at(3000)).toBe(15);
+		expect(
+			signal(
+				coque({ price: { amountCents: 3000, currency: "EUR" } }),
+				"new_account",
+			)?.weight,
+		).toBe(25);
+	});
+
+	test("pas d'atténuation hors prix fixe ou sans prix", () => {
+		expect(signal(coque({ priceType: "bidding" }), "few_photos")?.weight).toBe(
+			15,
+		);
+		expect(signal(coque({ price: null }), "few_photos")?.weight).toBe(15);
+	});
+
+	test("l'objet du listing n'est pas modifié", () => {
+		const l = coque();
+		const copy = structuredClone(l);
+		evaluate(l);
+		expect(l).toEqual(copy);
+		expect(RULES.find((r) => r.id === "few_photos")?.weight).toBe(15);
+	});
+
+	test("le plafond et le niveau utilisent les poids atténués", () => {
+		const l = coque({
+			images: [],
+			description: "",
+			seller: { reviewCount: 0, accountAgeMonths: { min: 0, max: 0 } },
+		});
+		const report = evaluate(l);
+		expect(report.signals.reduce((n, s) => n + s.weight, 0)).toBe(
+			7 + 12 + 5 + 5,
+		);
+		expect(report.score).toBe(29);
+	});
+});
+
+describe("prix sans règle de prix", () => {
+	test("« on_request » ne déclenche aucune règle de prix", () => {
+		const l = {
+			...makeListing({ price: null }),
+			priceType: "on_request",
+		} as unknown as Listing;
+		expect(ids(l)).toEqual([]);
+		const withPrice = {
+			...makeListing({ price: { amountCents: 0, currency: "EUR" } }),
+			priceType: "on_request",
+		} as unknown as Listing;
+		expect(ids(withPrice)).toEqual([]);
+	});
+
+	test("« on_request » n'atténue pas les signaux faibles", () => {
+		const l = {
+			...makeListing({
+				images: [],
+				price: { amountCents: 500, currency: "EUR" },
+			}),
+			priceType: "on_request",
+		} as unknown as Listing;
+		expect(signal(l, "few_photos")?.weight).toBe(15);
+	});
+});
+
 describe("shipping_only", () => {
 	test.each([
 		"Envoi uniquement, merci",
@@ -368,6 +607,25 @@ describe("offsite_payment", () => {
 
 	test("unknown (no text) triggers nothing", () => {
 		expect(ids(makeListing({ title: "" }))).toEqual([]);
+	});
+
+	test.each([
+		"Acompte de 50 € demandé",
+		"Caution avant la visite obligatoire",
+		"Réservation payante",
+		"RÉSERVATION PAYANTE",
+		"Voorschot nodig",
+		"Waarborg vooraf te betalen",
+		"Eerst betalen, dan verzenden",
+		"Paiement par carte cadeau",
+		"Betaling met cadeaukaart",
+	])("v3 keywords: %s", (text) => {
+		const l = makeListing({ description: `${NEUTRAL_DESCRIPTION} ${text}` });
+		expect(signal(l, "offsite_payment")).toEqual({
+			id: "offsite_payment",
+			weight: 35,
+			severity: "danger",
+		});
 	});
 
 	test("friends and family needs paypal in the same text", () => {
@@ -461,7 +719,7 @@ describe("score and level", () => {
 		});
 		const report = evaluate(l);
 		expect(report.signals).toHaveLength(9);
-		expect(report.signals.reduce((n, s) => n + s.weight, 0)).toBe(175);
+		expect(report.signals.reduce((n, s) => n + s.weight, 0)).toBe(144); // prix 0 € : signaux faibles atténués (7+12+5+5)
 		expect(report.score).toBe(100);
 		expect(report.level).toBe("high");
 	});

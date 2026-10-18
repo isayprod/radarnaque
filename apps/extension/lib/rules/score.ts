@@ -13,6 +13,25 @@ export interface RiskReport {
 
 const MAX_SCORE = 100;
 
+/** Prix fixe sous ce seuil (en centimes) : objet de faible valeur, l'arnaque y est rare. */
+export const LOW_VALUE_PRICE_CENTS = 3000;
+
+/** Signaux faibles, atténués de moitié pour un objet de faible valeur. */
+export const LOW_VALUE_WEAK_SIGNALS: ReadonlySet<RuleId> = new Set<RuleId>([
+	"few_photos",
+	"no_reviews",
+	"new_account",
+	"short_description",
+]);
+
+function isLowValue(listing: Listing): boolean {
+	return (
+		listing.priceType === "fixed" &&
+		listing.price !== null &&
+		listing.price.amountCents < LOW_VALUE_PRICE_CENTS
+	);
+}
+
 /** Champ que l'adaptateur n'a pas pu lire : la règle qui en dépend n'est pas évaluée. */
 export type UnknownField = "description" | "images";
 
@@ -29,7 +48,10 @@ export function levelOf(score: number): RiskLevel {
 }
 
 /**
- * Somme des poids des signaux, plafonnée à 100. Ignore les règles `enabled: false`
+ * Somme des poids des signaux, plafonnée à 100. Pour un objet de faible valeur,
+ * les signaux faibles pèsent la moitié de leur poids (arrondi inférieur) : le
+ * poids atténué est celui du signal renvoyé, donc celui que reçoit le serveur.
+ * Ignore les règles `enabled: false`
  * et celles dont le champ est dans `opts.unknown`.
  */
 export function evaluate(
@@ -40,11 +62,17 @@ export function evaluate(
 	for (const field of opts?.unknown ?? []) {
 		skipped.add(RULE_OF_UNKNOWN_FIELD[field]);
 	}
+	const lowValue = isLowValue(listing);
 	const signals: Signal[] = [];
 	for (const rule of RULES) {
 		if (!rule.enabled || skipped.has(rule.id)) continue;
 		const signal = rule.check(listing);
-		if (signal) signals.push(signal);
+		if (!signal) continue;
+		signals.push(
+			lowValue && LOW_VALUE_WEAK_SIGNALS.has(signal.id)
+				? { ...signal, weight: Math.floor(signal.weight / 2) }
+				: signal,
+		);
 	}
 	const score = Math.min(
 		MAX_SCORE,
