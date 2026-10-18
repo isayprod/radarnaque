@@ -18,6 +18,16 @@ export const ABROAD_SELLER_KEYWORDS: readonly string[] = [
 	"ik ben in het buitenland",
 	"momenteel in het buitenland",
 	"eigenaar in het buitenland",
+	"muté à l'étranger",
+	"travaille à l'étranger",
+	"vis à l'étranger",
+	"habite à l'étranger",
+	"réside à l'étranger",
+	"en mission à l'étranger",
+	"werk in het buitenland",
+	"verblijf in het buitenland",
+	"woonachtig in het buitenland",
+	"verhuisd naar het buitenland",
 ];
 
 /**
@@ -49,8 +59,11 @@ export const EMAIL_CONTACT_KEYWORDS: readonly string[] = [
 	"enkel via mail",
 ];
 
-/** « mail me » en mots entiers : ni « mail merci » ni « hotmail me » (sur le texte replié). */
-export const MAIL_ME_RE = /(?<!\p{L})mail me(?!\p{L})/u;
+/**
+ * « mail me » ou « email me » en mots entiers : ni « mail merci » ni « hotmail me »
+ * (sur le texte replié ; « e-mail me » passe, le tiret n'étant pas une lettre).
+ */
+export const MAIL_ME_RE = /(?<!\p{L})e?mail me(?!\p{L})/u;
 
 /** Mots-clés de `offsite_payment` : FR, NL, EN. */
 export const OFFSITE_PAYMENT_KEYWORDS: readonly string[] = [
@@ -82,10 +95,15 @@ export const NEGATABLE_PAYMENT_KEYWORDS: readonly string[] = [
 	"voorschot",
 ];
 
-/** Négations, en mots repliés : « d' » est un mot à part (« pas d'acompte »). */
+/**
+ * Négations qui portent sur le mot-clé, en mots repliés et juste avant lui :
+ * « d' » est un mot à part (« pas d'acompte »).
+ */
 const NEGATIONS: readonly (readonly string[])[] = [
 	["pas", "d'"],
 	["pas", "de"],
+	["sans", "aucun"],
+	["geen", "enkel"],
 	["sans"],
 	["aucun"],
 	["geen"],
@@ -112,23 +130,31 @@ export function foldText(s: string): string {
 		.toLowerCase();
 }
 
-/** Vrai si l'un des 2 mots qui précèdent `prefix` (fin exclue) forme une négation. */
+/** Ponctuation qui clôt une proposition : une négation d'avant ne porte plus sur la suite. */
+const CLAUSE_END_RE = /[,;:.!?…()«»"]$/;
+
+/**
+ * Vrai si `prefix` (le texte avant le mot-clé) se termine par une négation qui porte
+ * sur le mot-clé : « pas d' », « sans aucun »… juste avant lui, sans ponctuation entre
+ * les deux. « Sans visite, acompte demandé » ou « sans frais acompte » ne sont donc pas
+ * des négations de l'acompte.
+ */
 function endsWithNegation(prefix: string): boolean {
-	// « d'acompte » : l'élision devient un mot ; la ponctuation sépare les mots.
-	const words = prefix
-		.replace(/'/g, "' ")
-		.split(/[\s,;:.!?()«»"]+/)
-		.filter(Boolean)
-		.slice(-2);
-	return NEGATIONS.some((neg) =>
-		words.some((_, i) => neg.every((w, j) => words[i + j] === w)),
+	const trimmed = prefix.trimEnd();
+	if (trimmed === "" || CLAUSE_END_RE.test(trimmed)) return false;
+	// « d'acompte » : l'élision devient un mot.
+	const words = trimmed.replace(/'/g, "' ").split(/\s+/).filter(Boolean);
+	return NEGATIONS.some(
+		(neg) =>
+			words.length >= neg.length &&
+			neg.every((w, j) => words[words.length - neg.length + j] === w),
 	);
 }
 
 /**
  * Vrai si `text` contient l'un des mots-clés hors négation : une occurrence
- * précédée (dans les 2 mots d'avant) de « pas d' », « pas de », « sans »,
- * « aucun », « geen » ou « zonder » ne compte pas ; une autre occurrence, si.
+ * précédée juste avant elle (sans ponctuation entre les deux) de « pas d' », « pas de »,
+ * « sans », « aucun », « geen » ou « zonder » ne compte pas ; une autre occurrence, si.
  */
 export function containsUnnegatedKeyword(
 	text: string,
