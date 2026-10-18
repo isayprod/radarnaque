@@ -31,6 +31,10 @@ Remarques relevées pendant les relectures de la phase 3c : l'IA prioritaire dan
   - numéros HK (agrément des animaux) et BCE/KBO (entreprise), détectés par expression régulière dans la description ;
   - une table locale de prix de référence pour 20 à 50 modèles phares (iPhone, PS5, Switch 2, vélos électriques), pour activer `price_anomaly` et `new_sealed_cheap`.
 
+- `abroad_seller` : un importateur honnête (« envoi par transporteur », « fabriqué à l'étranger », « importé de l'étranger ») déclenche encore la règle, car le mot « étranger » est cherché dans tout le texte. Piste : exiger le contexte dans la même phrase, ou exclure « de l'étranger ».
+- Migration 0004 : la vérification du texte v2 lit la base, donc `alembic upgrade --sql` (mode hors ligne) échoue sur 0004.
+- Changement de compte sans déconnexion (reconnexion par le site après expiration) : les résultats IA du compte précédent restent dans le navigateur. Piste : enregistrer l'identifiant d'utilisateur dans chaque entrée.
+
 ## Décisions prises pendant l'exécution
 
 - **R1. Règles de travail :** trailer de commit « Claude Opus 5.5 », aucun push, `video/`, `.DS_Store`, `.conftest.py.swp` et `.Rhistory` jamais touchés, `web-pages/` jamais lu ; l'utilisateur avait approuvé la spec et le plan à l'avance.
