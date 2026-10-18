@@ -99,6 +99,7 @@ describe("twhAdapter.extractListing — listing-fixed", () => {
 			rating: 4.5,
 			otherListingsCount: 2,
 			verified: true,
+			sellerKind: "private",
 		});
 	});
 
@@ -195,16 +196,182 @@ describe("twhAdapter.extractListing — price types", () => {
 		},
 	);
 
-	test.each(["NOTK", "SEE_DESCRIPTION", "EXCHANGE", "RESERVED", "WHATEVER"])(
-		"%s → no price, unknown",
-		(type) => {
+	test.each([
+		["SEE_DESCRIPTION", "see_description"],
+		["ON_REQUEST", "on_request"],
+		["NOTK", "on_request"],
+		["EXCHANGE", "exchange"],
+		["RESERVED", "reserved"],
+		["WHATEVER", "unknown"],
+		["constructor", "unknown"],
+	])("%s → no price, %s", (type, expected) => {
+		const doc = fixed();
+		setPriceInfo(doc, type, 39900);
+		const { listing } = extract(doc, FIXED_URL);
+		expect(listing.price).toBeNull();
+		expect(listing.priceType).toBe(expected);
+	});
+});
+
+/** Élément qui affiche le prix sous le titre de la sidebar. */
+function priceElement(doc: Document): Element {
+	const el = doc.querySelector(
+		"#seller-sidebar-root header h1",
+	)?.nextElementSibling;
+	if (!el) throw new Error("no price element");
+	return el;
+}
+
+describe("twhAdapter.extractListing — libellé affiché à la place du prix", () => {
+	test.each([
+		["Prix sur demande", "on_request"],
+		["Prijs op aanvraag", "on_request"],
+		["Voir description", "see_description"],
+		["Zie omschrijving", "see_description"],
+		["À convenir", "on_request"],
+		["a convenir", "on_request"],
+		["N.o.t.k.", "on_request"],
+		["Échange", "exchange"],
+		["Ruilen", "exchange"],
+		["Réservé", "reserved"],
+		["RESERVE", "reserved"],
+		["Gereserveerd", "reserved"],
+	])("« %s » sans prix dans __CONFIG__ → %s", (label, expected) => {
+		const doc = fixed();
+		editListingConfig(doc, (listing) => {
+			delete listing.priceInfo;
+		});
+		priceElement(doc).textContent = label;
+		const { listing, missing } = extract(doc, FIXED_URL);
+		expect(listing.price).toBeNull();
+		expect(listing.priceType).toBe(expected);
+		expect(missing).not.toContain("price");
+	});
+
+	test("« Prix sur demande » sans __CONFIG__ → on_request, sans repli JSON-LD", () => {
+		const doc = fixed();
+		configScript(doc).remove();
+		priceElement(doc).textContent = "Prix sur demande";
+		const { listing } = extract(doc, FIXED_URL);
+		expect(listing.price).toBeNull();
+		expect(listing.priceType).toBe("on_request");
+	});
+
+	test("type inconnu dans __CONFIG__ : le libellé affiché le précise", () => {
+		const doc = fixed();
+		setPriceInfo(doc, "WHATEVER", 0);
+		priceElement(doc).textContent = "Zie omschrijving";
+		expect(extract(doc, FIXED_URL).listing.priceType).toBe("see_description");
+	});
+
+	test("un type connu dans __CONFIG__ l'emporte sur le libellé", () => {
+		const doc = fixed();
+		priceElement(doc).textContent = "Prix sur demande";
+		const { listing } = extract(doc, FIXED_URL);
+		expect(listing.priceType).toBe("fixed");
+		expect(listing.price).toEqual({ amountCents: 39900, currency: "EUR" });
+	});
+
+	test.each(["Échange possible contre un vélo", "toString", "constructor"])(
+		"« %s » n'est pas un libellé de prix",
+		(label) => {
 			const doc = fixed();
-			setPriceInfo(doc, type, 39900);
+			editListingConfig(doc, (listing) => {
+				delete listing.priceInfo;
+			});
+			priceElement(doc).textContent = label;
+			// Repli habituel : montant du JSON-LD, type inconnu.
 			const { listing } = extract(doc, FIXED_URL);
-			expect(listing.price).toBeNull();
 			expect(listing.priceType).toBe("unknown");
+			expect(listing.price).toEqual({ amountCents: 39900, currency: "EUR" });
 		},
 	);
+});
+
+/** Remplace du texte dans le script `__CONFIG__` de la fixture chargée. */
+function replaceInConfig(doc: Document, from: string, to: string): void {
+	const script = configScript(doc);
+	const text = script.textContent ?? "";
+	if (!text.includes(from)) throw new Error(`no ${from} in __CONFIG__`);
+	script.textContent = text.replace(from, to);
+}
+
+/** Ajoute un lien « site internet » dans la section vendeur `scope`. */
+function addWebsiteLink(doc: Document, scope: string, label: string): void {
+	const section = doc.querySelector(scope);
+	if (!section) throw new Error(`no ${scope}`);
+	const link = doc.createElement("a");
+	link.setAttribute("href", "https://shop.example/");
+	const span = doc.createElement("span");
+	span.textContent = label;
+	link.append(span);
+	section.append(link);
+}
+
+describe("twhAdapter.extractListing — type de vendeur", () => {
+	test("sellerType CONSUMER → private", () => {
+		const { listing, missing } = extract(fixed(), FIXED_URL);
+		expect(listing.seller.sellerKind).toBe("private");
+		expect(missing).not.toContain("seller.sellerKind");
+	});
+
+	test("sellerType TRADER → professional", () => {
+		const doc = fixed();
+		replaceInConfig(doc, '"sellerType":"CONSUMER"', '"sellerType":"TRADER"');
+		expect(extract(doc, FIXED_URL).listing.seller.sellerKind).toBe(
+			"professional",
+		);
+	});
+
+	test.each([
+		["#seller-sidebar-root", "Visiter le site internet"],
+		["#vendeur", " visiter  le SITE internet "],
+		["#seller-sidebar-root", "Bekijk website"],
+	])(
+		"sans sellerType, lien « site internet » dans %s → professional",
+		(scope, label) => {
+			const doc = fixed();
+			replaceInConfig(doc, '"sellerType":"CONSUMER",', "");
+			addWebsiteLink(doc, scope, label);
+			const { listing, missing } = extract(doc, FIXED_URL);
+			expect(listing.seller.sellerKind).toBe("professional");
+			expect(missing).not.toContain("seller.sellerKind");
+		},
+	);
+
+	test("un lien « site internet » hors de la section vendeur est ignoré", () => {
+		const doc = fixed();
+		replaceInConfig(doc, '"sellerType":"CONSUMER",', "");
+		const footer = doc.createElement("footer");
+		doc.body.append(footer);
+		addWebsiteLink(doc, "footer", "Visiter le site internet");
+		const { listing, missing } = extract(doc, FIXED_URL);
+		expect(listing.seller.sellerKind).toBeUndefined();
+		expect(missing).toContain("seller.sellerKind");
+	});
+
+	test("sans sellerType ni lien → absent et signalé dans missing", () => {
+		const doc = fixed();
+		replaceInConfig(doc, '"sellerType":"CONSUMER",', "");
+		const { listing, missing } = extract(doc, FIXED_URL);
+		expect(listing.seller).not.toHaveProperty("sellerKind");
+		expect(missing).toContain("seller.sellerKind");
+	});
+
+	test("sellerType vide → indéterminé", () => {
+		const doc = fixed();
+		replaceInConfig(doc, '"sellerType":"CONSUMER"', '"sellerType":"  "');
+		expect(extract(doc, FIXED_URL).listing.seller.sellerKind).toBeUndefined();
+	});
+
+	test("__CONFIG__ illisible : le lien suffit", () => {
+		const doc = fixed();
+		configScript(doc).textContent = "window.__CONFIG__ = { not json };";
+		addWebsiteLink(doc, "#seller-sidebar-root", "Visiter le site internet");
+		expect(extract(doc, FIXED_URL).listing.seller.sellerKind).toBe(
+			"professional",
+		);
+	});
 });
 
 describe("twhAdapter.extractListing — seller verification", () => {

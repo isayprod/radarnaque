@@ -309,6 +309,8 @@ function readSeller(root: Element, url: URL, now: Date): Listing["seller"] {
 		rating: undefined,
 		otherListingsCount: undefined,
 		verified: undefined,
+		// Facebook n'affiche pas si le vendeur est un professionnel.
+		sellerKind: undefined,
 	};
 }
 

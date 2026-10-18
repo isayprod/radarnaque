@@ -520,26 +520,21 @@ describe("objets de faible valeur", () => {
 
 describe("prix sans règle de prix", () => {
 	test("« on_request » ne déclenche aucune règle de prix", () => {
-		const l = {
-			...makeListing({ price: null }),
-			priceType: "on_request",
-		} as unknown as Listing;
+		const l = makeListing({ price: null, priceType: "on_request" });
 		expect(ids(l)).toEqual([]);
-		const withPrice = {
-			...makeListing({ price: { amountCents: 0, currency: "EUR" } }),
+		const withPrice = makeListing({
+			price: { amountCents: 0, currency: "EUR" },
 			priceType: "on_request",
-		} as unknown as Listing;
+		});
 		expect(ids(withPrice)).toEqual([]);
 	});
 
 	test("« on_request » n'atténue pas les signaux faibles", () => {
-		const l = {
-			...makeListing({
-				images: [],
-				price: { amountCents: 500, currency: "EUR" },
-			}),
+		const l = makeListing({
+			images: [],
+			price: { amountCents: 500, currency: "EUR" },
 			priceType: "on_request",
-		} as unknown as Listing;
+		});
 		expect(signal(l, "few_photos")?.weight).toBe(15);
 	});
 });

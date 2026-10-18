@@ -121,6 +121,7 @@ describe("facebookAdapter : fiche en modale", () => {
 				"seller.rating",
 				"seller.otherListingsCount",
 				"seller.verified",
+				"seller.sellerKind",
 			]),
 		);
 		for (const key of [
@@ -136,6 +137,11 @@ describe("facebookAdapter : fiche en modale", () => {
 		]) {
 			expect(missing).not.toContain(key);
 		}
+	});
+
+	test("le type de vendeur n'est jamais renseigné", () => {
+		const { listing } = extract(modal());
+		expect(listing.seller).not.toHaveProperty("sellerKind");
 	});
 
 	test("l'ancre est le h1 de la fiche", () => {
