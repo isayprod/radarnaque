@@ -99,6 +99,8 @@ export default defineContentScript({
 		const accessCache = createAccessCache();
 		// Résultats IA gardés 24 h (storage.local), partagés par la pastille et les cartes.
 		const aiResults = createAiResultStore();
+		// M1 : entrées expirées retirées une fois au démarrage ; aucune écriture sinon.
+		void aiResults.prune();
 		// Les UI ne s'abonnent pas à l'invalidation (une fuite par montage) : les
 		// `dispose()` ci-dessous les retirent toutes. R7 : pastille et icônes
 		// partagent un CSS chargé une seule fois, sans `<style>` dans la page.

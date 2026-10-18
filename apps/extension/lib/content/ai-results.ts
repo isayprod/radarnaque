@@ -3,13 +3,16 @@ import { storage } from "wxt/utils/storage";
 import type { Listing, Site } from "../listing/types";
 import type { ScanKind } from "../messages";
 
-/** Un résultat IA reste valable 24 h après l'analyse (`analyzedAt`). */
+/**
+ * Un résultat IA reste valable 24 h après l'analyse (`analyzedAt`) et 24 h
+ * après son écriture (`storedAt`) : la première échéance atteinte l'emporte.
+ */
 export const AI_RESULT_TTL_MS = 24 * 60 * 60_000;
 
 /** Au plus 200 annonces gardées : les plus anciennes (`storedAt`) sont retirées. */
 export const MAX_AI_RESULTS = 200;
 
-/** Résultat IA gardé dans le navigateur pour une annonce. */
+/** Résultat IA d'un type (texte ou photos) gardé pour une annonce. */
 export interface StoredAiResult {
 	result: AnalysisResult;
 	scanKind: ScanKind;
@@ -35,10 +38,37 @@ export function listingFingerprint(l: Listing): string {
 	});
 }
 
+/** Les résultats gardés d'une annonce, un par type (R4). */
+export interface StoredAiResults {
+	text?: StoredAiResult;
+	image?: StoredAiResult;
+}
+
+/** Valeur stockée sous `site|externalId`. Sans `v: 1`, elle est ignorée. */
+export interface StoredAiEntry extends StoredAiResults {
+	v: 1;
+}
+
+/**
+ * Quota restant inconnu. Celui d'un résultat gardé date de l'analyse, jusqu'à
+ * 24 h plus tôt : il n'est ni stocké ni affiché (I1).
+ */
+export const NO_REMAINING: AnalysisResult["remaining"] = Object.freeze({
+	text: null,
+	image: null,
+	total: null,
+});
+
+/** Le résultat sans son quota restant d'alors. */
+export const withoutRemaining = (result: AnalysisResult): AnalysisResult => ({
+	...result,
+	remaining: { ...NO_REMAINING },
+});
+
 /** Stockage d'une valeur : `storage.defineItem` de WXT, ou un double en test. */
 export interface StorageAreaLike {
-	getValue(): Promise<Record<string, StoredAiResult>>;
-	setValue(value: Record<string, StoredAiResult>): Promise<void>;
+	getValue(): Promise<Record<string, StoredAiEntry>>;
+	setValue(value: Record<string, StoredAiEntry>): Promise<void>;
 }
 
 /**
@@ -47,42 +77,104 @@ export interface StorageAreaLike {
  * un stockage vide.
  */
 export interface AiResultStore {
-	/** null si absent, expiré (> 24 h depuis analyzedAt) ou illisible. */
-	get(site: Site, externalId: string): Promise<StoredAiResult | null>;
-	/** Au plus 200 entrées : les plus anciennes sont retirées. */
+	/**
+	 * Les types valables de l'annonce, sans quota restant ; null si aucun
+	 * (absent, expiré ou illisible).
+	 */
+	get(site: Site, externalId: string): Promise<StoredAiResults | null>;
+	/**
+	 * Écrit l'emplacement `entry.scanKind` de l'annonce. Au plus 200 annonces :
+	 * les plus anciennes sont retirées.
+	 */
 	put(site: Site, externalId: string, entry: StoredAiResult): Promise<void>;
+	/** Retire les entrées expirées ; n'écrit que s'il y en a. */
+	prune(): Promise<void>;
 }
+
+const KINDS: readonly ScanKind[] = ["text", "image"];
 
 const keyOf = (site: Site, externalId: string) => `${site}|${externalId}`;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Vérifie la forme d'une entrée lue : le stockage peut contenir n'importe quoi. */
-function isStoredAiResult(value: unknown): value is StoredAiResult {
+/** Vérifie la forme d'un emplacement lu : le stockage peut contenir n'importe quoi. */
+function isSlot(value: unknown, kind: ScanKind): value is StoredAiResult {
 	if (!isRecord(value) || !isRecord(value.result)) return false;
 	return (
-		(value.scanKind === "text" || value.scanKind === "image") &&
+		value.scanKind === kind &&
 		typeof value.fingerprint === "string" &&
 		typeof value.storedAt === "number" &&
 		typeof value.result.partial === "boolean"
 	);
 }
 
-/** Départ des 24 h : `analyzedAt`, ou `storedAt` s'il est illisible. */
-function startOf(entry: StoredAiResult): number {
-	const analyzed = Date.parse(entry.result.analyzedAt);
-	return Number.isNaN(analyzed) ? entry.storedAt : analyzed;
+/** M4 : expiré 24 h après l'analyse ou 24 h après l'écriture. */
+function isExpired(slot: StoredAiResult, now: number): boolean {
+	const analyzed = Date.parse(slot.result.analyzedAt);
+	if (!Number.isNaN(analyzed) && now - analyzed > AI_RESULT_TTL_MS) return true;
+	return now - slot.storedAt > AI_RESULT_TTL_MS;
 }
 
-const isExpired = (entry: StoredAiResult, now: number) =>
-	now - startOf(entry) > AI_RESULT_TTL_MS;
+/** Emplacements valables d'une valeur lue ; null si aucun ou sans `v: 1`. */
+function cleanEntry(value: unknown, now: number): StoredAiEntry | null {
+	if (!isRecord(value) || value.v !== 1) return null;
+	const entry: StoredAiEntry = { v: 1 };
+	for (const kind of KINDS) {
+		const slot = value[kind];
+		if (isSlot(slot, kind) && !isExpired(slot, now)) entry[kind] = slot;
+	}
+	return entry.text || entry.image ? entry : null;
+}
+
+/** Écriture la plus récente parmi les emplacements de l'annonce. */
+const recency = (entry: StoredAiEntry) =>
+	Math.max(entry.text?.storedAt ?? 0, entry.image?.storedAt ?? 0);
+
+/**
+ * Valeur lue débarrassée des entrées expirées ou illisibles, puis bornée aux
+ * 200 annonces les plus récentes. `dropped` : quelque chose a été retiré.
+ */
+function cleanMap(
+	raw: Record<string, unknown>,
+	now: number,
+): { map: Record<string, StoredAiEntry>; dropped: boolean } {
+	let dropped = false;
+	const kept: Array<[string, StoredAiEntry]> = [];
+	for (const [key, value] of Object.entries(raw)) {
+		const entry = cleanEntry(value, now);
+		if (!entry) {
+			dropped = true;
+			continue;
+		}
+		if (KINDS.some((k) => isRecord(value) && value[k] && !entry[k]))
+			dropped = true;
+		kept.push([key, entry]);
+	}
+	kept.sort((a, b) => recency(b[1]) - recency(a[1]));
+	if (kept.length > MAX_AI_RESULTS) dropped = true;
+	return {
+		map: Object.fromEntries(kept.slice(0, MAX_AI_RESULTS)),
+		dropped,
+	};
+}
+
+/** Clé de stockage des résultats IA (`storage.local`). */
+export const AI_RESULTS_KEY = "local:aiResults";
 
 /** `storage.local`, sous la clé `aiResults`. */
 const defaultArea = (): StorageAreaLike =>
-	storage.defineItem<Record<string, StoredAiResult>>("local:aiResults", {
+	storage.defineItem<Record<string, StoredAiEntry>>(AI_RESULTS_KEY, {
 		fallback: {},
 	});
+
+/**
+ * R5 : vide les résultats gardés, à la déconnexion (service worker). Les
+ * content scripts déjà ouverts gardent leur copie en mémoire (M2) jusqu'au
+ * prochain chargement de page : accepté.
+ */
+export const clearAiResults = (): Promise<void> =>
+	storage.removeItem(AI_RESULTS_KEY);
 
 export function createAiResultStore(
 	area: StorageAreaLike = defaultArea(),
@@ -112,36 +204,69 @@ export function createAiResultStore(
 		return run;
 	};
 
-	const read = async (): Promise<Record<string, unknown>> => {
+	/**
+	 * M2 : copie en mémoire de la valeur stockée, pour ce content script. Les
+	 * icônes montées ensemble ne lisent le stockage qu'une fois ; `put` relit le
+	 * stockage (écritures des autres onglets) puis met la copie à jour.
+	 */
+	let memory: Record<string, unknown> | null = null;
+
+	const readFresh = async (): Promise<Record<string, unknown>> => {
 		const value = await area.getValue();
 		return isRecord(value) ? value : {};
+	};
+
+	/** Écrit `map` ; la copie n'est mise à jour qu'après une écriture réussie. */
+	const write = async (map: Record<string, StoredAiEntry>) => {
+		memory = null;
+		await area.setValue(map);
+		memory = map;
 	};
 
 	return {
 		get: (site, externalId) =>
 			serial(async () => {
-				const entry = (await read())[keyOf(site, externalId)];
-				if (!isStoredAiResult(entry) || isExpired(entry, now())) return null;
-				return entry;
+				memory ??= await readFresh();
+				const entry = cleanEntry(memory[keyOf(site, externalId)], now());
+				if (!entry) return null;
+				const results: StoredAiResults = {};
+				for (const kind of KINDS) {
+					const slot = entry[kind];
+					if (slot)
+						results[kind] = { ...slot, result: withoutRemaining(slot.result) };
+				}
+				return results;
 			}, null),
 
 		put: (site, externalId, entry) =>
 			serial(async () => {
-				const at = now();
-				const kept: Array<[string, StoredAiResult]> = [];
-				for (const [key, value] of Object.entries(await read()))
-					if (isStoredAiResult(value) && !isExpired(value, at))
-						kept.push([key, value]);
+				const kind = entry.scanKind;
+				const { map } = cleanMap(await readFresh(), now());
 				const key = keyOf(site, externalId);
-				const previous = kept.find(([k]) => k === key)?.[1];
+				const previous = map[key]?.[kind];
 				// Un résultat partiel (carte Facebook) ne remplace jamais l'analyse
-				// de la fiche complète encore valable.
-				if (entry.result.partial && previous && !previous.result.partial)
+				// complète du même type encore valable.
+				if (entry.result.partial && previous && !previous.result.partial) {
+					memory = map;
 					return;
-				const next = kept.filter(([k]) => k !== key);
-				next.push([key, entry]);
-				next.sort((a, b) => b[1].storedAt - a[1].storedAt);
-				await area.setValue(Object.fromEntries(next.slice(0, MAX_AI_RESULTS)));
+				}
+				const next: Record<string, StoredAiEntry> = {
+					[key]: {
+						...map[key],
+						v: 1,
+						[kind]: { ...entry, result: withoutRemaining(entry.result) },
+					},
+				};
+				for (const [k, value] of Object.entries(map))
+					if (k !== key) next[k] = value;
+				await write(cleanMap(next, now()).map);
+			}, undefined),
+
+		prune: () =>
+			serial(async () => {
+				const { map, dropped } = cleanMap(await readFresh(), now());
+				if (dropped) await write(map);
+				else memory = map;
 			}, undefined),
 	};
 }

@@ -36,6 +36,8 @@ export interface HandlerDeps {
 	api: { getMe(): Promise<Me>; scan(body: ScanIn): Promise<AnalysisResult> };
 	/** Ouvre la popup de l'extension (`browser.action.openPopup()` en production). */
 	openPopup: () => Promise<void>;
+	/** R5 : vide les résultats IA gardés à la déconnexion (`clearAiResults`). */
+	clearAiResults: () => Promise<void>;
 }
 
 export interface ExternalDeps {
@@ -159,6 +161,9 @@ export function createHandlers(
 				// La déconnexion locale a lieu même si la révocation distante échoue.
 				if (token) await auth.signOutRemote(token).catch(() => {});
 				await storeSession(null);
+				// R5 : les résultats IA gardés ne survivent pas à la déconnexion ; un
+				// échec du vidage ne bloque pas la déconnexion.
+				await deps.clearAiResults().catch(() => {});
 				return ok(null);
 			}
 			default:

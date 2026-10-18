@@ -15,6 +15,7 @@ import {
 	handleExternal,
 } from "../lib/background-handlers";
 import { PUBLIC_URL } from "../lib/config";
+import { clearAiResults } from "../lib/content/ai-results";
 import { createJwtProvider } from "../lib/jwt-provider";
 import type { BgRequest } from "../lib/messages";
 import { sessionToken } from "../lib/storage";
@@ -38,6 +39,7 @@ export default defineBackground(() => {
 		jwt,
 		api,
 		openPopup: () => browser.action.openPopup(),
+		clearAiResults,
 	});
 
 	// Messages internes : tout depuis les pages de l'extension (popup) ; depuis un

@@ -549,12 +549,16 @@ describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
 			.split(" ")
 			.map((id) => document.getElementById(id)?.textContent);
 
-	/** Magasin simulé : entrées par `site|externalId`. */
+	/** Magasin simulé : une entrée par `site|externalId`, rangée sous son type. */
 	const storeWith = (
 		entries: Record<string, StoredAiResult>,
 	): AiResultStore => ({
-		get: async (site, id) => entries[`${site}|${id}`] ?? null,
+		get: async (site, id) => {
+			const entry = entries[`${site}|${id}`];
+			return entry ? { [entry.scanKind]: entry } : null;
+		},
 		put: async () => {},
+		prune: async () => {},
 	});
 
 	test("avant le scan : pastille « Risque moyen 40/100 », panneau avec les signaux locaux", async () => {
@@ -654,6 +658,42 @@ describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
 		expect(dialog.textContent).toContain(aiHigh.summary.fr);
 		for (const text of LOCAL_TEXTS)
 			expect(dialog.textContent).not.toContain(text);
+		expect(ai.scan).not.toHaveBeenCalled();
+	});
+
+	test("I2 : résultat repris, puis prix changé sous la même clé : pastille locale, sans « IA »", async () => {
+		const aiResults = storeWith({
+			"2ememain.be|m123": {
+				result: aiHigh,
+				scanKind: "text",
+				fingerprint: listingFingerprint(listing),
+				storedAt: 1,
+			},
+		});
+		const view = render(
+			<RiskBadge
+				report={medium}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				aiResults={aiResults}
+			/>,
+		);
+		await vi.waitFor(() => expect(toggle().textContent).toContain("82/100"));
+		view.rerender(
+			<RiskBadge
+				report={medium}
+				listing={{
+					...listing,
+					price: { amountCents: 9000, currency: "EUR" },
+				}}
+				locale="fr"
+				ai={ai}
+				aiResults={aiResults}
+			/>,
+		);
+		expect(toggle().textContent).toContain("40/100");
+		expect(toggle().textContent).not.toContain("IA");
 		expect(ai.scan).not.toHaveBeenCalled();
 	});
 

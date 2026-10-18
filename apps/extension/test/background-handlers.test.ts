@@ -11,6 +11,7 @@ import {
 	type HandlerDeps,
 	handleExternal,
 } from "../lib/background-handlers";
+import { clearAiResults, createAiResultStore } from "../lib/content/ai-results";
 import {
 	type BgRequest,
 	CONTENT_SCRIPT_MESSAGES,
@@ -44,15 +45,17 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}) {
 		),
 	};
 	const openPopup = vi.fn<() => Promise<void>>(async () => {});
+	const clear = vi.fn<() => Promise<void>>(async () => {});
 	const deps: HandlerDeps = {
 		sessionToken,
 		auth,
 		jwt,
 		api,
 		openPopup,
+		clearAiResults: clear,
 		...overrides,
 	};
-	return { deps, auth, jwt, api, openPopup };
+	return { deps, auth, jwt, api, openPopup, clearAiResults: clear };
 }
 
 beforeEach(() => {
@@ -100,6 +103,40 @@ describe("background handlers", () => {
 			data: null,
 		});
 		expect(await sessionToken.getValue()).toBeNull();
+	});
+
+	test("R5 : sign-out vide les résultats IA gardés (local:aiResults)", async () => {
+		await sessionToken.setValue("session-abc");
+		const results = createAiResultStore();
+		await results.put("2ememain.be", "m1", {
+			result: { ...sampleAnalysis, analyzedAt: new Date().toISOString() },
+			scanKind: "text",
+			fingerprint: "fp",
+			storedAt: Date.now(),
+		});
+		expect(await fakeBrowser.storage.local.get("aiResults")).toHaveProperty(
+			"aiResults",
+		);
+		const { deps } = makeDeps({ clearAiResults });
+		expect(await createHandlers(deps)({ type: "auth/sign-out" })).toEqual({
+			ok: true,
+			data: null,
+		});
+		expect(await fakeBrowser.storage.local.get("aiResults")).toEqual({});
+		expect(await createAiResultStore().get("2ememain.be", "m1")).toBeNull();
+	});
+
+	test("R5 : un échec du vidage ne bloque pas la déconnexion", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps, clearAiResults: clear, jwt } = makeDeps();
+		clear.mockRejectedValueOnce(new Error("indisponible"));
+		expect(await createHandlers(deps)({ type: "auth/sign-out" })).toEqual({
+			ok: true,
+			data: null,
+		});
+		expect(clear).toHaveBeenCalledTimes(1);
+		expect(await sessionToken.getValue()).toBeNull();
+		expect(jwt.invalidate).toHaveBeenCalled();
 	});
 
 	test("handlers: state without token → signedOut, no network call", async () => {
