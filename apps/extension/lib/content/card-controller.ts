@@ -11,7 +11,11 @@ import {
 	RELOGIN_CODES,
 } from "./access-policy";
 import type { AiClient, ScanState } from "./ai-client";
-import { type AiResultStore, listingFingerprint } from "./ai-results";
+import {
+	type AiResultStore,
+	listingFingerprint,
+	withoutRemaining,
+} from "./ai-results";
 import { defaultFetchPage, scanCard } from "./card-scan";
 import { BADGE_HOST_TAG, CARD_HOST_TAG } from "./controller";
 
@@ -194,14 +198,22 @@ export function createCardController(deps: CardControllerDeps): {
 		tracked.get(id)?.mount.update(viewOf(id));
 	}
 
-	/** Icône montée ou remontée sans résultat : reprend celui du magasin s'il existe. */
+	/**
+	 * Icône montée ou remontée sans résultat : reprend celui du magasin s'il
+	 * existe, l'analyse photos de préférence, sinon le texte (R4).
+	 */
 	function restore(site: Site, id: string) {
 		if (!deps.aiResults || stateOf(id).status !== "idle") return;
 		void deps.aiResults.get(site, id).then(
 			(stored) => {
+				const entry = stored?.image ?? stored?.text;
 				// Un clic entre-temps (chargement, résultat, erreur) l'emporte.
-				if (disposed || !stored || stateOf(id).status !== "idle") return;
-				setState(id, { status: "done", result: stored.result });
+				if (disposed || !entry || stateOf(id).status !== "idle") return;
+				// I1 : jamais le quota restant de l'époque.
+				setState(id, {
+					status: "done",
+					result: withoutRemaining(entry.result),
+				});
 			},
 			() => {},
 		);

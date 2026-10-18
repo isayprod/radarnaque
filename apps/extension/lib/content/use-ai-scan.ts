@@ -13,7 +13,8 @@ import type { AiClient, ScanState } from "./ai-client";
 import {
 	type AiResultStore,
 	listingFingerprint,
-	type StoredAiResult,
+	type StoredAiResults,
+	withoutRemaining,
 } from "./ai-results";
 import type { BadgeView } from "./controller";
 
@@ -28,6 +29,12 @@ interface Slots {
 	access: AccessState | null;
 	text: ScanState;
 	image: ScanState;
+	/**
+	 * Empreinte de l'annonce analysée (ou restaurée) pour chaque état `done`.
+	 * L'annonce affichée change sous la même clé (prix, description) : l'état
+	 * revient à `idle` et la pastille à l'analyse locale (I2).
+	 */
+	doneFingerprint: Partial<Record<ScanKind, string>>;
 	loginUnavailable: boolean;
 }
 
@@ -48,13 +55,31 @@ interface Scope {
 
 const IDLE: ScanState = { status: "idle" };
 
+const KINDS: readonly ScanKind[] = ["text", "image"];
+
 const freshSlots = (key: string, access: AccessState | null): Slots => ({
 	key,
 	access,
 	text: IDLE,
 	image: IDLE,
+	doneFingerprint: {},
 	loginUnavailable: false,
 });
+
+/** Les états `done` d'une autre version de l'annonce reviennent à `idle` (I2). */
+function dropStale(slots: Slots, fingerprint: string): Slots {
+	let next = slots;
+	for (const kind of KINDS) {
+		if (
+			next[kind].status !== "done" ||
+			next.doneFingerprint[kind] === fingerprint
+		)
+			continue;
+		const { [kind]: _, ...others } = next.doneFingerprint;
+		next = { ...next, [kind]: IDLE, doneFingerprint: others };
+	}
+	return next;
+}
 
 const freshScope = (key: string): Scope => ({
 	key,
@@ -119,6 +144,13 @@ export function useAiScan(
 		slots = freshSlots(key, cache.current());
 		setSlots(slots);
 	}
+	// Même annonce, autre version (prix, description…) : l'ancien verdict IA
+	// n'est plus affiché, sans un rendu avec lui.
+	const fingerprint = listingFingerprint(view.listing);
+	if (dropStale(slots, fingerprint) !== slots) {
+		slots = dropStale(slots, fingerprint);
+		setSlots((prev) => dropStale(prev, fingerprint));
+	}
 
 	// L'annonce et le rapport les plus récents, lus au moment du clic.
 	const viewRef = useRef(view);
@@ -142,6 +174,33 @@ export function useAiScan(
 		);
 	}, []);
 
+	/**
+	 * État d'un type. Un `done` retient l'empreinte de l'annonce analysée ;
+	 * `onlyIfIdle` : pas d'écrasement d'un scan en cours ou fini.
+	 */
+	const setKind = useCallback(
+		(
+			scope: Scope,
+			kind: ScanKind,
+			state: ScanState,
+			analysed?: string,
+			onlyIfIdle = false,
+		) => {
+			if (!mountedRef.current || scopeRef.current !== scope) return;
+			setSlots((prev) => {
+				if (prev.key !== scope.key) return prev;
+				if (onlyIfIdle && prev[kind].status !== "idle") return prev;
+				const { [kind]: _, ...others } = prev.doneFingerprint;
+				const doneFingerprint =
+					state.status === "done" && analysed !== undefined
+						? { ...others, [kind]: analysed }
+						: others;
+				return { ...prev, [kind]: state, doneFingerprint };
+			});
+		},
+		[],
+	);
+
 	// Une seule lecture du magasin par annonce (portée), jamais un scan.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: `key` déclenche la lecture pour chaque annonce
 	useEffect(() => {
@@ -149,22 +208,28 @@ export function useAiScan(
 		if (!aiResults || scope.storeRead) return;
 		scope.storeRead = true;
 		const { site, externalId } = viewRef.current.listing;
-		const adopt = (entry: StoredAiResult | null) => {
-			if (!entry || !mountedRef.current || scopeRef.current !== scope) return;
-			// Résultat partiel (carte) ou annonce changée depuis l'analyse : pastille locale.
-			if (entry.result.partial) return;
-			if (entry.fingerprint !== listingFingerprint(viewRef.current.listing))
-				return;
-			const kind = entry.scanKind;
-			// Un scan de ce type, en cours ou fini (pas `idle`), l'emporte sur l'entrée lue.
-			setSlots((prev) =>
-				prev.key === scope.key && prev[kind].status === "idle"
-					? { ...prev, [kind]: { status: "done", result: entry.result } }
-					: prev,
-			);
+		const adopt = (entries: StoredAiResults | null) => {
+			if (!entries) return;
+			const current = listingFingerprint(viewRef.current.listing);
+			// Chaque type est repris seul (R4).
+			for (const kind of KINDS) {
+				const entry = entries[kind];
+				// Résultat partiel (carte) ou annonce changée depuis l'analyse : pastille locale.
+				if (!entry || entry.result.partial || entry.fingerprint !== current)
+					continue;
+				// I1 : jamais le quota restant de l'époque. Un scan de ce type, en
+				// cours ou fini (pas `idle`), l'emporte sur l'entrée lue.
+				setKind(
+					scope,
+					kind,
+					{ status: "done", result: withoutRemaining(entry.result) },
+					entry.fingerprint,
+					true,
+				);
+			}
 		};
 		void aiResults.get(site, externalId).then(adopt, () => {});
-	}, [aiResults, key]);
+	}, [aiResults, key, setKind]);
 
 	const readAccess = useCallback(
 		(scope: Scope) => {
@@ -217,7 +282,8 @@ export function useAiScan(
 				// Fiche lue en entier : `partial` ne vaut vrai que pour un scan depuis une carte.
 				partial: false,
 			};
-			patch(scope, { [kind]: { status: "loading" } });
+			const analysed = listingFingerprint(listing);
+			setKind(scope, kind, { status: "loading" });
 			const finish = (state: ScanState) => {
 				scope.inflight.delete(kind);
 				// Gardé 24 h, même si l'annonce affichée a changé entre-temps :
@@ -227,11 +293,12 @@ export function useAiScan(
 						?.put(listing.site, listing.externalId, {
 							result: state.result,
 							scanKind: kind,
-							fingerprint: listingFingerprint(listing),
+							fingerprint: analysed,
 							storedAt: Date.now(),
 						})
 						.catch(() => {});
-				patch(scope, { [kind]: state });
+				// Annonce modifiée depuis le clic : le rendu suivant le remet à `idle`.
+				setKind(scope, kind, state, analysed);
 				// R8 : session expirée, l'accès en cache ne vaut plus, pour les
 				// icônes de cartes aussi.
 				if (state.status === "error" && RELOGIN_CODES.has(state.code))
@@ -250,7 +317,7 @@ export function useAiScan(
 				() => finish({ status: "error", code: "background_unavailable" }),
 			);
 		},
-		[client, patch, readAccess, cache, aiResults],
+		[client, setKind, readAccess, cache, aiResults],
 	);
 
 	const login = useCallback(() => {
