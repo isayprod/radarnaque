@@ -223,8 +223,8 @@ interface MarketplaceAdapter {
 
 Les poids ci-dessus sont les poids initiaux du MVP ; ils pourront être ajustés en testant sur des annonces réelles (chaque ajustement incrémente `RULES_VERSION`).
 
-**Règles v3 (phase 3c, `RULES_VERSION = 3`)**, d'après la recherche `docs/superpowers/research/2026-10-18-arnaques-acheteurs.md` :
-- **`abroad_seller`** (20, warning) : vendeur ou objet à l'étranger avec envoi par transporteur (« je suis à l'étranger », « envoi par transporteur », « in het buitenland », « via koerier »…).
+**Règles v4 (phase 3c, `RULES_VERSION = 4` : les règles v3 ci-dessous, aux mots-clés affinés contre les faux positifs)**, d'après la recherche `docs/superpowers/research/2026-10-18-arnaques-acheteurs.md` :
+- **`abroad_seller`** (20, warning) : vendeur ou objet à l'étranger (« je suis à l'étranger », « eigenaar in het buitenland »…) ; un envoi par transporteur (« envoi par transporteur », « via een koerier »…) ne compte qu'avec « étranger », « buitenland » ou un intermédiaire.
 - **Listes de mots-clés enrichies** pour `offsite_payment` (acompte, caution ou réservation payée avant la visite ; « voorschot », « waarborg vooraf »…) et `contact_outside` (« uniquement par WhatsApp », « contactez-moi par mail », « enkel via WhatsApp »…).
 - **Objets de faible valeur :** pour un prix fixe de moins de 30 €, les signaux faibles (`few_photos`, `no_reviews`, `new_account`, `short_description`) comptent pour la moitié de leur poids (arrondi à l'entier inférieur). L'arnaque y est rare, le préjudice faible.
 - Les types de prix `on_request`, `see_description`, `exchange` et `reserved` ne déclenchent aucune règle.
