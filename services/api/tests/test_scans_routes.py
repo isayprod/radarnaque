@@ -143,6 +143,25 @@ async def test_scan_rejects_seller_identity(client, bearer, user, llm):
     assert llm.calls == 0
 
 
+async def test_scan_accepts_new_price_types_and_seller_kind(client, bearer, user, llm):
+    uid = await user()
+    body = _body(priceType="on_request", seller={"reviewCount": 0, "sellerKind": "professional"})
+    r = await client.post("/api/scans", json=body, headers=bearer(uid))
+    assert r.status_code == 200, r.text
+    assert r.json()["professional"] is False
+
+
+async def test_scan_rejects_an_unknown_seller_kind(client, bearer, user, llm):
+    uid = await user()
+    body = _body(seller={"reviewCount": 0, "sellerKind": "shop"})
+    r = await client.post("/api/scans", json=body, headers=bearer(uid))
+    assert r.status_code == 422
+    error = r.json()["error"]
+    assert error["code"] == "invalid_listing"
+    assert error["details"]["field"] == "listing.seller.sellerKind"
+    assert llm.calls == 0
+
+
 async def test_scan_requires_jwt(client, llm):
     r = await client.post("/api/scans", json=_body())
     assert r.status_code == 401 and r.json()["error"]["code"] == "unauthenticated"

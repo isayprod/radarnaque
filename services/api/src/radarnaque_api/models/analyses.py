@@ -35,6 +35,8 @@ class Analysis(Base):
     input_hash: Mapped[str]
     score: Mapped[int]
     partial: Mapped[bool] = mapped_column(server_default=false())
+    # L'IA juge que l'annonce vient d'un professionnel (vitrine) ; ce n'est pas un signal.
+    professional: Mapped[bool] = mapped_column(server_default=false())
     tokens_in: Mapped[int] = mapped_column(server_default="0")
     tokens_out: Mapped[int] = mapped_column(server_default="0")
     cost_usd_micros: Mapped[int] = mapped_column(BigInteger, server_default="0")

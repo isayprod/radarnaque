@@ -31,6 +31,7 @@ const result: AnalysisResult = {
 	analyzedAt: "2026-10-17T10:00:00Z",
 	fromCache: false,
 	partial: false,
+	professional: false,
 	level: "high",
 	score: 82,
 	summary: { fr: "Résumé en français.", nl: "Samenvatting in het Nederlands." },

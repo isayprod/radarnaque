@@ -88,11 +88,40 @@ def test_limits_on_title_description_and_images():
         {"seller": {"reviewCount": -1}},
         {"seller": {"rating": 5.5}},
         {"seller": {"otherListingsCount": -1}},
+        {"seller": {"sellerKind": "shop"}},
     ],
 )
 def test_invalid_listing_values_are_rejected(override):
     with pytest.raises(ValidationError):
         ListingIn.model_validate({**_listing(), **override})
+
+
+@pytest.mark.parametrize(
+    "price_type",
+    [
+        "fixed",
+        "bidding",
+        "free",
+        "on_request",
+        "see_description",
+        "exchange",
+        "reserved",
+        "unknown",
+    ],
+)
+def test_every_price_type_is_accepted(price_type):
+    listing = ListingIn.model_validate({**_listing(), "priceType": price_type})
+    assert listing.price_type == price_type
+
+
+@pytest.mark.parametrize("kind", ["private", "professional"])
+def test_seller_kind_is_accepted(kind):
+    listing = ListingIn.model_validate({**_listing(), "seller": {"sellerKind": kind}})
+    assert listing.seller.seller_kind == kind
+
+
+def test_seller_kind_is_optional():
+    assert ListingIn.model_validate(_listing()).seller.seller_kind is None
 
 
 def test_signal_and_rules_limits():

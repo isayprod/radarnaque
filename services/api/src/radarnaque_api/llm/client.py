@@ -46,6 +46,9 @@ class LLMReason(BaseModel):
 
 class LLMAnalysis(BaseModel):
     score: int = Field(ge=0, le=100)
+    # Faux par défaut : une réponse au format v1, sans ce champ, reste valide. Le schéma strict
+    # l'exige, comme tous les champs.
+    professional: bool = False
     summary: Bilingual
     advice: Bilingual
     reasons: list[LLMReason] = Field(max_length=5)
@@ -87,8 +90,8 @@ class LLMClient(Protocol):
 
 
 # Mots-clés que la sortie structurée stricte d'OpenAI refuse ; Pydantic les vérifie de toute
-# façon à la réception.
-_UNSUPPORTED_KEYWORDS = {"title", "minLength", "maxLength"}
+# façon à la réception. `default` n'a pas de sens en mode strict, où tout champ est exigé.
+_UNSUPPORTED_KEYWORDS = {"title", "minLength", "maxLength", "default"}
 
 
 _SUBSCHEMA_KEYS = {"items", "additionalProperties", "not"}

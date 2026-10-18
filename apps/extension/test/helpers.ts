@@ -81,6 +81,7 @@ export const sampleAnalysis: AnalysisResult = {
 	fromCache: false,
 	level: "medium",
 	partial: false,
+	professional: false,
 	score: 55,
 	summary: { fr: "Prudence.", nl: "Voorzichtig." },
 	advice: { fr: "Payez à la remise.", nl: "Betaal bij overhandiging." },

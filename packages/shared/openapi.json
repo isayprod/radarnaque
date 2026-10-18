@@ -54,6 +54,10 @@
             "title": "Partial",
             "type": "boolean"
           },
+          "professional": {
+            "title": "Professional",
+            "type": "boolean"
+          },
           "reasons": {
             "items": {
               "$ref": "#/components/schemas/AnalysisReasonOut"
@@ -77,6 +81,7 @@
           "score",
           "level",
           "partial",
+          "professional",
           "fromCache",
           "summary",
           "advice",
@@ -234,6 +239,10 @@
               "fixed",
               "bidding",
               "free",
+              "on_request",
+              "see_description",
+              "exchange",
+              "reserved",
               "unknown"
             ],
             "title": "Pricetype",
@@ -789,6 +798,21 @@
               }
             ],
             "title": "Reviewcount"
+          },
+          "sellerKind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "private",
+                  "professional"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sellerkind"
           },
           "verified": {
             "anyOf": [

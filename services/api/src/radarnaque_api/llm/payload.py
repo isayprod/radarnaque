@@ -40,6 +40,7 @@ _SELLER_FIELDS = {
     "rating": "rating",
     "other_listings_count": "otherListingsCount",
     "verified": "verified",
+    "seller_kind": "sellerKind",
 }
 _RANGE_FIELDS = {"min": "min", "max": "max"}
 _LOCATION_FIELDS = {"city": "city", "region": "region", "country": "country"}
@@ -74,11 +75,19 @@ def _seller(seller: Any) -> dict[str, Any]:
     return {**facts, "accountAgeMonths": _pick(age, _RANGE_FIELDS)}
 
 
+def masked_contacts(masked_description: str) -> int:
+    """Nombre de téléphones et d'emails masqués dans la description **déjà masquée** (le titre
+    n'est pas compté). Dérivé de la description, ce fait est couvert par `content_hash`."""
+    return masked_description.count(PHONE_MASK) + masked_description.count(EMAIL_MASK)
+
+
 def _facts(listing: ListingIn, rules: RulesIn) -> dict[str, Any]:
+    description = mask_contacts(listing.description)
     return {
         "site": listing.site,
         "title": mask_contacts(listing.title),
-        "description": mask_contacts(listing.description),
+        "description": description,
+        "maskedContacts": masked_contacts(description),
         "price": _pick(listing.price, _PRICE_FIELDS),
         "priceType": listing.price_type,
         "category": listing.category,
