@@ -310,6 +310,44 @@ contrairement à la pastille (voir « 6. Tester sur les vrais sites »), la stac
 6. Sans être connecté, le panneau propose « Se connecter » ; sans abonnement actif, il
    l'indique et renvoie vers les formules.
 
+### Quand un résultat IA existe
+
+- **La pastille passe sur l'IA.** Elle affiche le score de l'analyse IA, suivi de la mention
+  « IA ». Le panneau ne montre plus que l'analyse IA : la liste des signaux locaux disparaît.
+  Tant qu'aucun résultat n'existe (ou pendant un premier scan), l'analyse locale reste affichée.
+- **Le résultat est gardé 24 h dans le navigateur**, par annonce, avec une place pour le texte
+  et une place pour les photos. Revenir sur l'annonce l'affiche
+  tout de suite, sans nouveau scan. Si le titre, la description, le prix ou
+  le type de prix change, la page revient à l'analyse locale.
+- **Le résultat partiel d'une carte** (Facebook, voir « Limites à connaître ») ne remplace
+  jamais l'analyse de la page de l'annonce.
+- **La déconnexion vide ces résultats** (ordinateur partagé).
+- **Un résultat repris du navigateur n'affiche pas « Analyses restantes »** : ce compteur n'est
+  connu qu'au moment du scan.
+- **Bandeau « annonce professionnelle ».** Il apparaît en haut du panneau (et dans l'infobulle
+  des cartes) quand 2ememain ou 2dehands classe le vendeur comme professionnel (`sellerType`),
+  ou quand l'IA le détecte (`professional`). Son style est neutre : il n'est pas un signal
+  d'arnaque et ne cache jamais le score ni les raisons.
+
+### Prompt v2 et règles locales v3
+
+- **Le prompt v2 relance les analyses.** La clé du cache de l'API change avec le prompt : une
+  annonce déjà analysée avec le prompt v1 est donc analysée de nouveau, et décomptée du quota.
+  Les résultats déjà gardés dans le navigateur restent affichés jusqu'à leurs 24 h.
+- **Revenir au prompt v1 :**
+
+  ```sh
+  cd services/api && uv run --env-file ../../infra/.env alembic downgrade 0003
+  ```
+
+  Les lignes du prompt v2 déjà utilisées par des analyses sont conservées (l'historique reste
+  lisible) ; le prompt v1 redevient le prompt actif. Revenir au prompt v2 : `alembic upgrade head`
+  (rejouable sans risque).
+- **Règles locales v3** (`RULES_VERSION = 3`) : une règle `abroad_seller` (vendeur ou objet à
+  l'étranger, avec envoi par transporteur), des listes de mots-clés plus riches, et, pour un
+  prix fixe de moins de 30 €, des signaux faibles (`few_photos`, `no_reviews`, `new_account`,
+  `short_description`) qui ne comptent que pour la moitié de leur poids.
+
 ### Sur une page de résultats
 
 Pages concernées : une recherche ou une liste de catégorie sur 2ememain ou 2dehands
