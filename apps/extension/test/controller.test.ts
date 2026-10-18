@@ -125,7 +125,7 @@ describe("createController — 2ememain", () => {
 		expect(t.ops.map((o) => o.op)).toEqual(["mount"]);
 		const [mount] = t.of("mount");
 		expect(mount?.locale).toBe("fr");
-		expect(mount?.report.rulesVersion).toBe(3);
+		expect(mount?.report.rulesVersion).toBe(4);
 		expect(mount?.anchor).toBe(doc.querySelector("#seller-sidebar-root h1"));
 		expect(mount?.anchor.getAttribute("data-radarnaque")).toBe("m1000000001");
 		expect(t.getLocale).toHaveBeenCalledWith("2ememain.be");
