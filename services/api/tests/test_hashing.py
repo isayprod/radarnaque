@@ -159,35 +159,74 @@ def _facts_sent(scan: ScanIn) -> dict:
     return json.loads(text.split("<annonce>\n", 1)[1].split("\n</annonce>", 1)[0])
 
 
-# Pour chaque champ envoyé au LLM : une modification du corps qui change sa valeur. `site` est
+# Pour chaque fait envoyé au LLM : l'empreinte qui le couvre, et une modification du corps qui
+# change sa valeur. Les faits vendeur sont détaillés un par un (`seller.<clé>`). `site` est
 # couvert par la clé du cache elle-même (snapshot → listings(site_id, external_id)).
+CONTENT = "content_hash"
+INPUT = "input_hash"
 FACT_MUTATIONS = {
-    "site": None,
-    "title": lambda b: b["listing"].update(title="Fiets kapot"),
-    "description": lambda b: b["listing"].update(description="Slechte staat"),
-    "price": lambda b: b["listing"]["price"].update(amountCents=2000),
-    "priceType": lambda b: b["listing"].update(priceType="bidding"),
-    "category": lambda b: b["listing"].update(category="Fietsen"),
-    "condition": lambda b: b["listing"].update(condition="Gebruikt"),
-    "postedAt": lambda b: b["listing"].update(postedAt="2026-10-01"),
-    "location": lambda b: b["listing"]["location"].update(city="Brugge"),
-    "imageCount": lambda b: b["listing"]["images"].append("https://images.2dehands.com/c.jpg"),
-    "seller": lambda b: b["listing"]["seller"].update(reviewCount=9),
-    "signals": lambda b: b["rules"]["signals"][0].update(weight=99),
+    "site": ("cache_key", None),
+    "title": (CONTENT, lambda b: b["listing"].update(title="Fiets kapot")),
+    "description": (CONTENT, lambda b: b["listing"].update(description="Slechte staat")),
+    "maskedContacts": (
+        CONTENT,
+        lambda b: b["listing"].update(description="Bel 0472 12 34 56 of jan@voorbeeld.be"),
+    ),
+    "price": (CONTENT, lambda b: b["listing"]["price"].update(amountCents=2000)),
+    "priceType": (CONTENT, lambda b: b["listing"].update(priceType="on_request")),
+    "category": (INPUT, lambda b: b["listing"].update(category="Fietsen")),
+    "condition": (INPUT, lambda b: b["listing"].update(condition="Gebruikt")),
+    "postedAt": (INPUT, lambda b: b["listing"].update(postedAt="2026-10-01")),
+    "location": (INPUT, lambda b: b["listing"]["location"].update(city="Brugge")),
+    "imageCount": (
+        CONTENT,
+        lambda b: b["listing"]["images"].append("https://images.2dehands.com/c.jpg"),
+    ),
+    "seller.accountAgeMonths": (
+        INPUT,
+        lambda b: b["listing"]["seller"].update(accountAgeMonths={"min": 12, "max": 24}),
+    ),
+    "seller.reviewCount": (INPUT, lambda b: b["listing"]["seller"].update(reviewCount=9)),
+    "seller.rating": (INPUT, lambda b: b["listing"]["seller"].update(rating=4.5)),
+    "seller.otherListingsCount": (
+        INPUT,
+        lambda b: b["listing"]["seller"].update(otherListingsCount=7),
+    ),
+    "seller.verified": (INPUT, lambda b: b["listing"]["seller"].update(verified=True)),
+    "seller.sellerKind": (
+        INPUT,
+        lambda b: b["listing"]["seller"].update(sellerKind="professional"),
+    ),
+    "signals": (INPUT, lambda b: b["rules"]["signals"][0].update(weight=99)),
 }
+
+
+def _fact_paths(facts: dict) -> set[str]:
+    """Faits envoyés, ceux du vendeur détaillés en `seller.<clé>`."""
+    paths = {key for key in facts if key != "seller"}
+    return paths | {f"seller.{key}" for key in facts["seller"]}
+
+
+def _fact(facts: dict, path: str):
+    head, _, sub = path.partition(".")
+    return facts[head][sub] if sub else facts[head]
 
 
 def test_every_fact_sent_to_the_llm_has_a_declared_coverage():
     # Un champ ajouté plus tard au message du LLM fait échouer ce test (règle R12) : il faut
     # alors le couvrir par content_hash ou input_hash, puis l'ajouter à FACT_MUTATIONS.
-    assert set(_facts_sent(ScanIn.model_validate(_scan()))) == set(FACT_MUTATIONS)
+    assert _fact_paths(_facts_sent(ScanIn.model_validate(_scan()))) == set(FACT_MUTATIONS)
 
 
-@pytest.mark.parametrize("field", [k for k, mutate in FACT_MUTATIONS.items() if mutate])
-def test_changing_a_fact_sent_to_the_llm_changes_the_cache_key(field):
+@pytest.mark.parametrize("field", [k for k, (_, mutate) in FACT_MUTATIONS.items() if mutate])
+def test_changing_a_fact_sent_to_the_llm_changes_its_declared_hash(field):
+    coverage, mutate = FACT_MUTATIONS[field]
     base = ScanIn.model_validate(_scan())
     body = _scan()
-    FACT_MUTATIONS[field](body)
+    mutate(body)
     changed = ScanIn.model_validate(body)
-    assert _facts_sent(changed)[field] != _facts_sent(base)[field]
-    assert (_content(changed), input_hash(changed)) != (_content(base), input_hash(base))
+    assert _fact(_facts_sent(changed), field) != _fact(_facts_sent(base), field)
+    if coverage == CONTENT:
+        assert _content(changed) != _content(base)
+    else:
+        assert input_hash(changed) != input_hash(base)

@@ -61,6 +61,7 @@ class FakeLLM:
         self.error = error
         self.calls: list[dict] = []
         self.providers: list[str] = []
+        self.professional = False  # valeur de `professional` des prochaines réponses
 
     def llm_for(self, provider: str) -> "FakeLLM":
         self.providers.append(provider)
@@ -76,6 +77,7 @@ class FakeLLM:
         return LLMResult(
             analysis=LLMAnalysis(
                 score=60 + n,
+                professional=self.professional,
                 summary=Bilingual(fr=f"Résumé {n}", nl=f"Samenvatting {n}"),
                 advice=Bilingual(fr=f"Conseil {n}", nl=f"Advies {n}"),
                 reasons=[
@@ -363,6 +365,7 @@ async def test_expired_cache_entry_is_refreshed_in_place(engine, http, clock, ll
         {"condition": "Gebruikt"},
         {"postedAt": "2026-10-01"},
         {"location": {"city": "Brugge"}},
+        {"seller": {"reviewCount": 0, "sellerKind": "professional"}},
     ],
 )
 async def test_listing_facts_sent_to_the_llm_are_part_of_the_cache_key(
@@ -382,6 +385,43 @@ async def test_listing_facts_sent_to_the_llm_are_part_of_the_cache_key(
     assert again.analysis_id == honest.analysis_id and again.from_cache is True
     assert again.score == honest.score == 61 and again.summary == honest.summary
     assert await _count(engine, ListingSnapshot) == 1
+
+
+async def test_professional_is_returned_stored_and_served_from_cache(engine, http, clock, llm):
+    user = await _user(engine)
+    llm.professional = True
+    first = await _scan_once(engine, user, _scan(), llm, http, clock)
+    clock.advance(seconds=1)
+    second = await _scan_once(engine, user, _scan(), llm, http, clock)
+
+    assert len(llm.calls) == 1
+    assert first.professional is True
+    assert second.from_cache is True and second.professional is True
+    analysis = await _scalar(engine, select(Analysis).where(Analysis.id == first.analysis_id))
+    assert analysis.professional is True
+
+
+async def test_professional_defaults_to_false(engine, http, clock, llm):
+    user = await _user(engine)
+    result = await _scan_once(engine, user, _scan(), llm, http, clock)
+    assert result.professional is False
+    analysis = await _scalar(engine, select(Analysis).where(Analysis.id == result.analysis_id))
+    assert analysis.professional is False
+
+
+async def test_refresh_in_place_updates_professional(engine, http, clock, llm):
+    user = await _user(engine, plan="premium")
+    llm.professional = True
+    first = await _scan_once(engine, user, _scan(), llm, http, clock)
+    clock.advance(hours=25)
+    llm.professional = False
+    second = await _scan_once(engine, user, _scan(), llm, http, clock)
+
+    # Règle R4 : `professional` fait partie de l'analyse, il est rafraîchi avec la note.
+    assert second.analysis_id == first.analysis_id and second.from_cache is False
+    assert first.professional is True and second.professional is False
+    analysis = await _scalar(engine, select(Analysis).where(Analysis.id == first.analysis_id))
+    assert analysis.professional is False
 
 
 async def test_partial_scan_is_cached_separately(engine, http, clock, llm):

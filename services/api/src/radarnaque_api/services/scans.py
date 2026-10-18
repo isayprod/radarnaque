@@ -393,6 +393,7 @@ async def _result(
         score=analysis.score,
         level=risk_level(analysis.score),
         partial=analysis.partial,
+        professional=analysis.professional,
         from_cache=from_cache,
         summary=texts.summary,
         advice=texts.advice,

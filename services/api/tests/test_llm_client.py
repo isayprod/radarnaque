@@ -172,6 +172,26 @@ def test_strict_schema_is_self_contained_and_closed():
     assert strict_analysis_schema()["properties"]
 
 
+def test_strict_schema_requires_professional_as_a_plain_boolean():
+    schema = strict_analysis_schema()
+    assert "professional" in schema["required"]
+    # Ni `title` ni `default` : le mode strict exige le champ, une valeur par défaut n'a pas de
+    # sens dans le schéma envoyé.
+    assert schema["properties"]["professional"] == {"type": "boolean"}
+
+
+@pytest.mark.parametrize(("extra", "expected"), [({}, False), ({"professional": True}, True)])
+async def test_professional_is_read_and_defaults_to_false(mock, http, extra, expected):
+    # Une réponse au format v1, sans `professional`, reste valide.
+    mock.post("/chat/completions").mock(return_value=_ok({**VALID, **extra}))
+    result = await _analyze(_provider(), http)
+    assert result.analysis.professional is expected
+
+
+def test_analysis_without_professional_is_not_professional():
+    assert LLMAnalysis.model_validate(VALID).professional is False
+
+
 class _Titled(BaseModel):
     title: str
     maxLength: int  # nom de champ volontairement identique à un mot-clé

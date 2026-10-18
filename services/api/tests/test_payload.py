@@ -163,6 +163,7 @@ def test_build_messages_content_is_canonical_json_of_allowed_facts():
         "site": "2ememain.be",
         "title": "Vélo électrique",
         "description": "Appelez le [téléphone] ou ecrire a [email]",
+        "maskedContacts": 2,
         "price": {"amountCents": 45000, "currency": "EUR"},
         "priceType": "fixed",
         "category": "Vélos",
@@ -176,6 +177,7 @@ def test_build_messages_content_is_canonical_json_of_allowed_facts():
             "rating": None,
             "otherListingsCount": 2,
             "verified": False,
+            "sellerKind": None,
         },
         "signals": [
             {"id": "contact_in_description", "weight": 25, "severity": "warning", "params": None},
@@ -187,6 +189,32 @@ def test_build_messages_content_is_canonical_json_of_allowed_facts():
     assert canonical in text
     # Ni URL ni identifiant d'annonce : ils ne servent pas à l'analyse.
     assert "m123" not in text and "https://" not in text
+
+
+def test_build_messages_sends_the_seller_kind():
+    listing = _listing(seller={"reviewCount": 4, "sellerKind": "professional"})
+    text = _user_text(build_messages(listing, RULES, []))
+    block = text.split("<annonce>\n", 1)[1]
+    assert '"sellerKind":"professional"' in block
+    assert '"maskedContacts":2' in block
+
+
+@pytest.mark.parametrize(
+    ("title", "description", "count"),
+    [
+        ("Vélo", "Rien à signaler.", 0),
+        ("Vélo", "Appelez le 0472 12 34 56 ou ecrire a jean@exemple.be", 2),
+        ("Vélo", "0472 12 34 56, +32 470 11 22 33, a@b.be, c@d.be et e@f.be", 5),
+        # Le titre n'est pas compté : seule la description masquée l'est.
+        ("Vélo 0472 12 34 56 jean@exemple.be", "Rien à signaler.", 0),
+        # Un masque déjà écrit par l'annonce compte aussi : le fait décrit le texte envoyé.
+        ("Vélo", "Contact : [téléphone]", 1),
+    ],
+)
+def test_masked_contacts_counts_masks_in_the_description_only(title, description, count):
+    facts = _facts(build_messages(_listing(title=title, description=description), RULES, []))
+    assert facts["maskedContacts"] == count
+    assert isinstance(facts["maskedContacts"], int)
 
 
 def test_build_messages_cannot_close_the_block_from_the_description():
@@ -222,6 +250,7 @@ def test_build_messages_never_sends_seller_identity_even_hand_built(seller_as):
         "rating",
         "otherListingsCount",
         "verified",
+        "sellerKind",
     }
 
 

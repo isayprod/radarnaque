@@ -159,6 +159,7 @@ async def save_analysis(
     values = {
         "rules_version": scan.rules.version,
         "score": analysis.score,
+        "professional": analysis.professional,
         "partial": scan.partial,
         "tokens_in": result.tokens_in,
         "tokens_out": result.tokens_out,

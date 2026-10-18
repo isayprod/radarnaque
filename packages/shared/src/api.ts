@@ -180,6 +180,8 @@ export interface components {
             level: "low" | "medium" | "high";
             /** Partial */
             partial: boolean;
+            /** Professional */
+            professional: boolean;
             /** Reasons */
             reasons: components["schemas"]["AnalysisReasonOut"][];
             remaining: components["schemas"]["RemainingOut"];
@@ -241,7 +243,7 @@ export interface components {
              * Pricetype
              * @enum {string}
              */
-            priceType: "fixed" | "bidding" | "free" | "unknown";
+            priceType: "fixed" | "bidding" | "free" | "on_request" | "see_description" | "exchange" | "reserved" | "unknown";
             seller: components["schemas"]["SellerFactsIn"];
             /**
              * Site
@@ -422,6 +424,8 @@ export interface components {
             rating?: number | null;
             /** Reviewcount */
             reviewCount?: number | null;
+            /** Sellerkind */
+            sellerKind?: ("private" | "professional") | null;
             /** Verified */
             verified?: boolean | null;
         };
