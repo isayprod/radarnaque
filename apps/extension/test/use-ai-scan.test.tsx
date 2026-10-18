@@ -8,6 +8,11 @@ import {
 	RECHECK_MS,
 } from "../lib/content/access-policy";
 import type { AiClient } from "../lib/content/ai-client";
+import {
+	type AiResultStore,
+	listingFingerprint,
+	type StoredAiResult,
+} from "../lib/content/ai-results";
 import { type BadgeView, useAiScan } from "../lib/content/use-ai-scan";
 import type { Listing } from "../lib/listing/types";
 import type { BgResponse, ContentAccess } from "../lib/messages";
@@ -92,13 +97,13 @@ function fakeClient() {
 	return { client, scans, accesses, logins };
 }
 
-function setup(initial: BadgeView = viewOf("m1")) {
+function setup(initial: BadgeView = viewOf("m1"), store?: AiResultStore) {
 	const fake = fakeClient();
 	let clock = 1_000;
 	const cache: AccessCache = createAccessCache(() => clock);
 	const hook = renderHook(
 		({ view }: { view: BadgeView }) =>
-			useAiScan(fake.client, view, "fr", cache),
+			useAiScan(fake.client, view, "fr", cache, store),
 		{ initialProps: { view: initial } },
 	);
 	return {
@@ -427,5 +432,184 @@ describe("useAiScan : connexion", () => {
 		t.logins[1]?.resolve(ok(null));
 		await settle();
 		expect(t.result.current.loginUnavailable).toBe(false);
+	});
+});
+
+/** Magasin simulé : entrées par `site|externalId`, lectures résolues tout de suite. */
+function fakeStore(entries: Record<string, StoredAiResult> = {}) {
+	return {
+		get: vi.fn<AiResultStore["get"]>(
+			async (site, id) => entries[`${site}|${id}`] ?? null,
+		),
+		put: vi.fn<AiResultStore["put"]>(async (site, id, entry) => {
+			entries[`${site}|${id}`] = entry;
+		}),
+	} satisfies AiResultStore;
+}
+
+const storedFor = (
+	listing: Listing,
+	overrides: Partial<StoredAiResult> = {},
+): StoredAiResult => ({
+	result: sampleAnalysis,
+	scanKind: "text",
+	fingerprint: listingFingerprint(listing),
+	storedAt: 1,
+	...overrides,
+});
+
+describe("useAiScan : résultats gardés 24 h", () => {
+	test("entrée stockée, même empreinte : done sans appel à client.scan", async () => {
+		const store = fakeStore({ "2ememain.be|m1": storedFor(listingOf("m1")) });
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		expect(store.get).toHaveBeenCalledWith("2ememain.be", "m1");
+		expect(t.result.current.text).toEqual({
+			status: "done",
+			result: sampleAnalysis,
+		});
+		expect(t.result.current.image).toEqual({ status: "idle" });
+		expect(t.client.scan).not.toHaveBeenCalled();
+	});
+
+	test("entrée de type image : c'est l'état image qui passe à done", async () => {
+		const store = fakeStore({
+			"2ememain.be|m1": storedFor(listingOf("m1"), { scanKind: "image" }),
+		});
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		expect(t.result.current.image.status).toBe("done");
+		expect(t.result.current.text).toEqual({ status: "idle" });
+	});
+
+	test("description changée depuis l'analyse : idle", async () => {
+		const store = fakeStore({
+			"2ememain.be|m1": storedFor(listingOf("m1", { description: "Ancien." })),
+		});
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		expect(t.result.current.text).toEqual({ status: "idle" });
+		expect(t.client.scan).not.toHaveBeenCalled();
+	});
+
+	test("prix baissé depuis l'analyse : idle", async () => {
+		const store = fakeStore({
+			"2ememain.be|m1": storedFor(
+				listingOf("m1", { price: { amountCents: 20000, currency: "EUR" } }),
+			),
+		});
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		expect(t.result.current.text).toEqual({ status: "idle" });
+	});
+
+	test("entrée partielle (carte Facebook) : idle", async () => {
+		const store = fakeStore({
+			"2ememain.be|m1": storedFor(listingOf("m1"), {
+				result: { ...sampleAnalysis, partial: true },
+			}),
+		});
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		expect(t.result.current.text).toEqual({ status: "idle" });
+	});
+
+	test("après un scan réussi, l'entrée est écrite avec l'empreinte de l'annonce scannée", async () => {
+		const store = fakeStore();
+		const t = setup(viewOf("m1"), store);
+		act(() => t.result.current.scan("image"));
+		// L'annonce change pendant le scan : l'empreinte reste celle du clic.
+		t.rerender({
+			view: { report, listing: listingOf("m1", { description: "Autre." }) },
+		});
+		const result = { ...sampleAnalysis, analysisId: 7 };
+		t.scans[0]?.resolve(ok(result));
+		await settle();
+		expect(store.put).toHaveBeenCalledTimes(1);
+		expect(store.put).toHaveBeenCalledWith(
+			"2ememain.be",
+			"m1",
+			expect.objectContaining({
+				result,
+				scanKind: "image",
+				fingerprint: listingFingerprint(listingOf("m1")),
+				storedAt: expect.any(Number),
+			}),
+		);
+	});
+
+	test("scan en échec : rien n'est écrit", async () => {
+		const store = fakeStore();
+		const t = setup(viewOf("m1"), store);
+		act(() => t.result.current.scan("text"));
+		t.scans[0]?.resolve(fail("quota_exceeded"));
+		await settle();
+		expect(store.put).not.toHaveBeenCalled();
+	});
+
+	test("scan terminé avant la lecture du magasin : la lecture ne l'écrase pas", async () => {
+		const pending = deferred<StoredAiResult | null>();
+		const store = fakeStore();
+		store.get.mockImplementationOnce(() => pending.promise);
+		const t = setup(viewOf("m1"), store);
+		act(() => t.result.current.scan("text"));
+		const fresh = { ...sampleAnalysis, analysisId: 99 };
+		t.scans[0]?.resolve(ok(fresh));
+		await settle();
+		pending.resolve(storedFor(listingOf("m1")));
+		await settle();
+		expect(t.result.current.text).toEqual({ status: "done", result: fresh });
+	});
+
+	test("lecture du magasin pendant un scan du même type : le scan en cours l'emporte", async () => {
+		const pending = deferred<StoredAiResult | null>();
+		const store = fakeStore();
+		store.get.mockImplementationOnce(() => pending.promise);
+		const t = setup(viewOf("m1"), store);
+		act(() => t.result.current.scan("text"));
+		pending.resolve(storedFor(listingOf("m1")));
+		await settle();
+		expect(t.result.current.text).toEqual({ status: "loading" });
+	});
+
+	test("nouvelle annonce : le magasin est relu pour elle ; la lecture de l'ancienne est ignorée", async () => {
+		const slow = deferred<StoredAiResult | null>();
+		const store = fakeStore({ "2ememain.be|m2": storedFor(listingOf("m2")) });
+		store.get.mockImplementationOnce(() => slow.promise);
+		const t = setup(viewOf("m1"), store);
+		t.rerender({ view: viewOf("m2") });
+		await settle();
+		expect(store.get).toHaveBeenLastCalledWith("2ememain.be", "m2");
+		expect(t.result.current.text.status).toBe("done");
+		// La réponse tardive pour m1 n'est pas appliquée à m2 (empreinte de m1 identique).
+		t.rerender({ view: viewOf("m3") });
+		slow.resolve(storedFor(listingOf("m3")));
+		await settle();
+		expect(t.result.current.text).toEqual({ status: "idle" });
+	});
+
+	test("même annonce, nouveaux rendus : le magasin n'est lu qu'une fois", async () => {
+		const store = fakeStore();
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		t.rerender({ view: viewOf("m1") });
+		t.rerender({
+			view: { report, listing: listingOf("m1", { title: "Autre" }) },
+		});
+		await settle();
+		expect(store.get).toHaveBeenCalledTimes(1);
+	});
+
+	test("magasin qui rejette : idle, et le scan fonctionne", async () => {
+		const store = fakeStore();
+		store.get.mockRejectedValue(new Error("indisponible"));
+		store.put.mockRejectedValue(new Error("indisponible"));
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		expect(t.result.current.text).toEqual({ status: "idle" });
+		act(() => t.result.current.scan("text"));
+		t.scans[0]?.resolve(ok(sampleAnalysis));
+		await settle();
+		expect(t.result.current.text.status).toBe("done");
 	});
 });

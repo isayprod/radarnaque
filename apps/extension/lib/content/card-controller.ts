@@ -2,7 +2,7 @@ import type { Locale } from "@radarnaque/shared";
 import { canUse } from "../access";
 import { adapterFor } from "../adapters/registry";
 import type { CardRef, MarketplaceAdapter } from "../adapters/types";
-import type { Site } from "../listing/types";
+import type { Listing, Site } from "../listing/types";
 import {
 	type AccessCache,
 	type AccessReading,
@@ -11,6 +11,7 @@ import {
 	RELOGIN_CODES,
 } from "./access-policy";
 import type { AiClient, ScanState } from "./ai-client";
+import { type AiResultStore, listingFingerprint } from "./ai-results";
 import { defaultFetchPage, scanCard } from "./card-scan";
 import { BADGE_HOST_TAG, CARD_HOST_TAG } from "./controller";
 
@@ -55,6 +56,8 @@ export interface CardControllerDeps {
 	win?: Pick<Window, "addEventListener" | "removeEventListener"> | null;
 	/** Accès partagé avec la pastille de fiche (R8) ; un cache propre par défaut. */
 	accessCache?: AccessCache;
+	/** Résultats IA gardés 24 h, partagés avec la pastille ; aucun par défaut. */
+	aiResults?: AiResultStore;
 	scan?: typeof scanCard;
 	fetchPage?: (url: string) => Promise<string>;
 	log?: (msg: string) => void;
@@ -110,7 +113,9 @@ function mountPointOf(
  * Contrôleur des icônes de cartes sur une page de résultats : lit l'accès selon
  * la politique R8 (cache partagé avec la pastille), pose une icône par carte et
  * garde l'état du scan de chaque annonce (par `externalId`), qui survit au
- * remontage de son icône. Aucun scan sans clic.
+ * remontage de son icône. Aucun scan sans clic : un résultat gardé (`aiResults`)
+ * est affiché tel quel, même partiel et quelle que soit son empreinte, car la
+ * carte ne montre pas toute l'annonce.
  */
 export function createCardController(deps: CardControllerDeps): {
 	refresh(): Promise<void>;
@@ -189,6 +194,19 @@ export function createCardController(deps: CardControllerDeps): {
 		tracked.get(id)?.mount.update(viewOf(id));
 	}
 
+	/** Icône montée ou remontée sans résultat : reprend celui du magasin s'il existe. */
+	function restore(site: Site, id: string) {
+		if (!deps.aiResults || stateOf(id).status !== "idle") return;
+		void deps.aiResults.get(site, id).then(
+			(stored) => {
+				// Un clic entre-temps (chargement, résultat, erreur) l'emporte.
+				if (disposed || !stored || stateOf(id).status !== "idle") return;
+				setState(id, { status: "done", result: stored.result });
+			},
+			() => {},
+		);
+	}
+
 	function activate(id: string) {
 		const entry = tracked.get(id);
 		const status = stateOf(id).status;
@@ -196,9 +214,20 @@ export function createCardController(deps: CardControllerDeps): {
 		if (disposed || !entry || status === "loading" || status === "done") return;
 		const pageUrl = deps.getUrl();
 		const adapter = adapterFor(pageUrl);
-		if (!adapter) return;
+		const site = adapter?.siteOf(pageUrl);
+		if (!adapter || !site) return;
 		setState(id, { status: "loading" });
-		void scan(entry.card, { pageUrl, adapter, ai: deps.ai, fetchPage })
+		let scanned: Listing | null = null;
+		const onListing = (listing: Listing) => {
+			scanned = listing;
+		};
+		void scan(entry.card, {
+			pageUrl,
+			adapter,
+			ai: deps.ai,
+			fetchPage,
+			onListing,
+		})
 			.then(
 				(response): ScanState =>
 					response.ok
@@ -207,6 +236,16 @@ export function createCardController(deps: CardControllerDeps): {
 				(): ScanState => ({ status: "error", code: "background_unavailable" }),
 			)
 			.then((state) => {
+				// Gardé 24 h avec l'empreinte de l'annonce analysée (fiche ou carte).
+				if (state.status === "done" && scanned)
+					void deps.aiResults
+						?.put(site, id, {
+							result: state.result,
+							scanKind: "text",
+							fingerprint: listingFingerprint(scanned),
+							storedAt: Date.now(),
+						})
+						.catch(() => {});
 				if (disposed) return;
 				setState(id, state);
 				if (state.status === "error" && RELOGIN_CODES.has(state.code)) {
@@ -330,6 +369,7 @@ export function createCardController(deps: CardControllerDeps): {
 				anchor,
 				mount: deps.mountCard(anchor, card, viewOf(id)),
 			});
+			restore(site, id);
 		}
 		// Cartes retirées par le site (virtualisation) : leur état reste, pour leur retour.
 		for (const id of [...tracked.keys()]) if (!seen.has(id)) unmountCard(id);
