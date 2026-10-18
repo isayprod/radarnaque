@@ -67,6 +67,37 @@ describe("contentText", () => {
 			"Lokale analyse, zonder AI. Gebruik de knop hierboven voor een AI-analyse.",
 		);
 	});
+
+	test("textes de l'analyse IA prioritaire et du bandeau professionnel", () => {
+		expect(contentText("fr", "ai.badgeTag")).toBe("IA");
+		expect(contentText("nl", "ai.badgeTag")).toBe("AI");
+		expect(contentText("fr", "badge.ariaAi")).toBe(
+			"Ouvrir l'analyse IA Radarnaque",
+		);
+		expect(contentText("nl", "badge.ariaAi")).toBe(
+			"Radarnaque-AI-analyse openen",
+		);
+		expect(contentText("fr", "panel.titleAi")).toBe("Analyse IA Radarnaque");
+		expect(contentText("nl", "panel.titleAi")).toBe("Radarnaque-AI-analyse");
+		expect(contentText("fr", "pro.notice")).toBe(
+			"Annonce d'un professionnel : elle sert souvent de vitrine (prix sur demande, voir le site du vendeur). Ce n'est pas un signal d'arnaque.",
+		);
+		expect(contentText("nl", "pro.notice")).toBe(
+			"Advertentie van een professional: ze dient vaak als etalage (prijs op aanvraag, zie de website van de verkoper). Dat is geen teken van oplichting.",
+		);
+	});
+
+	test("les nouvelles clés existent en FR et en NL", () => {
+		for (const key of [
+			"ai.badgeTag",
+			"badge.ariaAi",
+			"panel.titleAi",
+			"pro.notice",
+		]) {
+			expect(CONTENT_TEXTS.fr).toHaveProperty([key]);
+			expect(CONTENT_TEXTS.nl).toHaveProperty([key]);
+		}
+	});
 });
 
 describe("signalText", () => {
@@ -154,6 +185,7 @@ describe("textes de la section IA", () => {
 	test("les textes FR imposés", () => {
 		const expected: Record<string, string> = {
 			"ai.title": "Analyse IA",
+			"ai.badgeTag": "IA",
 			"ai.run": "Lancer une analyse IA",
 			"ai.runPhotos": "Analyse avec photos",
 			"ai.loading": "Analyse en cours…",

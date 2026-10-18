@@ -5,6 +5,7 @@ import type { ComponentProps } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { AiSection } from "../components/AiSection";
 import { createAiClient, type ScanState } from "../lib/content/ai-client";
+import { shownResult } from "../lib/content/shown-result";
 import { contentText } from "../lib/content-i18n";
 import type { ContentAccess, ScanRequest } from "../lib/messages";
 
@@ -236,11 +237,10 @@ describe("AiSection : analyse", () => {
 		expect(within(second).getByText("Info")).not.toBeNull();
 	});
 
-	test("done : le bouton est de nouveau actif après l'analyse", () => {
+	test("done : le résultat remplace le bouton d'analyse texte", () => {
 		setup({ text: { status: "done", result } });
-		expect(button("Lancer une analyse IA").hasAttribute("disabled")).toBe(
-			false,
-		);
+		expect(screen.getByText(result.summary.fr)).not.toBeNull();
+		expect(queryButton("Lancer une analyse IA")).toBeNull();
 	});
 
 	test("done : le texte de l'IA est rendu en texte, jamais en HTML", () => {
@@ -435,5 +435,107 @@ describe("createAiClient", () => {
 		const response = { ok: false as const, error: { code: "quota_exhausted" } };
 		const client = createAiClient((async () => response) as never);
 		await expect(client.scan({} as ScanRequest)).resolves.toBe(response);
+	});
+});
+
+describe("shownResult", () => {
+	const imageResult: AnalysisResult = { ...result, score: 30, level: "low" };
+
+	test("photos d'abord, sinon texte", () => {
+		expect(
+			shownResult(
+				{ status: "done", result },
+				{ status: "done", result: imageResult },
+			),
+		).toEqual({ kind: "image", result: imageResult });
+		expect(shownResult({ status: "done", result }, idle)).toEqual({
+			kind: "text",
+			result,
+		});
+		expect(shownResult(idle, { status: "done", result: imageResult })).toEqual({
+			kind: "image",
+			result: imageResult,
+		});
+	});
+
+	test("en cours ou en erreur : le résultat texte reste affiché", () => {
+		expect(
+			shownResult({ status: "done", result }, { status: "loading" }),
+		).toEqual({ kind: "text", result });
+		expect(
+			shownResult({ status: "done", result }, { status: "error", code: "x" }),
+		).toEqual({ kind: "text", result });
+	});
+
+	test("aucun résultat done : null", () => {
+		expect(shownResult(idle, idle)).toBeNull();
+		expect(shownResult({ status: "loading" }, idle)).toBeNull();
+		expect(
+			shownResult({ status: "error", code: "network" }, { status: "loading" }),
+		).toBeNull();
+	});
+});
+
+describe("AiSection : résultat IA affiché", () => {
+	test("résultat texte, photos possibles : seul « Analyse avec photos » reste proposé", async () => {
+		const user = userEvent.setup();
+		const { props } = setup({
+			access: trial,
+			hasPhotos: true,
+			text: { status: "done", result },
+		});
+		expect(screen.getByText(result.summary.fr)).not.toBeNull();
+		expect(queryButton("Lancer une analyse IA")).toBeNull();
+		await user.click(button("Analyse avec photos"));
+		expect(props.onScan).toHaveBeenCalledWith("image");
+	});
+
+	test("résultat texte, plan sans photos : aucun bouton", () => {
+		setup({ access: standard, text: { status: "done", result } });
+		expect(screen.queryAllByRole("button")).toHaveLength(0);
+	});
+
+	test("résultat photos affiché : aucun bouton, le résultat photos seul", () => {
+		const imageResult: AnalysisResult = {
+			...result,
+			summary: { fr: "Résumé photos.", nl: "Samenvatting foto's." },
+		};
+		setup({
+			access: trial,
+			text: { status: "done", result },
+			image: { status: "done", result: imageResult },
+		});
+		expect(screen.queryAllByRole("button")).toHaveLength(0);
+		expect(screen.getByText("Résumé photos.")).not.toBeNull();
+		expect(screen.queryByText(result.summary.fr)).toBeNull();
+	});
+
+	test("scan photos en cours après un résultat texte : le résultat texte reste", () => {
+		setup({
+			access: trial,
+			text: { status: "done", result },
+			image: { status: "loading" },
+		});
+		expect(screen.getByText(result.summary.fr)).not.toBeNull();
+		expect(button("Analyse en cours…").hasAttribute("disabled")).toBe(true);
+	});
+
+	test("scan photos en erreur après un résultat texte : erreur et résultat texte", () => {
+		setup({
+			access: trial,
+			text: { status: "done", result },
+			image: { status: "error", code: "analysis_failed" },
+		});
+		expect(screen.getByText(result.summary.fr)).not.toBeNull();
+		expect(screen.getByRole("alert").textContent).toContain(
+			contentText("fr", "ai.error.analysis_failed"),
+		);
+		expect(button("Analyse avec photos")).not.toBeNull();
+	});
+
+	test("résultat repris du magasin, accès pas encore chargé : le résultat s'affiche", () => {
+		setup({ access: "loading", text: { status: "done", result } });
+		expect(screen.getByText(result.summary.fr)).not.toBeNull();
+		expect(screen.queryByText("Chargement…")).toBeNull();
 	});
 });

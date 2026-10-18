@@ -173,6 +173,31 @@ describe("CardBadge", () => {
 		expect(tooltip.textContent).toContain(contentText("nl", "ai.partial"));
 	});
 
+	test("done professionnel : pro.notice sous le résumé, en FR et en NL", () => {
+		const professional = { ...sampleAnalysis, professional: true };
+		renderInLink({ status: "done", result: professional });
+		const tooltip = screen.getByRole("tooltip", { hidden: true });
+		const text = tooltip.textContent ?? "";
+		const notice = contentText("fr", "pro.notice");
+		expect(text).toContain(sampleAnalysis.summary.fr);
+		expect(text).toContain(notice);
+		expect(text.indexOf(notice)).toBeGreaterThan(
+			text.indexOf(sampleAnalysis.summary.fr),
+		);
+		cleanup();
+		renderInLink({ status: "done", result: professional }, "nl");
+		expect(screen.getByRole("tooltip", { hidden: true }).textContent).toContain(
+			contentText("nl", "pro.notice"),
+		);
+	});
+
+	test("done non professionnel : pas de pro.notice", () => {
+		renderInLink({ status: "done", result: sampleAnalysis });
+		expect(
+			screen.getByRole("tooltip", { hidden: true }).textContent,
+		).not.toContain(contentText("fr", "pro.notice"));
+	});
+
 	test("error : message dans l'infobulle, un nouveau clic relance", async () => {
 		const user = userEvent.setup();
 		const { onActivate } = renderInLink({
