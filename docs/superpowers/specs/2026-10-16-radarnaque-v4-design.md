@@ -317,7 +317,7 @@ L'admin se connecte par lien magique ou code, sur la même origine (session cook
 
 ## 6. Données — schéma `app` en 3NF
 
-Le schéma `auth` appartient à Better Auth et n'est pas modifié, à l'exception des valeurs de `user.role`, limitées à `user` et `admin`. Le **niveau** de l'utilisateur (essai, standard, premium) n'est stocké qu'à un seul endroit : son abonnement actif.
+Le schéma `auth` appartient à Better Auth et n'est pas modifié, à l'exception des valeurs de `user.role`, limitées à `user`, `admin` et `superuser` (réservé au développement, §5.3 bis). Le **niveau** de l'utilisateur (essai, standard, premium) n'est stocké qu'à un seul endroit : son abonnement actif.
 
 ### 6.1 Référentiels
 
