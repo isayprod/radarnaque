@@ -29,3 +29,58 @@
 	--tw-ring-offset-shadow: 0 0 #0000;
 	--tw-ring-shadow: 0 0 #0000;
 }
+
+/* Analyse en cours : l'icône qui tourne, le fondu entre deux lignes d'état, et les
+   points de suspension après 4 s sans événement (`is-waiting`). */
+@keyframes radarnaque-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes radarnaque-fade {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes radarnaque-dots {
+	to {
+		width: 1.2em;
+	}
+}
+
+.radarnaque-spin {
+	animation: radarnaque-spin 0.9s linear infinite;
+}
+
+.radarnaque-fade {
+	animation: radarnaque-fade 0.25s ease-out;
+}
+
+.radarnaque-status.is-waiting::after {
+	content: "...";
+	display: inline-block;
+	overflow: hidden;
+	width: 0;
+	vertical-align: bottom;
+	animation: radarnaque-dots 1.2s steps(4, end) infinite;
+}
+
+/* Animations réduites : ni rotation, ni fondu, ni points animés ; l'attente reste
+   indiquée par des points fixes. */
+@media (prefers-reduced-motion: reduce) {
+	.radarnaque-spin,
+	.radarnaque-fade {
+		animation: none;
+	}
+
+	.radarnaque-status.is-waiting::after {
+		content: "…";
+		width: auto;
+		animation: none;
+	}
+}

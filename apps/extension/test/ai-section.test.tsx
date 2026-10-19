@@ -5,7 +5,7 @@ import type { ComponentProps } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { AiSection } from "../components/AiSection";
 import type { ScanState } from "../lib/content/ai-client";
-import { startProgress } from "../lib/content/scan-progress";
+import { addEvent, startProgress } from "../lib/content/scan-progress";
 import { shownResult } from "../lib/content/shown-result";
 import { contentText } from "../lib/content-i18n";
 import type { ContentAccess } from "../lib/messages";
@@ -20,14 +20,16 @@ const standard: ContentAccess = {
 	features: [],
 	unlimited: false,
 	debug: false,
-	remaining: { text: 12, image: null, total: null },
+	maxImages: 1,
+	remaining: { scans: 12 },
 };
 const trial: ContentAccess = {
 	status: "active",
-	features: ["image_scan", "card_icons"],
+	features: ["card_icons"],
 	unlimited: false,
 	debug: false,
-	remaining: { text: null, image: null, total: 5 },
+	maxImages: 4,
+	remaining: { scans: 5 },
 };
 
 const result: AnalysisResult = {
@@ -50,8 +52,18 @@ const result: AnalysisResult = {
 			text: { fr: "Raison info.", nl: "Informatieve reden." },
 		},
 	],
-	remaining: { text: 11, image: null, total: null },
+	remaining: { scans: 11 },
+	imagesAnalyzed: 3,
+	webSearches: [],
 };
+
+/** Analyse terminée, sans déroulé (reprise du magasin) sauf `progress` donné. */
+const done = (r: AnalysisResult = result): ScanState => ({
+	status: "done",
+	result: r,
+	progress: null,
+});
+const loading: ScanState = { status: "loading", progress: startProgress(0) };
 
 type Props = ComponentProps<typeof AiSection>;
 
@@ -59,9 +71,7 @@ function setup(overrides: Partial<Props> = {}) {
 	const props: Props = {
 		locale: "fr",
 		access: standard,
-		hasPhotos: true,
-		text: idle,
-		image: idle,
+		ai: idle,
 		onScan: vi.fn(),
 		onLogin: vi.fn(),
 		loginUnavailable: false,
@@ -138,65 +148,54 @@ describe("AiSection : accès", () => {
 		expect(queryButton("Lancer une analyse IA")).toBeNull();
 	});
 
-	test("plan standard (features: []) avec photos : bouton texte seul", () => {
-		setup({ access: standard, hasPhotos: true });
-		expect(button("Lancer une analyse IA").getAttribute("type")).toBe("button");
-		expect(queryButton("Analyse avec photos")).toBeNull();
-	});
-
-	test("essai avec photos : les deux boutons", () => {
-		setup({ access: trial, hasPhotos: true });
-		expect(button("Lancer une analyse IA")).not.toBeNull();
-		expect(button("Analyse avec photos")).not.toBeNull();
-	});
-
-	test("essai sans photo : seul le bouton texte", () => {
-		setup({ access: trial, hasPhotos: false });
-		expect(button("Lancer une analyse IA")).not.toBeNull();
-		expect(queryButton("Analyse avec photos")).toBeNull();
-	});
-
-	test("admin (unlimited) avec photos : les deux boutons", () => {
-		setup({
-			access: {
-				status: "active",
-				features: [],
-				unlimited: true,
-				debug: false,
-				remaining: { text: null, image: null, total: null },
-			},
-		});
-		expect(button("Lancer une analyse IA")).not.toBeNull();
-		expect(button("Analyse avec photos")).not.toBeNull();
-	});
-
-	test("les clics appellent onScan avec le bon type", async () => {
+	test("no photo-scan button : une seule action, quel que soit le plan", async () => {
 		const user = userEvent.setup();
-		const { props } = setup({ access: trial });
-		await user.click(button("Lancer une analyse IA"));
-		await user.click(button("Analyse avec photos"));
-		expect(props.onScan).toHaveBeenNthCalledWith(1, "text");
-		expect(props.onScan).toHaveBeenNthCalledWith(2, "image");
+		for (const access of [
+			standard,
+			trial,
+			{ ...standard, unlimited: true, remaining: { scans: null } },
+		]) {
+			const { props, unmount } = setup({ access });
+			expect(button("Lancer une analyse IA").getAttribute("type")).toBe(
+				"button",
+			);
+			expect(screen.getAllByRole("button")).toHaveLength(1);
+			expect(screen.queryByText(/photos/)).toBeNull();
+			await user.click(button("Lancer une analyse IA"));
+			expect(props.onScan).toHaveBeenCalledTimes(1);
+			unmount();
+		}
 	});
 });
 
 describe("AiSection : analyse", () => {
-	test("text loading : bouton désactivé avec « Analyse en cours… »", async () => {
+	test("loading : bouton désactivé avec « Analyse en cours… », et le déroulé en direct", async () => {
 		const user = userEvent.setup();
-		const { props } = setup({ access: trial, text: { status: "loading" } });
+		const progress = addEvent(
+			startProgress(0),
+			{ type: "search", id: 1, query: "iPhone 18 Pro prix", aspect: "price" },
+			3_000,
+		);
+		const { props, container } = setup({
+			access: trial,
+			ai: { status: "loading", progress },
+		});
 		const running = button("Analyse en cours…");
 		expect(running.hasAttribute("disabled")).toBe(true);
 		expect(queryButton("Lancer une analyse IA")).toBeNull();
 		await user.click(running);
 		expect(props.onScan).not.toHaveBeenCalled();
-		// L'autre analyse reste disponible.
-		expect(button("Analyse avec photos").hasAttribute("disabled")).toBe(false);
+		// Déroulé en direct : déplié, sans « Comment l'IA a analysé ».
+		expect(container.querySelector("details")).toBeNull();
+		expect(screen.getByRole("listitem").textContent).toContain(
+			"Recherche web (prix du marché) : “iPhone 18 Pro prix”",
+		);
 	});
 
 	test("done en nl : textes NL de l'IA, aucun texte FR, niveau en toutes lettres", () => {
 		const { container } = setup({
 			locale: "nl",
-			text: { status: "done", result },
+			ai: done(),
 		});
 		const content = container.textContent ?? "";
 		expect(content).toContain("Hoog risico");
@@ -218,7 +217,7 @@ describe("AiSection : analyse", () => {
 	});
 
 	test("done : ordre niveau, résumé, conseil, raisons avec gravité, quota", () => {
-		const { container } = setup({ text: { status: "done", result } });
+		const { container } = setup({ ai: done() });
 		const content = container.textContent ?? "";
 		const order = [
 			"Risque élevé",
@@ -242,76 +241,93 @@ describe("AiSection : analyse", () => {
 	});
 
 	test("done : le résultat remplace le bouton d'analyse texte", () => {
-		setup({ text: { status: "done", result } });
+		setup({ ai: done() });
 		expect(screen.getByText(result.summary.fr)).not.toBeNull();
 		expect(queryButton("Lancer une analyse IA")).toBeNull();
 	});
 
 	test("done : le texte de l'IA est rendu en texte, jamais en HTML", () => {
 		const { container } = setup({
-			text: {
-				status: "done",
-				result: {
-					...result,
-					summary: { fr: "<b>gras</b><img src=x>", nl: "x" },
-				},
-			},
+			ai: done({
+				...result,
+				summary: { fr: "<b>gras</b><img src=x>", nl: "x" },
+			}),
 		});
 		expect(container.querySelector("b")).toBeNull();
 		expect(container.querySelector("img")).toBeNull();
 		expect(container.textContent).toContain("<b>gras</b><img src=x>");
 	});
 
-	test("remaining : total prioritaire, sinon le quota du type", () => {
-		const { rerender, props } = setup({
-			image: {
-				status: "done",
-				result: { ...result, remaining: { text: 9, image: 3, total: null } },
-			},
-			access: trial,
-		});
-		expect(screen.getByText("Analyses restantes : 3")).not.toBeNull();
-		rerender(
-			<AiSection
-				{...props}
-				image={{
-					status: "done",
-					result: { ...result, remaining: { text: 9, image: 3, total: 7 } },
-				}}
-			/>,
-		);
+	test("remaining : les analyses restantes du résultat", () => {
+		setup({ ai: done({ ...result, remaining: { scans: 7 } }) });
 		expect(screen.getByText("Analyses restantes : 7")).not.toBeNull();
 	});
 
-	test("remaining tout à null : aucun texte « restantes »", () => {
+	test("remaining à null : aucun texte « restantes »", () => {
 		const { container } = setup({
-			text: {
-				status: "done",
-				result: {
-					...result,
-					remaining: { text: null, image: null, total: null },
-				},
-			},
+			ai: done({ ...result, remaining: { scans: null } }),
 		});
 		expect(container.textContent).not.toMatch(/restantes/);
 	});
 
 	test("remaining à 0 est affiché (quota réel épuisé)", () => {
-		setup({
-			text: {
-				status: "done",
-				result: { ...result, remaining: { text: 0, image: null, total: null } },
-			},
-		});
+		setup({ ai: done({ ...result, remaining: { scans: 0 } }) });
 		expect(screen.getByText("Analyses restantes : 0")).not.toBeNull();
+	});
+
+	test("no photo mention : imagesAnalyzed 0 donne « Analysée sans photo »", () => {
+		const { rerender, props } = setup({
+			ai: done({ ...result, imagesAnalyzed: 0 }),
+		});
+		expect(screen.getByText("Analysée sans photo")).not.toBeNull();
+		rerender(<AiSection {...props} locale="nl" />);
+		expect(screen.getByText("Geanalyseerd zonder foto")).not.toBeNull();
+		rerender(<AiSection {...props} ai={done()} />);
+		expect(screen.queryByText("Analysée sans photo")).toBeNull();
+	});
+
+	test("web searches listed for cached result : sous « Comment l'IA a analysé »", () => {
+		const { container } = setup({
+			ai: done({
+				...result,
+				fromCache: true,
+				webSearches: [{ query: "iPhone 18 Pro prix", aspect: "price" }],
+			}),
+		});
+		const details = container.querySelector("details");
+		expect(details?.querySelector("summary")?.textContent).toBe(
+			"Comment l'IA a analysé",
+		);
+		expect(details?.textContent).toContain(
+			"Recherche web (prix du marché) : “iPhone 18 Pro prix”",
+		);
+	});
+
+	test("done avec son déroulé : replié sous « Comment l'IA a analysé », après le verdict", () => {
+		const progress = addEvent(
+			startProgress(0),
+			{ type: "stage", stage: "writing" },
+			2_000,
+		);
+		const { container } = setup({
+			ai: { status: "done", result, progress },
+		});
+		const details = container.querySelector("details");
+		expect(details?.textContent).toContain("Rédige le verdict");
+		const content = container.textContent ?? "";
+		expect(content.indexOf(result.summary.fr)).toBeLessThan(
+			content.indexOf("Comment l'IA a analysé"),
+		);
+	});
+
+	test("done sans déroulé ni recherche : pas de « Comment l'IA a analysé »", () => {
+		setup({ ai: done() });
+		expect(screen.queryByText("Comment l'IA a analysé")).toBeNull();
 	});
 
 	test("fromCache et partial affichent leurs mentions", () => {
 		setup({
-			text: {
-				status: "done",
-				result: { ...result, fromCache: true, partial: true },
-			},
+			ai: done({ ...result, fromCache: true, partial: true }),
 		});
 		expect(
 			screen.getByText("Résultat déjà disponible : servi depuis le cache."),
@@ -324,7 +340,7 @@ describe("AiSection : analyse", () => {
 	});
 
 	test("sans fromCache ni partial : aucune mention", () => {
-		setup({ text: { status: "done", result } });
+		setup({ ai: done() });
 		expect(screen.queryByText(contentText("fr", "ai.fromCache"))).toBeNull();
 		expect(screen.queryByText(contentText("fr", "ai.partial"))).toBeNull();
 	});
@@ -332,7 +348,7 @@ describe("AiSection : analyse", () => {
 
 describe("AiSection : erreurs", () => {
 	test("quota_exhausted : message et lien vers pricingUrl", () => {
-		setup({ text: { status: "error", code: "quota_exhausted" } });
+		setup({ ai: { status: "error", code: "quota_exhausted" } });
 		expect(
 			screen.getByText(
 				"Vous avez utilisé toutes vos analyses de ce type pour cette période.",
@@ -347,7 +363,7 @@ describe("AiSection : erreurs", () => {
 	test.each(["feature_not_in_plan", "no_active_subscription"])(
 		"%s : lien vers les formules",
 		(code) => {
-			setup({ image: { status: "error", code }, access: trial });
+			setup({ ai: { status: "error", code }, access: trial });
 			expect(
 				screen.getByText(contentText("fr", `ai.error.${code}` as never)),
 			).not.toBeNull();
@@ -360,7 +376,7 @@ describe("AiSection : erreurs", () => {
 	test("analysis_failed : message, bouton actif, le clic relance", async () => {
 		const user = userEvent.setup();
 		const { props } = setup({
-			text: { status: "error", code: "analysis_failed" },
+			ai: { status: "error", code: "analysis_failed" },
 		});
 		expect(
 			screen.getByText(
@@ -371,11 +387,25 @@ describe("AiSection : erreurs", () => {
 		const retry = button("Lancer une analyse IA");
 		expect(retry.hasAttribute("disabled")).toBe(false);
 		await user.click(retry);
-		expect(props.onScan).toHaveBeenCalledWith("text");
+		expect(props.onScan).toHaveBeenCalledTimes(1);
 	});
 
+	test.each(["stream_interrupted", "timeout"])(
+		"%s : message et bouton « Relancer »",
+		async (code) => {
+			const user = userEvent.setup();
+			const { props } = setup({ ai: { status: "error", code } });
+			expect(screen.getByRole("alert").textContent).toBe(
+				contentText("fr", `ai.error.${code}` as never),
+			);
+			expect(queryButton("Lancer une analyse IA")).toBeNull();
+			await user.click(button("Relancer"));
+			expect(props.onScan).toHaveBeenCalledTimes(1);
+		},
+	);
+
 	test("code inconnu : ai.error.default", () => {
-		setup({ text: { status: "error", code: "teapot" } });
+		setup({ ai: { status: "error", code: "teapot" } });
 		expect(
 			screen.getByText("Une erreur est survenue. Réessayez plus tard."),
 		).not.toBeNull();
@@ -386,7 +416,7 @@ describe("AiSection : erreurs", () => {
 		async (code) => {
 			const user = userEvent.setup();
 			const { props } = setup({
-				text: { status: "error", code },
+				ai: { status: "error", code },
 				loginUnavailable: true,
 			});
 			expect(
@@ -401,14 +431,14 @@ describe("AiSection : erreurs", () => {
 	);
 
 	test("le message d'erreur est annoncé (role=alert)", () => {
-		setup({ text: { status: "error", code: "rate_limited" } });
+		setup({ ai: { status: "error", code: "rate_limited" } });
 		expect(screen.getByRole("alert").textContent).toContain(
 			contentText("fr", "ai.error.rate_limited"),
 		);
 	});
 
 	test("erreur en nl : texte NL", () => {
-		setup({ locale: "nl", text: { status: "error", code: "network" } });
+		setup({ locale: "nl", ai: { status: "error", code: "network" } });
 		expect(
 			screen.getByText(contentText("nl", "ai.error.network")),
 		).not.toBeNull();
@@ -427,72 +457,20 @@ describe("shownResult", () => {
 
 	test("aucune analyse terminée : null", () => {
 		expect(shownResult(idle)).toBeNull();
-		expect(
-			shownResult({ status: "loading", progress: startProgress(0) }),
-		).toBeNull();
+		expect(shownResult(loading)).toBeNull();
 		expect(shownResult({ status: "error", code: "network" })).toBeNull();
 	});
 });
 
 describe("AiSection : résultat IA affiché", () => {
-	test("résultat texte, photos possibles : seul « Analyse avec photos » reste proposé", async () => {
-		const user = userEvent.setup();
-		const { props } = setup({
-			access: trial,
-			hasPhotos: true,
-			text: { status: "done", result },
-		});
+	test("résultat affiché : aucun bouton, ni analyse ni photos", () => {
+		setup({ access: trial, ai: done() });
 		expect(screen.getByText(result.summary.fr)).not.toBeNull();
-		expect(queryButton("Lancer une analyse IA")).toBeNull();
-		await user.click(button("Analyse avec photos"));
-		expect(props.onScan).toHaveBeenCalledWith("image");
-	});
-
-	test("résultat texte, plan sans photos : aucun bouton", () => {
-		setup({ access: standard, text: { status: "done", result } });
 		expect(screen.queryAllByRole("button")).toHaveLength(0);
-	});
-
-	test("résultat photos affiché : aucun bouton, le résultat photos seul", () => {
-		const imageResult: AnalysisResult = {
-			...result,
-			summary: { fr: "Résumé photos.", nl: "Samenvatting foto's." },
-		};
-		setup({
-			access: trial,
-			text: { status: "done", result },
-			image: { status: "done", result: imageResult },
-		});
-		expect(screen.queryAllByRole("button")).toHaveLength(0);
-		expect(screen.getByText("Résumé photos.")).not.toBeNull();
-		expect(screen.queryByText(result.summary.fr)).toBeNull();
-	});
-
-	test("scan photos en cours après un résultat texte : le résultat texte reste", () => {
-		setup({
-			access: trial,
-			text: { status: "done", result },
-			image: { status: "loading" },
-		});
-		expect(screen.getByText(result.summary.fr)).not.toBeNull();
-		expect(button("Analyse en cours…").hasAttribute("disabled")).toBe(true);
-	});
-
-	test("scan photos en erreur après un résultat texte : erreur et résultat texte", () => {
-		setup({
-			access: trial,
-			text: { status: "done", result },
-			image: { status: "error", code: "analysis_failed" },
-		});
-		expect(screen.getByText(result.summary.fr)).not.toBeNull();
-		expect(screen.getByRole("alert").textContent).toContain(
-			contentText("fr", "ai.error.analysis_failed"),
-		);
-		expect(button("Analyse avec photos")).not.toBeNull();
 	});
 
 	test("résultat repris du magasin, accès pas encore chargé : le résultat s'affiche", () => {
-		setup({ access: "loading", text: { status: "done", result } });
+		setup({ access: "loading", ai: done() });
 		expect(screen.getByText(result.summary.fr)).not.toBeNull();
 		expect(screen.queryByText("Chargement…")).toBeNull();
 	});

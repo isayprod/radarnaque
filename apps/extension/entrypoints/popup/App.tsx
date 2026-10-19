@@ -9,6 +9,7 @@ import {
 	useState,
 } from "react";
 import { browser } from "wxt/browser";
+import { accessOf } from "../../lib/access";
 import { isValidEmail, normalizeEmail } from "../../lib/email";
 import { detectLocale, errorMessage, type MessageKey, t } from "../../lib/i18n";
 import { type AuthState, sendToBackground } from "../../lib/messages";
@@ -373,10 +374,20 @@ export default function App() {
 }
 
 function planName(me: Me, locale: Locale): string {
-	// Rôle renvoyé par l'API hors production seulement (sinon `user`).
-	if (me.role === "superuser") return t(locale, "plan.superuser");
+	// Rôle renvoyé par l'API hors production seulement (sinon `user`). Le superuser
+	// y est vu en Premium : son plan suit le rôle.
+	if (me.role === "superuser") {
+		const superuser = t(locale, "plan.superuser");
+		return me.plan === null
+			? superuser
+			: `${superuser} — ${offerName(me.plan, locale)}`;
+	}
 	if (me.unlimited) return t(locale, "plan.unlimited");
-	switch (me.plan) {
+	return offerName(me.plan, locale);
+}
+
+function offerName(plan: string | null, locale: Locale): string {
+	switch (plan) {
 		case "trial":
 			return t(locale, "plan.trial");
 		case "standard":
@@ -386,6 +397,15 @@ function planName(me: Me, locale: Locale): string {
 		default:
 			return t(locale, "plan.none");
 	}
+}
+
+/** « N analyses IA restantes », au singulier selon la langue (« 0 analyse » en FR). */
+function scansLeft(count: number, locale: Locale): string {
+	const one = new Intl.PluralRules(locale).select(count) === "one";
+	return t(locale, one ? "account.scansLeftOne" : "account.scansLeft").replace(
+		"{count}",
+		String(count),
+	);
 }
 
 function Account({
@@ -399,24 +419,10 @@ function Account({
 	busy: boolean;
 	onSignOut: () => void;
 }) {
-	// L'essai n'a qu'un plafond global : les lignes par type seraient trompeuses.
-	let rows: Array<{ label: string; remaining: number }> = [];
-	if (!me.unlimited) {
-		rows = me.totalCap
-			? [
-					{
-						label: t(locale, "account.totalCap"),
-						remaining: me.totalCap.remaining,
-					},
-				]
-			: me.quotas.map((quota) => ({
-					label: t(
-						locale,
-						quota.scanKind === "image" ? "scan.image" : "scan.text",
-					),
-					remaining: quota.remaining,
-				}));
-	}
+	// Une seule analyse (`full`) : son quota, limité par le plafond de l'essai ;
+	// rien pour un compte illimité (admin, superuser) ou sans abonnement.
+	const access = accessOf(me);
+	const remaining = access.status === "active" ? access.remaining.scans : null;
 
 	return (
 		<div className="space-y-4">
@@ -426,23 +432,10 @@ function Account({
 					{planName(me, locale)}
 				</p>
 			</div>
-			{rows.length > 0 && (
-				<section aria-labelledby="remaining-title" className="space-y-2">
-					<h2 id="remaining-title" className="text-sm font-semibold">
-						{t(locale, "account.remaining")}
-					</h2>
-					<ul className="divide-y divide-slate-200 rounded-lg border border-slate-200">
-						{rows.map((row) => (
-							<li
-								key={row.label}
-								className="flex items-center justify-between px-3 py-2 text-sm"
-							>
-								<span>{row.label}</span>
-								<strong className="tabular-nums">{row.remaining}</strong>
-							</li>
-						))}
-					</ul>
-				</section>
+			{remaining !== null && (
+				<p className="rounded-lg border border-slate-200 px-3 py-2 text-sm tabular-nums">
+					{scansLeft(remaining, locale)}
+				</p>
 			)}
 			<button
 				type="button"

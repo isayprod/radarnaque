@@ -14,7 +14,8 @@ const active: ContentAccess = {
 	features: ["card_icons"],
 	unlimited: false,
 	debug: false,
-	remaining: { text: 3, image: null, total: null },
+	maxImages: 4,
+	remaining: { scans: 3 },
 };
 
 /** Cache avec une horloge réglée depuis le test. */

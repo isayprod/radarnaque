@@ -64,7 +64,7 @@ describe("DebugSection", () => {
 		expect(shownValue(container, "provider / model")?.textContent).toBe(
 			"fournisseur-test / modele-test",
 		);
-		expect(shownValue(container, "prompt")?.textContent).toBe("text v2");
+		expect(shownValue(container, "prompt")?.textContent).toBe("full v1");
 		expect(shownValue(container, "llmCalled")?.textContent).toBe("true");
 		expect(shownValue(container, "fromCache")?.textContent).toBe("false");
 		expect(shownValue(container, "tokens in / out")?.textContent).toBe(
@@ -73,8 +73,64 @@ describe("DebugSection", () => {
 		// 1234 micro-dollars : 6 décimales.
 		expect(shownValue(container, "cost")?.textContent).toBe("$0.001234");
 		expect(shownValue(container, "timings")?.textContent).toBe(
-			"total 950 ms · llm 900 ms · images —",
+			"total 950 ms · llm 900 ms · images — · search —",
 		);
+		expect(shownValue(container, "rounds")?.textContent).toBe("1");
+	});
+
+	test("tours, recherches et réflexion : en texte seul", () => {
+		const { container } = renderSection({
+			debug: {
+				...sampleDebug,
+				rounds: 3,
+				timingsMs: { ...sampleDebug.timingsMs, search: 1500 },
+				searches: [
+					{
+						query: "iPhone 18 Pro prix",
+						aspect: "price",
+						ok: true,
+						output: "1. <b>Apple</b> — apple.com",
+						ms: 812,
+					},
+					{
+						query: "arnaque iPhone",
+						aspect: "scam",
+						ok: false,
+						output: "Recherche indisponible",
+						ms: 8000,
+					},
+				],
+				reasoning: "**Prix**\nLe prix <i>suit</i> le marché.",
+			},
+		});
+		expect(shownValue(container, "rounds")?.textContent).toBe("3");
+		expect(shownValue(container, "timings")?.textContent).toBe(
+			"total 950 ms · llm 900 ms · images — · search 1500 ms",
+		);
+		const block = (title: string) =>
+			[...container.querySelectorAll("details details")].find(
+				(d) => d.querySelector("summary")?.textContent === title,
+			);
+		const searches = block("Recherches web")?.querySelector("pre");
+		expect(searches?.textContent).toBe(
+			"[1] price · ok · 812 ms\nquery: iPhone 18 Pro prix\n1. <b>Apple</b> — apple.com\n\n[2] scam · failed · 8000 ms\nquery: arnaque iPhone\nRecherche indisponible",
+		);
+		expect(searches?.querySelector("b")).toBeNull();
+		const reasoning = block("Réflexion")?.querySelector("pre");
+		expect(reasoning?.textContent).toBe(
+			"**Prix**\nLe prix <i>suit</i> le marché.",
+		);
+		expect(reasoning?.querySelector("i")).toBeNull();
+	});
+
+	test("sans recherche ni réflexion : un tiret", () => {
+		const { container } = renderSection();
+		for (const title of ["Recherches web", "Réflexion"]) {
+			const block = [...container.querySelectorAll("details details")].find(
+				(d) => d.querySelector("summary")?.textContent === title,
+			);
+			expect(block?.querySelector("pre")?.textContent).toBe("—");
+		}
 	});
 
 	test("empreintes raccourcies à 12 caractères, la valeur complète en title", () => {
@@ -208,6 +264,8 @@ describe("DebugSection", () => {
 		expect(titles).toEqual([
 			"Systeemprompt",
 			"Verzonden berichten",
+			"Webzoekopdrachten",
+			"Redenering",
 			"Ruw antwoord",
 		]);
 	});

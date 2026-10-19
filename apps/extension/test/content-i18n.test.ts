@@ -188,7 +188,12 @@ describe("textes de la section IA", () => {
 			"ai.title": "Analyse IA",
 			"ai.badgeTag": "IA",
 			"ai.run": "Lancer une analyse IA",
-			"ai.runPhotos": "Analyse avec photos",
+			"ai.launch": "Analyser avec l'IA",
+			"ai.launchShort": "Analyser",
+			"ai.retry": "Relancer",
+			"ai.noScansLeft": "Plus d'analyses IA ce mois-ci",
+			"ai.noPhoto": "Analysée sans photo",
+			"ai.howAnalyzed": "Comment l'IA a analysé",
 			"ai.loading": "Analyse en cours…",
 			"ai.accessLoading": "Chargement…",
 			"ai.login": "Se connecter",
@@ -230,6 +235,14 @@ describe("textes de la section IA", () => {
 		expect(aiKeys("fr")).toEqual(Object.keys(expected).sort());
 	});
 
+	test("bouton de la pastille : nom accessible FR et NL, qui contient le texte visible", () => {
+		expect(contentText("nl", "ai.launch")).toBe("Analyseren met AI");
+		for (const locale of ["fr", "nl"] as const)
+			expect(contentText(locale, "ai.launch")).toContain(
+				contentText(locale, "ai.launchShort"),
+			);
+	});
+
 	test("ai.remaining garde {count} dans les deux langues", () => {
 		expect(contentText("fr", "ai.remaining")).toContain("{count}");
 		expect(contentText("nl", "ai.remaining")).toContain("{count}");
@@ -251,6 +264,8 @@ describe("textes de la section Debug (superuser)", () => {
 			"debug.systemPrompt": "Prompt système",
 			"debug.messages": "Messages envoyés",
 			"debug.rawResponse": "Réponse brute",
+			"debug.searches": "Recherches web",
+			"debug.reasoning": "Réflexion",
 		};
 		const nl: Record<string, string> = {
 			"debug.title": "Debug (superuser)",
@@ -260,6 +275,8 @@ describe("textes de la section Debug (superuser)", () => {
 			"debug.systemPrompt": "Systeemprompt",
 			"debug.messages": "Verzonden berichten",
 			"debug.rawResponse": "Ruw antwoord",
+			"debug.searches": "Webzoekopdrachten",
+			"debug.reasoning": "Redenering",
 		};
 		for (const [locale, expected] of [
 			["fr", fr],

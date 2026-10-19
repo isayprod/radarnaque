@@ -35,6 +35,7 @@ function linesOf(
 			value: `${debug.promptVersion.scanKind} v${debug.promptVersion.version}`,
 		},
 		{ label: "llmCalled", value: String(debug.llmCalled) },
+		{ label: "rounds", value: String(debug.rounds) },
 		{ label: "fromCache", value: String(debug.fromCache) },
 		{
 			label: "tokens in / out",
@@ -44,7 +45,7 @@ function linesOf(
 		{ label: "cost", value: `$${(debug.costUsdMicros / 1e6).toFixed(6)}` },
 		{
 			label: "timings",
-			value: `total ${ms(t.total)} · llm ${ms(t.llm)} · images ${ms(t.images)}`,
+			value: `total ${ms(t.total)} · llm ${ms(t.llm)} · images ${ms(t.images)} · search ${ms(t.search)}`,
 		},
 		{
 			label: "inputHash",
@@ -57,6 +58,16 @@ function linesOf(
 			title: debug.contentHash,
 		},
 	];
+}
+
+/** Recherches web de l'analyse : aspect, issue, durée, requête puis sortie de l'outil. */
+function searchesText(debug: ScanDebug): string {
+	return debug.searches
+		.map(
+			(s, i) =>
+				`[${i + 1}] ${s.aspect} · ${s.ok ? "ok" : "failed"} · ${s.ms} ms\nquery: ${s.query}\n${s.output}`,
+		)
+		.join("\n\n");
 }
 
 /** Bloc repliable : un `<pre>` borné en hauteur, avec défilement. */
@@ -74,9 +85,10 @@ function Block({ title, text }: { title: string; text: string }) {
 }
 
 /**
- * Section « Debug (superuser) » en bas du panneau : modèle, prompt, coût,
- * durées, et ce qui a été envoyé au LLM et reçu de lui. Tout est rendu en nœuds
- * texte, jamais en HTML : le prompt et la réponse contiennent du texte de l'annonce.
+ * Section « Debug (superuser) » en bas du panneau : modèle, prompt, tours, coût,
+ * durées, et ce qui a été envoyé au LLM et reçu de lui (recherches web et
+ * réflexion comprises). Tout est rendu en nœuds texte, jamais en HTML : le prompt,
+ * les recherches et la réponse contiennent du texte de l'annonce ou du web.
  */
 export function DebugSection({
 	locale,
@@ -148,6 +160,14 @@ export function DebugSection({
 				text={debug.systemPrompt}
 			/>
 			<Block title={contentText(locale, "debug.messages")} text={messages} />
+			<Block
+				title={contentText(locale, "debug.searches")}
+				text={searchesText(debug) || "—"}
+			/>
+			<Block
+				title={contentText(locale, "debug.reasoning")}
+				text={debug.reasoning || "—"}
+			/>
 			<Block
 				title={contentText(locale, "debug.rawResponse")}
 				text={debug.rawResponse ?? "—"}

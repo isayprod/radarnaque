@@ -4,8 +4,9 @@ import { useId } from "react";
 import { RELOGIN_CODES } from "../lib/content/access-policy";
 import type { ScanState } from "../lib/content/ai-client";
 import { aiErrorText, contentText } from "../lib/content-i18n";
-import type { ContentAccess, ScanKind } from "../lib/messages";
+import type { ContentAccess } from "../lib/messages";
 import { LEVEL_KEY, LEVEL_STYLE, SEVERITY_STYLE } from "./risk-styles";
+import { ScanProgressView } from "./ScanProgressView";
 
 // Erreurs de droits : on propose le lien vers les formules.
 const PRICING_CODES = new Set([
@@ -18,27 +19,13 @@ const BUTTON_CLASS =
 	"inline-flex cursor-pointer items-center justify-center rounded-[6px] border border-slate-300 bg-white px-3 py-1.5 text-[13px] leading-[1.4] font-semibold text-slate-900 shadow-sm hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700 disabled:cursor-default disabled:bg-slate-100 disabled:text-slate-500";
 
 /**
- * Provisoire, jusqu'à la section IA à scan unique (phase 3d) : l'ancien droit aux
- * photos, que `canUse` ne connaît plus.
+ * Analyse coupée en route (flux interrompu, délai dépassé) : le message, et
+ * « Relancer » à la place de « Lancer une analyse IA ». Partagé avec la pastille.
  */
-function canScanPhotos(access: ContentAccess): boolean {
-	if (access.status !== "active") return false;
-	return access.unlimited || access.features.includes("image_scan");
-}
-
-/**
- * Provisoire, jusqu'à la section IA à scan unique (tâche 12) : le résultat affiché
- * parmi les deux anciennes places, celle des photos d'abord.
- */
-interface ShownResult {
-	kind: ScanKind;
-	result: AnalysisResult;
-}
-function shownOf(text: ScanState, image: ScanState): ShownResult | null {
-	if (image.status === "done") return { kind: "image", result: image.result };
-	if (text.status === "done") return { kind: "text", result: text.result };
-	return null;
-}
+export const RELAUNCH_CODES: ReadonlySet<string> = new Set([
+	"stream_interrupted",
+	"timeout",
+]);
 
 const LINK_CLASS =
 	"font-semibold text-slate-900 underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700";
@@ -46,10 +33,9 @@ const LINK_CLASS =
 export interface AiSectionProps {
 	locale: Locale;
 	access: ContentAccess | "loading" | { error: string };
-	hasPhotos: boolean;
-	text: ScanState;
-	image: ScanState;
-	onScan(kind: ScanKind): void;
+	/** L'analyse IA de l'annonce : une seule action, une seule place. */
+	ai: ScanState;
+	onScan(): void;
 	onLogin(): void;
 	loginUnavailable: boolean;
 	pricingUrl: string;
@@ -75,33 +61,24 @@ export function AiSection(props: AiSectionProps) {
 	);
 }
 
-function SectionBody(props: AiSectionProps) {
-	const shown = shownOf(props.text, props.image);
-	return shown ? (
-		<ShownBody {...props} shown={shown} />
-	) : (
-		<AccessBody {...props} />
-	);
-}
-
 /**
  * Un résultat IA existe : il est affiché quel que soit l'accès (repris du
- * magasin avant la lecture de l'accès, ou session expirée depuis). Seule
- * « Analyse avec photos » reste proposée, si le plan le permet et que le
- * résultat affiché vient du texte ; relancer le texte ne servirait à rien.
+ * magasin avant la lecture de l'accès, ou session expirée depuis), sans aucun
+ * bouton : relancer la même analyse ne servirait à rien. Son déroulé est replié
+ * dessous.
  */
-function ShownBody(props: AiSectionProps & { shown: ShownResult }) {
-	const { locale, access, shown } = props;
-	const photos =
-		shown.kind === "text" &&
-		props.hasPhotos &&
-		access !== "loading" &&
-		!("error" in access) &&
-		canScanPhotos(access);
+function SectionBody(props: AiSectionProps) {
+	const { locale, ai } = props;
+	if (ai.status !== "done") return <AccessBody {...props} />;
 	return (
 		<div className="flex flex-col gap-3">
-			<ResultView locale={locale} kind={shown.kind} result={shown.result} />
-			{photos && <ScanBlock {...props} kind="image" state={props.image} />}
+			<ResultView locale={locale} result={ai.result} />
+			<ScanProgressView
+				progress={ai.progress}
+				locale={locale}
+				webSearches={ai.result.webSearches}
+				live={false}
+			/>
 		</div>
 	);
 }
@@ -129,42 +106,35 @@ function AccessBody(props: AiSectionProps) {
 	if (access.status === "noSubscription") {
 		return <ErrorNotice {...props} code="no_active_subscription" />;
 	}
-	const photos = canScanPhotos(access) && props.hasPhotos;
-	return (
-		<div className="flex flex-col gap-3">
-			<ScanBlock {...props} kind="text" state={props.text} />
-			{photos && <ScanBlock {...props} kind="image" state={props.image} />}
-		</div>
-	);
+	return <ScanBlock {...props} />;
 }
 
-function ScanBlock(
-	props: AiSectionProps & { kind: ScanKind; state: ScanState },
-) {
-	const { locale, kind, state } = props;
-	const loading = state.status === "loading";
-	const label = loading
-		? contentText(locale, "ai.loading")
-		: contentText(locale, kind === "text" ? "ai.run" : "ai.runPhotos");
+/** Le bouton d'analyse, puis l'erreur ou le déroulé en direct. */
+function ScanBlock(props: AiSectionProps) {
+	const { locale, ai } = props;
+	const loading = ai.status === "loading";
+	const relaunch = ai.status === "error" && RELAUNCH_CODES.has(ai.code);
+	let label = contentText(locale, "ai.run");
+	if (loading) label = contentText(locale, "ai.loading");
+	else if (relaunch) label = contentText(locale, "ai.retry");
 	return (
 		<div className="flex flex-col items-start gap-2">
 			<button
 				type="button"
 				disabled={loading}
 				aria-busy={loading}
-				onClick={() => props.onScan(kind)}
+				onClick={() => props.onScan()}
 				className={BUTTON_CLASS}
 			>
 				{label}
 			</button>
 			<div aria-live="polite" className="w-full">
-				{state.status === "error" && (
-					<ErrorNotice {...props} code={state.code} />
-				)}
-				{state.status === "done" && (
-					<ResultView locale={locale} kind={kind} result={state.result} />
-				)}
+				{ai.status === "error" && <ErrorNotice {...props} code={ai.code} />}
 			</div>
+			{/* Hors de la région annoncée : le déroulé change sans cesse. */}
+			{loading && (
+				<ScanProgressView progress={ai.progress} locale={locale} live />
+			)}
 		</div>
 	);
 }
@@ -214,16 +184,14 @@ function LoginButton(props: AiSectionProps) {
 
 function ResultView({
 	locale,
-	kind,
 	result,
 }: {
 	locale: Locale;
-	kind: ScanKind;
 	result: AnalysisResult;
 }) {
 	const style = LEVEL_STYLE[result.level];
 	// `null` : illimité (admin) ou sans plafond. On n'affiche alors rien, jamais « 0 ».
-	const remaining = result.remaining.total ?? result.remaining[kind];
+	const remaining = result.remaining.scans;
 	return (
 		<div className="flex flex-col gap-2">
 			<p className="m-0 flex items-center gap-1.5 font-semibold">
@@ -270,6 +238,11 @@ function ResultView({
 			{result.partial && (
 				<p className="m-0 text-[12px] text-slate-600">
 					{contentText(locale, "ai.partial")}
+				</p>
+			)}
+			{result.imagesAnalyzed === 0 && (
+				<p className="m-0 text-[12px] text-slate-600">
+					{contentText(locale, "ai.noPhoto")}
 				</p>
 			)}
 			{remaining !== null && (

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { CardBadge } from "../components/CardBadge";
 import type { ScanState } from "../lib/content/ai-client";
+import { addEvent, startProgress } from "../lib/content/scan-progress";
 import { aiErrorText, contentText } from "../lib/content-i18n";
 import { sampleAnalysis } from "./helpers";
 
@@ -119,6 +120,7 @@ describe("CardBadge", () => {
 		const { reached } = renderInLink({
 			status: "done",
 			result: sampleAnalysis,
+			progress: null,
 		});
 		const tooltip = screen.getByRole("tooltip", { hidden: true });
 		const click = new MouseEvent("click", { bubbles: true, cancelable: true });
@@ -127,10 +129,11 @@ describe("CardBadge", () => {
 		expect(reached).not.toHaveBeenCalled();
 	});
 
-	test("loading : aria-busy et texte d'attente", () => {
-		renderInLink({ status: "loading" });
+	test("loading : aria-busy, icône qui tourne et texte d'attente", () => {
+		renderInLink({ status: "loading", progress: startProgress(0) });
 		const button = screen.getByRole("button");
 		expect(button.getAttribute("aria-busy")).toBe("true");
+		expect(button.querySelector(".radarnaque-spin")).not.toBeNull();
 		expect(button.textContent).toBe(contentText("fr", "card.loading"));
 		expect(contentText("fr", "card.loading")).toBe("Analyse…");
 		expect(contentText("nl", "card.loading")).toBe("Analyseren…");
@@ -141,6 +144,7 @@ describe("CardBadge", () => {
 		renderInLink({
 			status: "done",
 			result: { ...sampleAnalysis, level: "medium" },
+			progress: null,
 		});
 		const button = screen.getByRole("button", { name: "Risque moyen" });
 		const tooltip = screen.getByRole("tooltip", { hidden: true });
@@ -164,6 +168,7 @@ describe("CardBadge", () => {
 			{
 				status: "done",
 				result: { ...sampleAnalysis, level: "high", partial: true },
+				progress: null,
 			},
 			"nl",
 		);
@@ -175,7 +180,7 @@ describe("CardBadge", () => {
 
 	test("done professionnel : pro.notice sous le résumé, en FR et en NL", () => {
 		const professional = { ...sampleAnalysis, professional: true };
-		renderInLink({ status: "done", result: professional });
+		renderInLink({ status: "done", result: professional, progress: null });
 		const tooltip = screen.getByRole("tooltip", { hidden: true });
 		const text = tooltip.textContent ?? "";
 		const notice = contentText("fr", "pro.notice");
@@ -185,17 +190,70 @@ describe("CardBadge", () => {
 			text.indexOf(sampleAnalysis.summary.fr),
 		);
 		cleanup();
-		renderInLink({ status: "done", result: professional }, "nl");
+		renderInLink(
+			{ status: "done", result: professional, progress: null },
+			"nl",
+		);
 		expect(screen.getByRole("tooltip", { hidden: true }).textContent).toContain(
 			contentText("nl", "pro.notice"),
 		);
 	});
 
 	test("done non professionnel : pas de pro.notice", () => {
-		renderInLink({ status: "done", result: sampleAnalysis });
+		renderInLink({ status: "done", result: sampleAnalysis, progress: null });
 		expect(
 			screen.getByRole("tooltip", { hidden: true }).textContent,
 		).not.toContain(contentText("fr", "pro.notice"));
+	});
+
+	test("tooltip shows live line : la ligne d'état suit le dernier événement", async () => {
+		const user = userEvent.setup();
+		const start = startProgress(0);
+		const searching = addEvent(
+			start,
+			{ type: "search", id: 1, query: "iPhone 18 Pro prix", aspect: "price" },
+			1_000,
+		);
+		const { rerender, onActivate } = renderInLink({
+			status: "loading",
+			progress: start,
+		});
+		const button = screen.getByRole("button");
+		const tooltip = screen.getByRole("tooltip", { hidden: true });
+		expect(tooltip.textContent).toBe("Démarrage de l'analyse");
+		expect(button.getAttribute("aria-describedby")).toBe(tooltip.id);
+		await user.hover(button);
+		expect(tooltip.hidden).toBe(false);
+
+		rerender(
+			<CardBadge
+				state={{ status: "loading", progress: searching }}
+				locale="fr"
+				onActivate={onActivate}
+			/>,
+		);
+		expect(screen.getByRole("tooltip").textContent).toBe(
+			"Recherche web (prix du marché) : “iPhone 18 Pro prix”",
+		);
+		// Texte du modèle : rendu en texte, jamais en HTML.
+		rerender(
+			<CardBadge
+				state={{
+					status: "loading",
+					progress: addEvent(
+						searching,
+						{ type: "thinking", part: 1, text: "<img src=x onerror=alert(1)>" },
+						2_000,
+					),
+				}}
+				locale="fr"
+				onActivate={onActivate}
+			/>,
+		);
+		expect(document.querySelector("img")).toBeNull();
+		expect(screen.getByRole("tooltip").textContent).toBe(
+			"<img src=x onerror=alert(1)>",
+		);
 	});
 
 	test("error : message dans l'infobulle, un nouveau clic relance", async () => {

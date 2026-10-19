@@ -2,7 +2,9 @@ import type { Locale } from "@radarnaque/shared";
 import { type SyntheticEvent, useId, useRef, useState } from "react";
 import type { ScanState } from "../lib/content/ai-client";
 import type { CardView } from "../lib/content/card-controller";
+import { statusLine } from "../lib/content/scan-progress";
 import { aiErrorText, contentText } from "../lib/content-i18n";
+import { Spinner } from "./LiveStatus";
 import { LEVEL_KEY, LEVEL_STYLE } from "./risk-styles";
 
 const BUTTON_CLASS =
@@ -19,13 +21,16 @@ const cancel = (event: SyntheticEvent) => {
 };
 
 /**
- * Contenu de l'infobulle : résumé de l'IA ou message d'erreur ; rien sinon.
- * `professional` ajoute `pro.notice` sous le résumé.
+ * Contenu de l'infobulle : la ligne d'état en direct pendant l'analyse, puis le
+ * résumé de l'IA ou le message d'erreur ; rien sinon. `professional` ajoute
+ * `pro.notice` sous le résumé.
  */
 function tooltipOf(
 	state: ScanState,
 	locale: Locale,
 ): { text: string; professional: boolean } | null {
+	if (state.status === "loading")
+		return { text: statusLine(state.progress, locale), professional: false };
 	if (state.status === "error")
 		return { text: aiErrorText(locale, state.code), professional: false };
 	if (state.status !== "done") return null;
@@ -37,7 +42,15 @@ function tooltipOf(
 }
 
 function ButtonContent({ state, locale }: Omit<CardView, "onActivate">) {
-	if (state.status === "loading") return contentText(locale, "card.loading");
+	// L'icône tourne ; le texte d'attente reste le nom du bouton.
+	if (state.status === "loading") {
+		return (
+			<>
+				<Spinner />
+				<span className="sr-only">{contentText(locale, "card.loading")}</span>
+			</>
+		);
+	}
 	if (state.status === "done") {
 		const style = LEVEL_STYLE[state.result.level];
 		return (
@@ -82,7 +95,8 @@ export function CardBadge({ state, locale, onActivate }: CardView) {
 	};
 	const tip = tooltipOf(state, locale);
 	// Inactif ou en erreur, le clic lance l'analyse : le nom du bouton le dit.
-	// Terminé, son nom est le niveau affiché ; en cours, le texte d'attente.
+	// Terminé, son nom est le niveau affiché ; en cours, le texte d'attente, et
+	// l'infobulle suit la ligne d'état.
 	const label =
 		state.status === "idle" || state.status === "error"
 			? contentText(locale, "card.aria")
