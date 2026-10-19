@@ -114,7 +114,7 @@ class RulesIn(CamelInModel):
     signals: list[SignalIn] = Field(max_length=20)
 
 
-ScanKindCode = Literal["text", "image"]
+ScanKindCode = Literal["text", "image", "full"]
 TriggerCode = Literal["button", "card"]
 
 
@@ -257,6 +257,7 @@ class MeOut(CamelModel):
     plan: str | None
     features: list[str]
     unlimited: bool
+    max_images: int
     period_start: datetime | None
     quotas: list[QuotaOut]
     total_cap: QuotaOut | None

@@ -428,6 +428,10 @@
             "title": "Features",
             "type": "array"
           },
+          "maxImages": {
+            "title": "Maximages",
+            "type": "integer"
+          },
           "periodStart": {
             "anyOf": [
               {
@@ -493,6 +497,7 @@
           "plan",
           "features",
           "unlimited",
+          "maxImages",
           "periodStart",
           "quotas",
           "totalCap"
@@ -547,7 +552,8 @@
           "scanKind": {
             "enum": [
               "text",
-              "image"
+              "image",
+              "full"
             ],
             "title": "Scankind",
             "type": "string"
@@ -804,7 +810,8 @@
           "scanKind": {
             "enum": [
               "text",
-              "image"
+              "image",
+              "full"
             ],
             "title": "Scankind",
             "type": "string"
@@ -916,7 +923,8 @@
           "scanKind": {
             "enum": [
               "text",
-              "image"
+              "image",
+              "full"
             ],
             "title": "Scankind",
             "type": "string"

@@ -55,6 +55,12 @@ def test_use_creates_and_activates_the_model(cli_env, pg_url, capsys):
     assert count == (1,)
 
 
+def test_cli_use_full_kind(cli_env, pg_url, capsys):
+    assert main(["use", "omniroute", "auto", "--kind", "full"]) == 0
+    assert _active(pg_url, "full") == ("omniroute", "auto")
+    assert "omniroute/auto" in capsys.readouterr().out
+
+
 def test_use_reuses_an_existing_model(cli_env, pg_url):
     before = _active(pg_url, "image")
     assert main(["use", "openrouter", "google/gemini-2.5-flash-lite", "--kind", "image"]) == 0

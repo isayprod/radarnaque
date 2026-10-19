@@ -11,7 +11,7 @@ from radarnaque_api.db import get_session
 from radarnaque_api.models import AuthUser, Feature, PlanFeature
 from radarnaque_api.schemas import MeOut, QuotaOut
 from radarnaque_api.services.subscriptions import bootstrap_trial, get_active_subscription
-from radarnaque_api.services.usage import compute_usage
+from radarnaque_api.services.usage import compute_usage, plan_max_images
 
 router = APIRouter()
 
@@ -27,15 +27,30 @@ async def me(
 
     # Compte illimité : admin, ou superuser hors production (seul à avoir le debug). En
     # production, le superuser n'a aucun privilège et suit le chemin ordinaire, en `user`.
+    # Le superuser se voit en Premium (`plan_override`) : plan, fonctionnalités et photos du
+    # plan Premium, lus en base ; l'admin garde toutes les fonctionnalités. Ni l'un ni l'autre
+    # n'a de quota affiché.
     if privileges.unlimited:
-        features = (await session.execute(select(Feature.code).order_by(Feature.code))).scalars()
+        if privileges.plan_override is not None:
+            features = (
+                await session.execute(
+                    select(PlanFeature.feature)
+                    .where(PlanFeature.plan == privileges.plan_override)
+                    .order_by(PlanFeature.feature)
+                )
+            ).scalars()
+        else:
+            features = (
+                await session.execute(select(Feature.code).order_by(Feature.code))
+            ).scalars()
         return MeOut(
             user_id=user.id,
             email=user.email,
             role="superuser" if privileges.debug else "admin",
-            plan=sub.plan if sub else None,
+            plan=privileges.plan_override or (sub.plan if sub else None),
             features=list(features),
             unlimited=True,
+            max_images=await plan_max_images(session, sub.plan if sub else None, privileges),
             period_start=None,
             quotas=[],
             total_cap=None,
@@ -57,6 +72,7 @@ async def me(
             plan=None,
             features=[],
             unlimited=False,
+            max_images=0,
             period_start=None,
             quotas=[],
             total_cap=None,
@@ -77,6 +93,7 @@ async def me(
         plan=sub.plan,
         features=list(features),
         unlimited=False,
+        max_images=await plan_max_images(session, sub.plan, privileges),
         period_start=usage.period_start,
         quotas=[
             QuotaOut(scan_kind=kind, limit=q.limit, used=q.used, remaining=q.remaining)

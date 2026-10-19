@@ -25,7 +25,9 @@ def _user(role: str) -> AuthUser:
 
 
 ADMIN = Privileges(unlimited=True, all_features=True, rate_limited=True, debug=False)
-SUPERUSER = Privileges(unlimited=True, all_features=True, rate_limited=False, debug=True)
+SUPERUSER = Privileges(
+    unlimited=True, all_features=True, rate_limited=False, debug=True, plan_override="premium"
+)
 ORDINARY = Privileges(unlimited=False, all_features=False, rate_limited=True, debug=False)
 
 
@@ -46,6 +48,13 @@ ORDINARY = Privileges(unlimited=False, all_features=False, rate_limited=True, de
 )
 def test_privileges_table(role, env, expected):
     assert privileges_of(_user(role), _settings(env)) == expected
+
+
+def test_superuser_plan_override_premium():
+    assert privileges_of(_user("superuser"), _settings("development")).plan_override == "premium"
+    assert privileges_of(_user("superuser"), _settings("production")).plan_override is None
+    assert privileges_of(_user("admin"), _settings("development")).plan_override is None
+    assert privileges_of(_user("user"), _settings("development")).plan_override is None
 
 
 def test_privileges_are_frozen():
