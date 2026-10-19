@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AnalysisResult } from "@radarnaque/shared";
+import type { AnalysisResult, ScanProgressEvent } from "@radarnaque/shared";
 import {
 	act,
 	cleanup,
@@ -190,7 +190,9 @@ describe("RiskBadge", () => {
 			<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />,
 			{ container },
 		);
-		await user.click(within(container).getByRole("button"));
+		await user.click(
+			within(container).getByRole("button", { name: /Radarnaque/ }),
+		);
 		await user.click(within(container).getByRole("dialog"));
 		expect(within(container).queryByRole("dialog")).not.toBeNull();
 		await user.click(outside);
@@ -451,21 +453,9 @@ describe("RiskBadge : analyse IA", () => {
 		expect(ai.access).toHaveBeenCalledTimes(1);
 	});
 
-	test("photos arrivées après coup : le bouton « Analyse avec photos » apparaît", async () => {
+	test("no photo-scan button : une seule action dans le panneau, avec ou sans photos", async () => {
 		const user = userEvent.setup();
-		ai.access.mockResolvedValue({
-			ok: true,
-			data: { ...active, features: ["image_scan"] },
-		});
-		const view = render(
-			<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />,
-		);
-		await user.click(toggle());
-		await findRun();
-		const photos = { name: contentText("fr", "ai.runPhotos") };
-		expect(screen.queryByRole("button", photos)).toBeNull();
-
-		view.rerender(
+		render(
 			<RiskBadge
 				report={high}
 				listing={{ ...listing, images: ["https://images.example/1.jpg"] }}
@@ -473,7 +463,12 @@ describe("RiskBadge : analyse IA", () => {
 				ai={ai}
 			/>,
 		);
-		expect(screen.getByRole("button", photos)).toBeTruthy();
+		await user.click(toggle());
+		await findRun();
+		expect(
+			within(screen.getByRole("dialog")).getAllByRole("button"),
+		).toHaveLength(1);
+		expect(screen.queryByText(/photos/)).toBeNull();
 	});
 
 	test("description modifiée puis clic : la requête porte la nouvelle description", async () => {
@@ -530,6 +525,276 @@ describe("RiskBadge : analyse IA", () => {
 		await screen.findByText(contentText("fr", "ai.loginFallback"));
 		// Le clic dans le panneau ne l'a pas fermé.
 		expect(screen.getByRole("dialog")).toBeTruthy();
+	});
+});
+
+describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
+	afterEach(() => vi.useRealTimers());
+
+	const LAUNCH = "Analyser avec l'IA";
+	const launch = () => screen.getByRole("button", { name: LAUNCH });
+	const queryLaunch = () => screen.queryByRole("button", { name: LAUNCH });
+	const searchEvent: ScanProgressEvent = {
+		type: "search",
+		id: 1,
+		query: "iPhone 18 Pro prix",
+		aspect: "price",
+	};
+	const SEARCH_LINE = "Recherche web (prix du marché) : “iPhone 18 Pro prix”";
+
+	/** Accès déjà en cache (lu par une icône de carte, ou plus tôt). */
+	const cached = (access: ContentAccess) => {
+		const cache = createAccessCache();
+		cache.settle(cache.begin(), access);
+		return cache;
+	};
+	/** Envoie un événement du flux à l'analyse lancée en dernier. */
+	const emit = (e: ScanProgressEvent) => {
+		const onEvent = ai.scan.mock.calls.at(-1)?.[1];
+		if (!onEvent) throw new Error("aucune analyse lancée");
+		act(() => onEvent(e));
+	};
+	const statusLineEl = () => toggle().querySelector(".radarnaque-status");
+	const announced = () => screen.getByRole("status").textContent;
+
+	test("launch button starts scan without opening panel", async () => {
+		const user = userEvent.setup();
+		scanReply.mockImplementation(() => new Promise(() => {}));
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		expect(ai.access).not.toHaveBeenCalled();
+		const button = launch();
+		expect(button.getAttribute("type")).toBe("button");
+		expect(button.textContent).toBe("Analyser");
+		await user.click(button);
+		// Accès inconnu : lu d'abord, puis l'analyse part.
+		await vi.waitFor(() => expect(ai.scan).toHaveBeenCalledTimes(1));
+		expect(ai.access).toHaveBeenCalledTimes(1);
+		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(toggle().getAttribute("aria-expanded")).toBe("false");
+		// Pendant l'analyse, la ligne en direct remplace le bouton.
+		expect(queryLaunch()).toBeNull();
+		expect(toggle().querySelector(".radarnaque-spin")).not.toBeNull();
+	});
+
+	test("accès déjà en cache : l'analyse part au clic, sans lecture", () => {
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		fireEvent.click(launch());
+		expect(ai.scan).toHaveBeenCalledTimes(1);
+		expect(ai.access).not.toHaveBeenCalled();
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
+	test("absent dès qu'un résultat IA est affiché", async () => {
+		const user = userEvent.setup();
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await user.click(launch());
+		await vi.waitFor(() => expect(toggle().textContent).toContain("55/100"));
+		expect(queryLaunch()).toBeNull();
+	});
+
+	test("launch button when signed out opens login", async () => {
+		const user = userEvent.setup();
+		// Chaque réponse du service worker est un objet neuf (clone du message).
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { status: "signedOut" },
+		}));
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await user.click(launch());
+		await vi.waitFor(() => expect(ai.openLogin).toHaveBeenCalledTimes(1));
+		expect(ai.scan).not.toHaveBeenCalled();
+		expect(screen.queryByRole("dialog")).toBeNull();
+		// Déjà connu signedOut : relu (R8), puis la connexion à nouveau.
+		await user.click(launch());
+		await vi.waitFor(() => expect(ai.openLogin).toHaveBeenCalledTimes(2));
+		expect(ai.access).toHaveBeenCalledTimes(2);
+	});
+
+	test("launch disabled when no scans left", async () => {
+		const user = userEvent.setup();
+		const empty: ContentAccess = { ...active, remaining: { scans: 0 } };
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(empty)}
+			/>,
+		);
+		const button = launch();
+		expect(button.hasAttribute("disabled")).toBe(true);
+		expect(button.getAttribute("title")).toBe("Plus d'analyses IA ce mois-ci");
+		await user.click(button);
+		expect(ai.scan).not.toHaveBeenCalled();
+		cleanup();
+
+		// Accès inconnu au clic : lu, puis grisé sans analyse.
+		ai.access.mockResolvedValue({ ok: true, data: empty });
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await user.click(launch());
+		await vi.waitFor(() =>
+			expect(launch().hasAttribute("disabled")).toBe(true),
+		);
+		expect(ai.scan).not.toHaveBeenCalled();
+	});
+
+	test("sans abonnement : un lien vers les formules, dans la langue active", () => {
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="nl"
+				ai={ai}
+				accessCache={cached({ status: "noSubscription" })}
+			/>,
+		);
+		const link = screen.getByRole("link", { name: "Analyseren met AI" });
+		expect(link.getAttribute("href")).toMatch(/\/pricing\/\?lang=nl$/);
+		expect(link.getAttribute("target")).toBe("_blank");
+		expect(link.getAttribute("rel")).toBe("noopener");
+	});
+
+	test("live line follows last event", () => {
+		scanReply.mockImplementation(() => new Promise(() => {}));
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		fireEvent.click(launch());
+		expect(statusLineEl()?.textContent).toBe("Démarrage de l'analyse");
+		emit({ type: "stage", stage: "photos", count: 3 });
+		expect(statusLineEl()?.textContent).toBe("Téléchargement de 3 photos");
+		emit(searchEvent);
+		expect(within(toggle()).getByText(SEARCH_LINE)).toBeTruthy();
+		expect(statusLineEl()?.textContent).toBe(SEARCH_LINE);
+		// Le nom du bouton ne change pas pendant l'analyse.
+		expect(toggle().getAttribute("aria-label")).toBe(
+			contentText("fr", "badge.aria"),
+		);
+	});
+
+	test("waiting class after 4s", () => {
+		vi.useFakeTimers();
+		scanReply.mockImplementation(() => new Promise(() => {}));
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		fireEvent.click(launch());
+		emit(searchEvent);
+		expect(statusLineEl()?.classList.contains("is-waiting")).toBe(false);
+		act(() => vi.advanceTimersByTime(3_999));
+		expect(statusLineEl()?.classList.contains("is-waiting")).toBe(false);
+		act(() => vi.advanceTimersByTime(1));
+		expect(statusLineEl()?.classList.contains("is-waiting")).toBe(true);
+		// La ligne garde le dernier texte.
+		expect(statusLineEl()?.textContent).toBe(SEARCH_LINE);
+		emit({ type: "stage", stage: "writing" });
+		expect(statusLineEl()?.classList.contains("is-waiting")).toBe(false);
+	});
+
+	test("aria-live throttled to 2s", () => {
+		vi.useFakeTimers();
+		scanReply.mockImplementation(() => new Promise(() => {}));
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		const region = screen.getByRole("status");
+		expect(region.getAttribute("aria-live")).toBe("polite");
+		expect(region.textContent).toBe("");
+		fireEvent.click(launch());
+		expect(announced()).toBe("Démarrage de l'analyse");
+		emit({ type: "stage", stage: "photos", count: 3 });
+		emit(searchEvent);
+		// La ligne visible suit chaque événement ; la région annoncée attend.
+		expect(statusLineEl()?.textContent).toBe(SEARCH_LINE);
+		expect(announced()).toBe("Démarrage de l'analyse");
+		act(() => vi.advanceTimersByTime(1_999));
+		expect(announced()).toBe("Démarrage de l'analyse");
+		act(() => vi.advanceTimersByTime(1));
+		expect(announced()).toBe(SEARCH_LINE);
+		act(() => vi.advanceTimersByTime(500));
+		emit({ type: "stage", stage: "writing" });
+		expect(announced()).toBe(SEARCH_LINE);
+		act(() => vi.advanceTimersByTime(1_499));
+		expect(announced()).toBe(SEARCH_LINE);
+		act(() => vi.advanceTimersByTime(1));
+		expect(announced()).toBe("Rédige le verdict");
+	});
+
+	test.each(["stream_interrupted", "timeout"])(
+		"interrupted shows relaunch (%s)",
+		async (code) => {
+			const user = userEvent.setup();
+			scanReply.mockResolvedValueOnce({ ok: false, error: { code } });
+			render(
+				<RiskBadge
+					report={high}
+					listing={listing}
+					locale="fr"
+					ai={ai}
+					accessCache={cached(active)}
+				/>,
+			);
+			await user.click(launch());
+			expect(await screen.findByText(aiErrorText("fr", code))).toBeTruthy();
+			// Jamais une icône qui tourne sans fin.
+			expect(toggle().querySelector(".radarnaque-spin")).toBeNull();
+			expect(queryLaunch()).toBeNull();
+			expect(screen.queryByRole("dialog")).toBeNull();
+			await user.click(screen.getByRole("button", { name: "Relancer" }));
+			expect(ai.scan).toHaveBeenCalledTimes(2);
+			await vi.waitFor(() => expect(toggle().textContent).toContain("55/100"));
+		},
+	);
+
+	test("model text rendered as text", async () => {
+		const user = userEvent.setup();
+		scanReply.mockImplementation(() => new Promise(() => {}));
+		const { container } = render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		await user.click(launch());
+		const text = "<img src=x onerror=alert(1)>";
+		emit({ type: "thinking", part: 1, text });
+		expect(container.querySelector("img")).toBeNull();
+		expect(statusLineEl()?.textContent).toBe(text);
+		// Le déroulé du panneau aussi.
+		await user.click(toggle());
+		const dialog = screen.getByRole("dialog");
+		expect(within(dialog).getByText(text)).toBeTruthy();
+		expect(container.querySelector("img")).toBeNull();
 	});
 });
 
@@ -757,7 +1022,7 @@ describe("RiskBadge : section Debug (superuser)", () => {
 		const summary = await screen.findByText(debugTitle);
 		const dialog = screen.getByRole("dialog");
 		expect(dialog.textContent).toContain("fournisseur-test / modele-test");
-		expect(dialog.textContent).toContain("text v2");
+		expect(dialog.textContent).toContain("full v1");
 		expect(dialog.textContent).toContain(sampleDebug.systemPrompt);
 		// En bas du panneau, après le résultat IA.
 		expect(dialog.lastElementChild).toBe(summary.closest("details"));
@@ -960,5 +1225,20 @@ describe("badge.css", () => {
 
 	test("les espacements sont en px", () => {
 		expect(css).toMatch(/@theme\s*\{[^}]*--spacing:\s*4px/);
+	});
+
+	test("animations réduites : ni rotation, ni fondu, ni points animés", () => {
+		expect(blockOf("\\.radarnaque-spin")).toContain("animation:");
+		expect(blockOf("\\.radarnaque-status\\.is-waiting::after")).toContain(
+			"animation:",
+		);
+		const reduced =
+			css.split("@media (prefers-reduced-motion: reduce)")[1] ?? "";
+		expect(reduced).toMatch(
+			/\.radarnaque-spin,\s*\.radarnaque-fade\s*\{\s*animation:\s*none;/,
+		);
+		expect(reduced).toMatch(
+			/\.radarnaque-status\.is-waiting::after\s*\{[^}]*animation:\s*none;/,
+		);
 	});
 });

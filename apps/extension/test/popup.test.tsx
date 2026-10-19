@@ -1,11 +1,5 @@
 import type { Me } from "@radarnaque/shared";
-import {
-	cleanup,
-	render,
-	screen,
-	waitFor,
-	within,
-} from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { browser } from "wxt/browser";
@@ -45,12 +39,6 @@ function requestsOf(type: BgRequest["type"]) {
 	return sendToBackground.mock.calls
 		.map(([req]) => req)
 		.filter((req) => req.type === type);
-}
-
-function rowOf(label: string): HTMLElement {
-	const row = screen.getByText(label).closest("li");
-	if (!row) throw new Error(`ligne introuvable : ${label}`);
-	return row;
 }
 
 afterEach(cleanup);
@@ -181,10 +169,8 @@ describe("popup", () => {
 			{ type: "auth/verify-otp", email: "a@b.be", otp: "123456" },
 		]);
 		expect(screen.getByText("a@b.be")).toBeTruthy();
-		expect(screen.getAllByRole("listitem")).toHaveLength(1);
-		expect(within(rowOf("Scans d'essai restants")).getByText("3")).toBeTruthy();
-		expect(screen.queryByText("Analyses texte")).toBeNull();
-		expect(screen.queryByText("Analyses avec photos")).toBeNull();
+		expect(screen.getByText("3 analyses IA restantes")).toBeTruthy();
+		expect(screen.queryByText(/photos/)).toBeNull();
 		expect(screen.getByRole("button", { name: "Se déconnecter" })).toBeTruthy();
 	});
 
@@ -511,52 +497,57 @@ describe("popup", () => {
 					...trialMe,
 					plan: "standard",
 					totalCap: null,
-					quotas: [
-						{ scanKind: "text", limit: 150, used: 20, remaining: 130 },
-						{ scanKind: "image", limit: 0, used: 0, remaining: 0 },
-					],
+					quotas: [{ scanKind: "full", limit: 150, used: 20, remaining: 130 }],
 				}),
 		});
 		render(<App />);
 		expect(await screen.findByText("Standard")).toBeTruthy();
-		expect(within(rowOf("Analyses texte")).getByText("130")).toBeTruthy();
-		expect(screen.queryByText("Scans d'essai restants")).toBeNull();
+		expect(screen.getByText("130 analyses IA restantes")).toBeTruthy();
 	});
 
-	test("account view: superuser shows « Superuser (dev) » in FR and NL, no quota rows", async () => {
+	test("superuser shows Premium : « Superuser (dev) — Premium » en FR et en NL, sans analyses restantes", async () => {
 		background({ "auth/state": () => signedIn(superuserMe) });
 		const { unmount } = render(<App />);
-		expect(await screen.findByText("Superuser (dev)")).toBeTruthy();
+		expect(await screen.findByText("Superuser (dev) — Premium")).toBeTruthy();
 		expect(screen.queryByText("Administrateur · illimité")).toBeNull();
-		expect(screen.queryByRole("listitem")).toBeNull();
+		expect(screen.queryByText(/restante/)).toBeNull();
 		unmount();
 
 		await localePref.setValue("nl");
 		render(<App />);
-		expect(await screen.findByText("Superuser (dev)")).toBeTruthy();
+		expect(await screen.findByText("Superuser (dev) — Premium")).toBeTruthy();
 		expect(screen.queryByText("Beheerder · onbeperkt")).toBeNull();
-		expect(t("nl", "plan.superuser")).toBe("Superuser (dev)");
+		expect(screen.queryByText(/over$/)).toBeNull();
 	});
 
-	test("account view: premium-like (no total cap) shows the two per-kind rows", async () => {
-		background({
-			"auth/state": () =>
-				signedIn({
-					...trialMe,
-					plan: "premium",
-					totalCap: null,
-					quotas: [
-						{ scanKind: "text", limit: 1000, used: 0, remaining: 1000 },
-						{ scanKind: "image", limit: 100, used: 0, remaining: 100 },
-					],
-				}),
+	test("shows remaining scans : le quota full, limité par le plafond total, au singulier pour 0 et 1", async () => {
+		const premium = (remaining: number, cap: number | null = null): Me => ({
+			...trialMe,
+			plan: "premium",
+			totalCap:
+				cap === null
+					? null
+					: { scanKind: null, limit: 300, used: 300 - cap, remaining: cap },
+			quotas: [
+				{ scanKind: "full", limit: 300, used: 300 - remaining, remaining },
+			],
 		});
+		const cases: Array<[Me, string]> = [
+			[premium(300), "300 analyses IA restantes"],
+			[premium(120, 40), "40 analyses IA restantes"],
+			[premium(1), "1 analyse IA restante"],
+			[premium(0), "0 analyse IA restante"],
+		];
+		for (const [me, text] of cases) {
+			background({ "auth/state": () => signedIn(me) });
+			const { unmount } = render(<App />);
+			expect(await screen.findByText(text)).toBeTruthy();
+			unmount();
+		}
+		await localePref.setValue("nl");
+		background({ "auth/state": () => signedIn(premium(2)) });
 		render(<App />);
-		expect(await screen.findByText("Analyses texte")).toBeTruthy();
-		expect(screen.getAllByRole("listitem")).toHaveLength(2);
-		expect(within(rowOf("Analyses texte")).getByText("1000")).toBeTruthy();
-		expect(within(rowOf("Analyses avec photos")).getByText("100")).toBeTruthy();
-		expect(screen.queryByText("Scans d'essai restants")).toBeNull();
+		expect(await screen.findByText("2 AI-analyses over")).toBeTruthy();
 	});
 
 	test("NL locale renders Dutch labels", async () => {
@@ -576,9 +567,7 @@ describe("popup", () => {
 		render(<App />);
 
 		expect(await screen.findByText("Proef")).toBeTruthy();
-		expect(screen.queryByText("Tekstanalyses")).toBeNull();
-		expect(screen.queryByText("Analyses met foto's")).toBeNull();
-		expect(screen.getByText("Resterende proefscans")).toBeTruthy();
+		expect(screen.getByText("3 AI-analyses over")).toBeTruthy();
 		expect(screen.getByRole("button", { name: "Afmelden" })).toBeTruthy();
 	});
 

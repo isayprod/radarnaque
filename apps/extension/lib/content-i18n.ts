@@ -50,7 +50,12 @@ type AiKey =
 	| "ai.title"
 	| "ai.badgeTag"
 	| "ai.run"
-	| "ai.runPhotos"
+	| "ai.launch"
+	| "ai.launchShort"
+	| "ai.retry"
+	| "ai.noScansLeft"
+	| "ai.noPhoto"
+	| "ai.howAnalyzed"
 	| "ai.loading"
 	| "ai.accessLoading"
 	| "ai.login"
@@ -90,7 +95,9 @@ type DebugKey =
 	| "debug.rescan"
 	| "debug.systemPrompt"
 	| "debug.messages"
-	| "debug.rawResponse";
+	| "debug.rawResponse"
+	| "debug.searches"
+	| "debug.reasoning";
 
 export type ContentKey = Exclude<TextKey, RuleId>;
 
@@ -128,7 +135,12 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"ai.title": "Analyse IA",
 		"ai.badgeTag": "IA",
 		"ai.run": "Lancer une analyse IA",
-		"ai.runPhotos": "Analyse avec photos",
+		"ai.launch": "Analyser avec l'IA",
+		"ai.launchShort": "Analyser",
+		"ai.retry": "Relancer",
+		"ai.noScansLeft": "Plus d'analyses IA ce mois-ci",
+		"ai.noPhoto": "Analysée sans photo",
+		"ai.howAnalyzed": "Comment l'IA a analysé",
 		"ai.loading": "Analyse en cours…",
 		"ai.accessLoading": "Chargement…",
 		"ai.login": "Se connecter",
@@ -186,6 +198,8 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"debug.systemPrompt": "Prompt système",
 		"debug.messages": "Messages envoyés",
 		"debug.rawResponse": "Réponse brute",
+		"debug.searches": "Recherches web",
+		"debug.reasoning": "Réflexion",
 	},
 	nl: {
 		"level.low": "Laag risico",
@@ -221,7 +235,12 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"ai.title": "AI-analyse",
 		"ai.badgeTag": "AI",
 		"ai.run": "AI-analyse starten",
-		"ai.runPhotos": "Analyse met foto's",
+		"ai.launch": "Analyseren met AI",
+		"ai.launchShort": "Analyseren",
+		"ai.retry": "Opnieuw proberen",
+		"ai.noScansLeft": "Geen AI-analyses meer deze maand",
+		"ai.noPhoto": "Geanalyseerd zonder foto",
+		"ai.howAnalyzed": "Hoe de AI analyseerde",
 		"ai.loading": "Analyse bezig…",
 		"ai.accessLoading": "Laden…",
 		"ai.login": "Aanmelden",
@@ -279,6 +298,8 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"debug.systemPrompt": "Systeemprompt",
 		"debug.messages": "Verzonden berichten",
 		"debug.rawResponse": "Ruw antwoord",
+		"debug.searches": "Webzoekopdrachten",
+		"debug.reasoning": "Redenering",
 	},
 };
 

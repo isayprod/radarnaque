@@ -123,7 +123,7 @@ export const sampleDebug: NonNullable<AnalysisResult["debug"]> = {
 		{ role: "user", content: "[image 1 : 2048 octets]" },
 	],
 	model: "modele-test",
-	promptVersion: { scanKind: "text", version: 2 },
+	promptVersion: { scanKind: "full", version: 1 },
 	provider: "fournisseur-test",
 	rawResponse: '{"score": 55}',
 	reasoning: "",

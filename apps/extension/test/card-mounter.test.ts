@@ -7,9 +7,11 @@ import {
 	type CardUi,
 	createCardMounter,
 } from "../lib/content/card-mounter";
+import { startProgress } from "../lib/content/scan-progress";
 
 const view = (status: "idle" | "loading"): CardView => ({
-	state: { status },
+	state:
+		status === "idle" ? { status } : { status, progress: startProgress(0) },
 	locale: "fr",
 	onActivate: () => {},
 });

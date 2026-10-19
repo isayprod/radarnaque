@@ -19,8 +19,8 @@ const fr = {
 	"code.resent": "Email renvoyé.",
 	"code.changeEmail": "Changer d'adresse",
 
-	"account.remaining": "Scans restants",
-	"account.totalCap": "Scans d'essai restants",
+	"account.scansLeft": "{count} analyses IA restantes",
+	"account.scansLeftOne": "{count} analyse IA restante",
 	"action.signOut": "Se déconnecter",
 
 	"plan.trial": "Essai",
@@ -29,9 +29,6 @@ const fr = {
 	"plan.none": "Aucun abonnement actif",
 	"plan.unlimited": "Administrateur · illimité",
 	"plan.superuser": "Superuser (dev)",
-
-	"scan.text": "Analyses texte",
-	"scan.image": "Analyses avec photos",
 
 	"error.invalid_email": "Adresse email invalide.",
 	"error.rate_limited":
@@ -63,8 +60,8 @@ const nl: Record<MessageKey, string> = {
 	"code.resent": "E-mail opnieuw verzonden.",
 	"code.changeEmail": "Ander adres gebruiken",
 
-	"account.remaining": "Resterende scans",
-	"account.totalCap": "Resterende proefscans",
+	"account.scansLeft": "{count} AI-analyses over",
+	"account.scansLeftOne": "{count} AI-analyse over",
 	"action.signOut": "Afmelden",
 
 	"plan.trial": "Proef",
@@ -73,9 +70,6 @@ const nl: Record<MessageKey, string> = {
 	"plan.none": "Geen actief abonnement",
 	"plan.unlimited": "Beheerder · onbeperkt",
 	"plan.superuser": "Superuser (dev)",
-
-	"scan.text": "Tekstanalyses",
-	"scan.image": "Analyses met foto's",
 
 	"error.invalid_email": "Ongeldig e-mailadres.",
 	"error.rate_limited":

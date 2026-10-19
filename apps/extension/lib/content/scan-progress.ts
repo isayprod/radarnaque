@@ -106,8 +106,11 @@ function stageLine(e: Stage, t: (key: ContentKey) => string): string {
 	}
 }
 
-/** Texte d'un événement ; vide pour un résumé de réflexion encore vide. */
-function eventLine(e: ScanProgressEvent, locale: Locale): string {
+/**
+ * Texte d'un événement, sans limite de longueur (le déroulé du panneau) ; vide pour
+ * un résumé de réflexion encore vide. La ligne d'état le coupe (`statusLine`).
+ */
+export function eventLine(e: ScanProgressEvent, locale: Locale): string {
 	const t = (key: ContentKey) => contentText(locale, key);
 	switch (e.type) {
 		case "stage":
