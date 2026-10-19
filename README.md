@@ -277,7 +277,7 @@ le coût de chaque analyse est lu dans l'en-tête `X-OmniRoute-Response-Cost`.
 
 ```sh
 ollama serve                         # http://localhost:11434 ; sinon OLLAMA_BASE_URL dans infra/.env
-ollama pull <modèle>                 # par exemple qwen2.5:7b ; un modèle « vision » (les analyses joignent des photos)
+ollama pull <modèle>                 # par exemple qwen2.5:7b ; un modèle « vision » (analyses avec photos)
 cd services/api && uv run --env-file ../../infra/.env radarnaque-llm use ollama <modèle> --kind full
 ```
 
@@ -294,10 +294,10 @@ contrairement à la pastille (voir « 6. Tester sur les vrais sites »), la stac
 1. `pnpm dev` est lancé (stack et extension : voir « 2. Lancer la stack »).
 2. Le compte est connecté depuis la popup de l'extension (email, puis code à 6 chiffres, lu
    dans les logs `[auth]` en dev). Un compte neuf a un essai de 3 scans au total.
-3. Un fournisseur LLM est actif pour les types `text` (et `image`, pour tester les photos) :
-   le faux fournisseur `stub` (sans réseau), `Groq` ou `openai-oauth`. Voir les sections
-   « Faux fournisseur (`stub`) », « Groq » et « Abonnement ChatGPT/Codex (`openai-oauth`) »
-   ci-dessus. `radarnaque-llm list` donne le modèle actif.
+3. Un fournisseur LLM est actif pour le type `full`, le seul utilisé (les analyses joignent des
+   photos : il faut un modèle vision) : le faux fournisseur `stub` (sans réseau), `Groq` ou
+   `openai-oauth`. Voir les sections « Faux fournisseur (`stub`) », « Groq » et « Abonnement
+   ChatGPT/Codex (`openai-oauth`) » ci-dessus. `radarnaque-llm list` donne le modèle actif.
 
 ### Sur une annonce (2ememain, 2dehands ou Facebook Marketplace)
 
@@ -403,7 +403,7 @@ Facebook Marketplace.
   `pnpm llm:stub` lancé pour `stub`, clé valide et quota non atteint pour Groq, proxy
   `npx openai-oauth` lancé pour `openai-oauth`. Les logs `[api]` donnent la raison.
 - **« Vous avez utilisé toutes vos analyses… »** : le quota est épuisé. Un essai n'a que 3
-  scans au total, texte et photos confondus ; se connecter depuis la popup avec une
+  scans au total ; se connecter depuis la popup avec une
   nouvelle adresse email crée un compte neuf, donc un nouvel essai de 3 scans.
 - **Pas d'icône « R » sur une recherche** : le compte est-il en essai, premium ou admin ? la
   page est-elle bien une recherche (`/q/…`, `/l/…`) et non une fiche ? Une annonce
