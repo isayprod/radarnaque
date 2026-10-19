@@ -404,6 +404,72 @@ Facebook Marketplace.
   page est-elle bien une recherche (`/q/…`, `/l/…`) et non une fiche ? Une annonce
   professionnelle (`a…`), dont la fiche n'est pas encore prise en charge, n'en a jamais.
 
+## Superuser de développement
+
+Un compte « superuser » sert à essayer les analyses IA sans compter : aucun quota, aucune
+limite de requêtes, toutes les fonctionnalités (photos, icônes des cartes). Il voit aussi tout
+ce qui se passe pendant une analyse. La popup affiche « Superuser (dev) ».
+
+### L'activer
+
+1. Ajouter `DEV_SUPERUSER_EMAIL=<email>` dans `infra/.env` (jamais commité : le dépôt est
+   public).
+2. Relancer `pnpm dev`. Au démarrage, le service auth donne le rôle `superuser` à ce compte
+   et le crée s'il n'existe pas.
+3. Se connecter normalement depuis la popup avec cette adresse.
+
+Changer la variable ne rétrograde pas l'ancien compte. Si besoin, dans la base :
+`update "user" set role = 'user' where email = '<email>';`
+
+Pour un autre compte, sans toucher à `infra/.env` :
+
+```bash
+pnpm dev:superuser <email>
+```
+
+Codes de sortie : `1` compte inconnu, `2` production, `64` argument absent ou invalide.
+
+> Au tout premier démarrage, le log de l'auth peut afficher une erreur d'initialisation de
+> l'essai (« trial bootstrap ») tant que l'API n'est pas encore lancée. Elle est sans gravité.
+
+### Où voir les logs
+
+| Où | Comment l'ouvrir |
+|---|---|
+| Console de l'API | Le terminal de `pnpm dev`, lignes `[api]` : blocs `[debug superuser]`. |
+| Console de la page | Sur la fiche ou la page de recherche : DevTools (F12), onglet Console, filtre « Radarnaque debug ». |
+| Console du service worker | `chrome://extensions`, carte Radarnaque, lien « service worker », onglet Console. |
+| Panneau | Section « Debug (superuser) » du badge, avec les boutons « Copier » et « Relancer sans cache ». |
+
+Ce que chacun montre :
+
+- **Console de la page :** l'annonce extraite et ses champs manquants, les règles locales
+  (score, niveau, signaux), la requête envoyée (sans l'identité du vendeur) et la réponse
+  reçue, avec le bloc `debug`.
+- **Console du service worker :** la requête envoyée à l'API (sans l'identité du vendeur), la
+  réponse avec le bloc `debug`, ou le code d'erreur. Après une mise en veille du service
+  worker, les logs reprennent au scan suivant.
+- **Console de l'API :** le fournisseur et le modèle, le prompt système, les messages envoyés
+  au modèle, la réponse brute, le cache (résultat servi du cache ou nouvel appel), les
+  tokens, le coût, les durées et les empreintes (hashes).
+- **Panneau :** les mêmes éléments du bloc `debug`, repliés. « Copier » met le bloc complet
+  en JSON dans le presse-papiers.
+
+Jamais affichés : les clés d'API, les jetons de session et le contenu des images. Le bloc
+`debug` n'est jamais conservé dans le stockage local du navigateur.
+
+### Relancer sans cache
+
+Le bouton « Relancer sans cache » du panneau force un nouvel appel au modèle, même si
+l'annonce a déjà été analysée. Le résultat remplace l'analyse partagée, sur place. Il est
+sans effet pour les autres rôles.
+
+### Inactif en production
+
+Le rôle est ignoré par l'API quand `ENV=production`, et le service auth refuse de
+l'attribuer quand `NODE_ENV=production`. Rien de tout cela n'existe donc pour un vrai
+utilisateur.
+
 ## Changer de fournisseur
 
 En production, les modèles sont ceux d'OpenRouter (clé `OPENROUTER_API_KEY` dans

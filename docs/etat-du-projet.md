@@ -22,6 +22,7 @@ Radarnaque est une extension Chrome, Edge et Brave qui signale les annonces susp
 | 3a | Serveur des analyses IA (fournisseurs LLM, quotas, cache, photos) | `main` | fusionnée |
 | 3b | Analyses IA dans l'extension (panneau, icônes sur les cartes) | `feat/phase-3b` | terminée, non poussée |
 | 3c | L'IA remplace l'analyse locale, prompt v2, annonces professionnelles | `feat/phase-3c` (au-dessus de 3b) | terminée, non poussée |
+| — | Superuser de développement (logs de debug, relance sans cache) | `feat/superuser-debug` (au-dessus de 3c) | terminée, non poussée |
 | 4 | Administration, suppression du compte, purge à 12 mois | — | à faire |
 | 5 | Paiement Stripe | — | à faire (les routes répondent 501) |
 | — | Passe de design (identité visuelle, maquettes) | — | à faire en dernier |
@@ -96,6 +97,12 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
 - **Sécurité :**
   - les content scripts ne peuvent envoyer que trois messages au service worker ;
   - le service worker est le seul à détenir la session et le JWT.
+
+### Superuser de développement
+- **Rôle `superuser`, réservé au développement :** aucun quota ni limite de requêtes, toutes les fonctionnalités. Il s'attribue avec `DEV_SUPERUSER_EMAIL` (`infra/.env`) ou `pnpm dev:superuser <email>`. L'API l'ignore en production.
+- **Logs de debug :** console de l'API (`[debug superuser]`), console de la page et du service worker (« Radarnaque debug »), section « Debug (superuser) » du panneau.
+- **« Relancer sans cache » :** force un nouvel appel au modèle et rafraîchit l'analyse partagée.
+- Voir le [README](../README.md#superuser-de-développement).
 
 ### Site
 - La page `/auth/callback` reçoit la connexion par lien magique.
