@@ -1,11 +1,12 @@
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from radarnaque_api.auth.deps import current_user
+from radarnaque_api.auth.privileges import privileges_of
 from radarnaque_api.db import get_session
 from radarnaque_api.models import AuthUser, Feature, PlanFeature
 from radarnaque_api.schemas import MeOut, QuotaOut
@@ -17,17 +18,21 @@ router = APIRouter()
 
 @router.get("/api/me", response_model=MeOut)
 async def me(
+    request: Request,
     user: Annotated[AuthUser, Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> MeOut:
+    privileges = privileges_of(user, request.app.state.settings)
     sub = await get_active_subscription(session, user.id)
 
-    if user.role == "admin":
+    # Compte illimité : admin, ou superuser hors production (seul à avoir le debug). En
+    # production, le superuser n'a aucun privilège et suit le chemin ordinaire, en `user`.
+    if privileges.unlimited:
         features = (await session.execute(select(Feature.code).order_by(Feature.code))).scalars()
         return MeOut(
             user_id=user.id,
             email=user.email,
-            role="admin",
+            role="superuser" if privileges.debug else "admin",
             plan=sub.plan if sub else None,
             features=list(features),
             unlimited=True,

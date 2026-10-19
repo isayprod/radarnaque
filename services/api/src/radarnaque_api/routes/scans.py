@@ -8,6 +8,7 @@ from fastapi.routing import APIRoute
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from radarnaque_api.auth.deps import current_user
+from radarnaque_api.auth.privileges import privileges_of
 from radarnaque_api.db import get_session
 from radarnaque_api.errors import validation_issues
 from radarnaque_api.models import AuthUser
@@ -65,6 +66,7 @@ async def create_scan(
     return await run_scan(
         engine=state.engine,
         user=user,
+        privileges=privileges_of(user, state.settings),
         scan=scan,
         llm_for=state.llm_for,
         http=state.http_images,

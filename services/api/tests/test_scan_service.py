@@ -13,6 +13,8 @@ from PIL import Image
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
+from radarnaque_api.auth.privileges import privileges_of
+from radarnaque_api.config import Settings
 from radarnaque_api.errors import ApiError
 from radarnaque_api.llm.client import Bilingual, LLMAnalysis, LLMError, LLMReason, LLMResult
 from radarnaque_api.llm.providers import ProviderError
@@ -36,6 +38,15 @@ from radarnaque_api.services.usage import compute_usage
 T0 = datetime(2026, 10, 17, 10, 0, tzinfo=UTC)
 PUBLIC_IP = "93.184.216.34"
 IMAGE_URLS = ["https://images.2dehands.com/api/a.jpg", "https://images.2dehands.com/api/b.jpg"]
+_SETTINGS = {
+    "database_url": "postgres://u:p@h/d",
+    "jwks_url": "http://j",
+    "jwt_issuer": "i",
+    "jwt_audience": "a",
+    "internal_api_secret": "s" * 32,
+}
+TEST_SETTINGS = Settings(env="test", **_SETTINGS)
+PRODUCTION_SETTINGS = Settings(env="production", **_SETTINGS)
 
 
 class Clock:
@@ -191,10 +202,14 @@ def _scan(
     return ScanIn.model_validate(body)
 
 
-async def _scan_once(engine, user, scan, llm, http, clock, **kw) -> AnalysisResultOut:
+async def _scan_once(
+    engine, user, scan, llm, http, clock, *, settings: Settings = TEST_SETTINGS, **kw
+) -> AnalysisResultOut:
+    """Un scan avec les privilèges que `settings` (hors production par défaut) donne à `user`."""
     return await run_scan(
         engine=engine,
         user=user,
+        privileges=privileges_of(user, settings),
         scan=scan,
         llm_for=llm.llm_for,
         http=http,
@@ -537,7 +552,13 @@ async def test_unknown_provider_is_a_configuration_failure(engine, http, clock, 
 
     with pytest.raises(ScanError) as info:
         await run_scan(
-            engine=engine, user=user, scan=_scan(), llm_for=llm_for, http=http, now=clock
+            engine=engine,
+            user=user,
+            privileges=privileges_of(user, TEST_SETTINGS),
+            scan=_scan(),
+            llm_for=llm_for,
+            http=http,
+            now=clock,
         )
     assert (info.value.status, info.value.details) == (502, {"reason": "configuration"})
     assert (await _scalar(engine, select(ScanFailure))).error_code == "configuration"
@@ -788,6 +809,54 @@ async def test_admin_without_subscription_can_scan_everything(engine, http, mock
     assert await _count(engine, ScanEvent, ScanEvent.user_id == admin.id) == 1
 
 
+async def test_superuser_without_subscription_has_every_feature_and_no_quota(
+    engine, http, mock, clock, llm
+):
+    mock.get(IMAGE_URLS[0]).respond(200, content=_png())
+    superuser = await _user(engine, role="superuser", plan=None)
+
+    for i in range(5):  # plus que les 3 scans de l'essai
+        result = await _scan_once(
+            engine,
+            superuser,
+            _scan(
+                description=f"annonce {i}", images=IMAGE_URLS[:1], scanKind="image", trigger="card"
+            ),
+            llm,
+            http,
+            clock,
+        )
+        assert result.remaining.model_dump() == {"text": None, "image": None, "total": None}
+
+    assert await _count(engine, ScanEvent, ScanEvent.user_id == superuser.id) == 5
+    assert await _count(engine, Subscription, Subscription.user_id == superuser.id) == 0
+
+
+async def test_superuser_in_production_is_an_ordinary_user(engine, http, clock, llm):
+    superuser = await _user(engine, role="superuser", plan=None)
+    with pytest.raises(ScanError) as info:
+        await _scan_once(engine, superuser, _scan(), llm, http, clock, settings=PRODUCTION_SETTINGS)
+    assert (info.value.status, info.value.code) == (402, "no_active_subscription")
+    assert await _count(engine, ScanEvent) == 0
+
+
+async def test_superuser_in_production_keeps_the_trial_quota(engine, http, clock, llm):
+    superuser = await _user(engine, role="superuser")
+    for i in range(3):
+        await _scan_once(
+            engine,
+            superuser,
+            _scan(description=f"annonce {i}"),
+            llm,
+            http,
+            clock,
+            settings=PRODUCTION_SETTINGS,
+        )
+    with pytest.raises(ScanError) as info:
+        await _scan_once(engine, superuser, _scan(), llm, http, clock, settings=PRODUCTION_SETTINGS)
+    assert (info.value.status, info.value.code) == (402, "quota_exhausted")
+
+
 async def test_quota_exhausted_gives_402_with_plan_and_kind(engine, http, clock, llm):
     user = await _user(engine)
     for i in range(3):
@@ -815,6 +884,41 @@ async def test_rate_limit_applies_to_admins_too(engine, http, clock, llm):
     clock.advance(seconds=61)
     await _scan_once(engine, admin, _scan(), llm, http, clock)
     assert len(llm.calls) == 1
+
+
+async def test_superuser_is_not_rate_limited(engine, http, clock, llm):
+    superuser = await _user(engine, role="superuser", plan=None)
+    for _ in range(31):
+        await _scan_once(engine, superuser, _scan(), llm, http, clock)
+    assert await _count(engine, ScanEvent, ScanEvent.user_id == superuser.id) == 31
+
+
+async def test_superuser_concurrent_scans_are_not_rate_limited(engine, http, clock, llm):
+    # Le recomptage atomique de `_reserve` ne s'applique pas non plus au superuser.
+    superuser = await _user(engine, role="superuser", plan=None)
+    async with AsyncSession(engine) as session:
+        for _ in range(29):
+            session.add(
+                ScanEvent(user_id=superuser.id, scan_kind="text", trigger="button", created_at=T0)
+            )
+        await session.commit()
+
+    results = await asyncio.gather(
+        *(_scan_once(engine, superuser, _scan(), llm, http, clock) for _ in range(4)),
+        return_exceptions=True,
+    )
+
+    assert all(isinstance(r, AnalysisResultOut) for r in results), results
+    assert await _count(engine, ScanEvent, ScanEvent.user_id == superuser.id) == 33
+
+
+async def test_superuser_in_production_is_rate_limited(engine, http, clock, llm):
+    superuser = await _user(engine, role="superuser", plan="standard")
+    for _ in range(30):
+        await _scan_once(engine, superuser, _scan(), llm, http, clock, settings=PRODUCTION_SETTINGS)
+    with pytest.raises(ScanError) as info:
+        await _scan_once(engine, superuser, _scan(), llm, http, clock, settings=PRODUCTION_SETTINGS)
+    assert (info.value.status, info.value.code) == (429, "rate_limited")
 
 
 async def test_rate_limit_applies_to_a_standard_user(engine, http, clock, llm):

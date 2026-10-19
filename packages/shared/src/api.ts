@@ -290,7 +290,7 @@ export interface components {
              * Role
              * @enum {string}
              */
-            role: "user" | "admin";
+            role: "user" | "admin" | "superuser";
             totalCap: components["schemas"]["QuotaOut"] | null;
             /** Unlimited */
             unlimited: boolean;

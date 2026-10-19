@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
+from radarnaque_api.auth.privileges import Privileges
 from radarnaque_api.errors import ApiError
 from radarnaque_api.images import (
     MAX_IMAGES,
@@ -176,18 +177,26 @@ async def _validated_site(session: AsyncSession, scan: ScanIn) -> tuple[int, lis
 
 
 async def _reserve(
-    session: AsyncSession, user: AuthUser, scan: ScanIn, at: datetime, rate_limit: int
+    session: AsyncSession,
+    user: AuthUser,
+    privileges: Privileges,
+    scan: ScanIn,
+    at: datetime,
+    rate_limit: int,
 ) -> int:
     """Étape 5, en une transaction. Un verrou consultatif propre à l'utilisateur couvre le
     recomptage de la limite de requêtes et l'insertion de l'événement : des scans simultanés ne
     la dépassent pas, admins compris. Puis l'abonnement actif est verrouillé (`FOR UPDATE`) le
-    temps de compter le quota. Un admin passe sans abonnement ni comptage du quota, mais son
-    événement est enregistré. Les deux verrous sont toujours pris dans cet ordre."""
-    await session.execute(
-        select(func.pg_advisory_xact_lock(func.hashtextextended(f"rate:{user.id}", 0)))
-    )
-    await _check_rate_limit(session, user.id, rate_limit, at)
-    if user.role != "admin":
+    temps de compter le quota. Un compte illimité (admin, superuser hors production) passe sans
+    abonnement ni comptage du quota, mais son événement est enregistré. Les deux verrous sont
+    toujours pris dans cet ordre. Le superuser hors production n'est pas soumis à la limite :
+    il ne prend aucun des deux."""
+    if privileges.rate_limited:
+        await session.execute(
+            select(func.pg_advisory_xact_lock(func.hashtextextended(f"rate:{user.id}", 0)))
+        )
+        await _check_rate_limit(session, user.id, rate_limit, at)
+    if not privileges.unlimited:
         sub = (
             await session.execute(
                 select(Subscription)
@@ -219,7 +228,11 @@ async def _reserve(
 
 
 async def _admit(
-    session: AsyncSession, user: AuthUser, scan: ScanIn, now: Callable[[], datetime]
+    session: AsyncSession,
+    user: AuthUser,
+    privileges: Privileges,
+    scan: ScanIn,
+    now: Callable[[], datetime],
 ) -> _Admission:
     """Étapes 1 à 5. Une `ScanError` levée ici ne laisse aucun événement."""
     settings = (await session.execute(select(AppSettings))).scalar_one()
@@ -227,13 +240,16 @@ async def _admit(
     rate_limit = settings.rate_limit_per_minute
     cache_ttl = timedelta(hours=settings.cache_ttl_hours)
     # Premier contrôle sans verrou, pour refuser tôt ; `_reserve` recompte sous verrou.
-    await _check_rate_limit(session, user.id, rate_limit, now())
-    if user.role != "admin":
+    if privileges.rate_limited:
+        await _check_rate_limit(session, user.id, rate_limit, now())
+    # Toutes les fonctionnalités vont de pair avec l'absence de quota (admin, superuser hors
+    # production) : ni l'offre ni l'abonnement ne sont alors consultés.
+    if not privileges.all_features:
         await _check_rights(session, user.id, scan)
     site_id, suffixes = await _validated_site(session, scan)
     snapshot_id = await upsert_snapshot(session, site_id, scan.listing, now())
     event_at = now()  # date de l'événement, et de l'analyse qu'il produira (règle R8)
-    event_id = await _reserve(session, user, scan, event_at, rate_limit)
+    event_id = await _reserve(session, user, privileges, scan, event_at, rate_limit)
     return _Admission(
         event_id=event_id,
         event_at=event_at,
@@ -354,9 +370,11 @@ async def _give_back(
     )
 
 
-async def _remaining(session: AsyncSession, user: AuthUser, at: datetime) -> RemainingOut:
-    sub = None if user.role == "admin" else await get_active_subscription(session, user.id)
-    if sub is None:  # admin : illimité
+async def _remaining(
+    session: AsyncSession, user: AuthUser, privileges: Privileges, at: datetime
+) -> RemainingOut:
+    sub = None if privileges.unlimited else await get_active_subscription(session, user.id)
+    if sub is None:  # compte illimité
         return RemainingOut(text=None, image=None, total=None)
     usage = await compute_usage(session, sub, at)
     per_kind = {kind: q.remaining for kind, q in usage.per_kind.items()}
@@ -368,7 +386,7 @@ async def _remaining(session: AsyncSession, user: AuthUser, at: datetime) -> Rem
 
 
 async def _result(
-    engine: AsyncEngine, user: AuthUser, event_id: int, at: datetime
+    engine: AsyncEngine, user: AuthUser, privileges: Privileges, event_id: int, at: datetime
 ) -> AnalysisResultOut:
     """Réponse du scan `event_id`, déjà relié à son analyse.
 
@@ -387,7 +405,7 @@ async def _result(
             )
         ).one()
         texts = await load_analysis(session, analysis.id)
-        remaining = await _remaining(session, user, at)
+        remaining = await _remaining(session, user, privileges, at)
     return AnalysisResultOut(
         analysis_id=analysis.id,
         score=analysis.score,
@@ -407,6 +425,7 @@ async def run_scan(
     *,
     engine: AsyncEngine,
     user: AuthUser,
+    privileges: Privileges,
     scan: ScanIn,
     llm_for: Callable[[str], LLMClient],
     http: httpx.AsyncClient,
@@ -416,13 +435,14 @@ async def run_scan(
     """Lance un scan pour `user` et renvoie le résultat ; lève `ScanError` pour un refus (402,
     403, 422, 429) ou un échec de l'analyse (502).
 
-    `llm_for(code)` donne le client du fournisseur du modèle actif. `http` est le client dédié
-    aux photos (règles R6/R7 : `trust_env=False`, `follow_redirects=False`, ni en-têtes, ni
-    cookies, ni authentification partagés), jamais celui du LLM. `resolve` remplace la
-    résolution DNS des hôtes d'images (tests)."""
+    `privileges` : ceux de `user` (`privileges_of`), qui décident de la limite de requêtes, des
+    droits et du quota. `llm_for(code)` donne le client du fournisseur du modèle actif. `http`
+    est le client dédié aux photos (règles R6/R7 : `trust_env=False`, `follow_redirects=False`,
+    ni en-têtes, ni cookies, ni authentification partagés), jamais celui du LLM. `resolve`
+    remplace la résolution DNS des hôtes d'images (tests)."""
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as session:
-        admission = await _admit(session, user, scan, now)
+        admission = await _admit(session, user, privileges, scan, now)
 
     failure: Exception | None = None
     try:
@@ -438,4 +458,4 @@ async def run_scan(
     if failure is not None:  # hors du `except` : aucun contexte chaîné à l'erreur rendue
         await _give_back(maker, admission.event_id, failure, now())
 
-    return await _result(engine, user, admission.event_id, now())
+    return await _result(engine, user, privileges, admission.event_id, now())

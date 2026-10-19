@@ -87,6 +87,15 @@ def settings(pg_url: str) -> Settings:
     )
 
 
+@pytest.fixture
+def production(app: FastAPI, settings: Settings) -> Settings:
+    """Fait tourner l'application `app` en production : une configuration revalidée avec
+    `env="production"`, lue par les routes dans `app.state.settings`."""
+    prod = Settings.model_validate({**settings.model_dump(), "env": "production"})
+    app.state.settings = prod
+    return prod
+
+
 @pytest.fixture(scope="session")
 def test_key_pair() -> KeyPair:
     """Paire de clés Ed25519 dont la partie publique est servie par le JWKS de test."""

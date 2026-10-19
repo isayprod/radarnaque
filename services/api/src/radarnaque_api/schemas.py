@@ -197,7 +197,7 @@ class QuotaOut(CamelModel):
 class MeOut(CamelModel):
     user_id: str
     email: str
-    role: Literal["user", "admin"]
+    role: Literal["user", "admin", "superuser"]
     plan: str | None
     features: list[str]
     unlimited: bool
