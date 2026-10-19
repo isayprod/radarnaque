@@ -1,4 +1,4 @@
-import type { AnalysisResult } from "@radarnaque/shared";
+import type { AnalysisResult, ScanProgressEvent } from "@radarnaque/shared";
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import {
@@ -7,13 +7,12 @@ import {
 	createAccessCache,
 	RECHECK_MS,
 } from "../lib/content/access-policy";
-import type { AiClient } from "../lib/content/ai-client";
+import type { AiClient, ScanHandle } from "../lib/content/ai-client";
 import {
 	type AiResultStore,
 	listingFingerprint,
 	NO_REMAINING,
 	type StoredAiResult,
-	type StoredAiResults,
 } from "../lib/content/ai-results";
 import { type BadgeView, useAiScan } from "../lib/content/use-ai-scan";
 import {
@@ -43,10 +42,11 @@ const fail = (code: string): BgResponse<never> => ({
 
 const active: ContentAccess = {
 	status: "active",
-	features: ["image_scan"],
+	features: ["ai"],
 	unlimited: false,
 	debug: false,
-	remaining: { text: 3, image: 3, total: null },
+	maxImages: 4,
+	remaining: { scans: 3 },
 };
 
 const report: RiskReport = {
@@ -77,10 +77,26 @@ const viewOf = (externalId: string): BadgeView => ({
 	listing: listingOf(externalId),
 });
 
-/** Client simulé : chaque appel renvoie une promesse résolue depuis le test. */
+const photos: ScanProgressEvent = { type: "stage", stage: "photos", count: 1 };
+const search: ScanProgressEvent = {
+	type: "search",
+	id: 1,
+	query: "vélo prix",
+	aspect: "price",
+};
+
+/** Une analyse lancée par le faux client : son issue et ses événements viennent du test. */
+interface FakeScan {
+	request: ScanRequest;
+	/** Événement de progression, relayé tel que le port le ferait. */
+	emit(e: ScanProgressEvent): void;
+	resolve(response: BgResponse<AnalysisResult>): void;
+	cancel: ReturnType<typeof vi.fn<ScanHandle["cancel"]>>;
+}
+
+/** Client simulé : chaque appel renvoie une promesse (ou une analyse) menée depuis le test. */
 function fakeClient() {
-	const scans: Array<ReturnType<typeof deferred<BgResponse<AnalysisResult>>>> =
-		[];
+	const scans: FakeScan[] = [];
 	const accesses: Array<
 		ReturnType<typeof deferred<BgResponse<ContentAccess>>>
 	> = [];
@@ -91,11 +107,20 @@ function fakeClient() {
 			accesses.push(d);
 			return d.promise;
 		}),
-		scan: vi.fn((_request: ScanRequest) => {
-			const d = deferred<BgResponse<AnalysisResult>>();
-			scans.push(d);
-			return d.promise;
-		}),
+		scan: vi.fn(
+			(request: ScanRequest, onEvent: (e: ScanProgressEvent) => void) => {
+				const d = deferred<BgResponse<AnalysisResult>>();
+				// Comme le vrai client : `cancel()` résout l'issue avec `cancelled`.
+				const cancel = vi.fn(() => d.resolve(fail("cancelled")));
+				scans.push({
+					request,
+					emit: (e) => act(() => onEvent(e)),
+					resolve: d.resolve,
+					cancel,
+				});
+				return { done: d.promise, cancel };
+			},
+		),
 		openLogin: vi.fn(() => {
 			const d = deferred<BgResponse<null>>();
 			logins.push(d);
@@ -131,6 +156,16 @@ function setup(
 /** Laisse les promesses déjà résolues propager leurs mises à jour d'état. */
 const settle = () => act(async () => {});
 
+/** Analyse en cours, quelle que soit sa progression. */
+const LOADING = expect.objectContaining({ status: "loading" });
+
+/** Analyse terminée par un scan : elle garde sa progression. */
+const doneWith = (result: AnalysisResult) => ({
+	status: "done",
+	result,
+	progress: expect.objectContaining({ steps: expect.any(Array) }),
+});
+
 describe("useAiScan : accès", () => {
 	test("aucun appel avant loadAccess, puis un seul même si loadAccess est rappelé", async () => {
 		const t = setup();
@@ -165,10 +200,10 @@ describe("useAiScan : accès", () => {
 		await settle();
 
 		// Deux scans terminés : deux relectures, qui répondent dans l'ordre inverse.
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		t.scans[0]?.resolve(ok(sampleAnalysis));
 		await settle();
-		act(() => t.result.current.scan("image"));
+		act(() => t.result.current.scan());
 		t.scans[1]?.resolve(ok(sampleAnalysis));
 		await settle();
 		expect(t.client.access).toHaveBeenCalledTimes(3);
@@ -261,50 +296,115 @@ describe("useAiScan : accès", () => {
 });
 
 describe("useAiScan : scans", () => {
-	test("double appel à scan('text') pendant le premier : un seul client.scan", async () => {
+	test("double appel à scan() pendant le premier : un seul client.scan", async () => {
 		const t = setup();
+		expect(t.result.current.ai).toEqual({ status: "idle" });
 		act(() => {
-			t.result.current.scan("text");
-			t.result.current.scan("text");
+			t.result.current.scan();
+			t.result.current.scan();
 		});
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		expect(t.client.scan).toHaveBeenCalledTimes(1);
-		expect(t.result.current.text).toEqual({ status: "loading" });
+		expect(t.result.current.ai).toEqual({
+			status: "loading",
+			progress: expect.objectContaining({ steps: [], last: null }),
+		});
 
 		t.scans[0]?.resolve(ok(sampleAnalysis));
 		await settle();
-		expect(t.result.current.text).toEqual({
-			status: "done",
-			result: sampleAnalysis,
-		});
-		expect(t.result.current.image).toEqual({ status: "idle" });
+		expect(t.result.current.ai).toEqual(doneWith(sampleAnalysis));
 	});
 
-	test("la requête contient l'annonce complète, signals et rulesVersion du rapport", () => {
+	test("la requête contient l'annonce complète, signals et rulesVersion du rapport, sans scanKind", () => {
 		const t = setup();
-		act(() => t.result.current.scan("image"));
-		expect(t.client.scan).toHaveBeenCalledWith({
-			listing: listingOf("m1"),
-			signals: report.signals,
-			rulesVersion: 2,
-			scanKind: "image",
-			trigger: "button",
-			partial: false,
-		});
+		act(() => t.result.current.scan());
+		expect(t.client.scan).toHaveBeenCalledWith(
+			{
+				listing: listingOf("m1"),
+				signals: report.signals,
+				rulesVersion: 2,
+				trigger: "button",
+				partial: false,
+			},
+			expect.any(Function),
+		);
 	});
 
-	test("la clé change pendant un scan : la réponse est ignorée, text reste idle", async () => {
-		const t = setup(viewOf("m1"));
-		act(() => t.result.current.scan("text"));
-		t.rerender({ view: viewOf("m2") });
-		expect(t.result.current.text).toEqual({ status: "idle" });
+	test("progress events update loading state", () => {
+		const t = setup();
+		act(() => t.result.current.scan());
+		t.scans[0]?.emit(photos);
+		t.scans[0]?.emit(search);
+		const state = t.result.current.ai;
+		expect(state.status).toBe("loading");
+		if (state.status !== "loading") return;
+		expect(state.progress.steps.map((s) => s.event)).toEqual([photos, search]);
+		expect(state.progress.last).toEqual(search);
+	});
 
+	test("done keeps progress", async () => {
+		const t = setup();
+		act(() => t.result.current.scan());
+		t.scans[0]?.emit(photos);
+		t.scans[0]?.emit(search);
 		t.scans[0]?.resolve(ok(sampleAnalysis));
 		await settle();
-		expect(t.result.current.text).toEqual({ status: "idle" });
+		const state = t.result.current.ai;
+		expect(state).toEqual(doneWith(sampleAnalysis));
+		if (state.status !== "done") return;
+		expect(state.progress?.steps.map((s) => s.event)).toEqual([photos, search]);
+	});
+
+	test("navigation to another listing cancels the scan and ignores its events", async () => {
+		const store = fakeStore();
+		const t = setup(viewOf("m1"), store);
+		act(() => t.result.current.loadAccess());
+		t.accesses[0]?.resolve(ok(active));
+		await settle();
+		act(() => t.result.current.scan());
+		t.scans[0]?.emit(photos);
+
+		t.rerender({ view: viewOf("m2") });
+		// Point 4 de Review Focus : le port de l'ancienne annonce est fermé.
+		expect(t.scans[0]?.cancel).toHaveBeenCalledTimes(1);
+		expect(t.result.current.ai).toEqual({ status: "idle" });
+
+		// Événement et issue tardifs de l'ancienne annonce : rien ne change.
+		t.scans[0]?.emit(search);
+		t.scans[0]?.resolve(ok(sampleAnalysis));
+		await settle();
+		expect(t.result.current.ai).toEqual({ status: "idle" });
+		// `cancelled` : ni relecture de l'accès, ni écriture.
+		expect(t.client.access).toHaveBeenCalledTimes(1);
+		expect(store.put).not.toHaveBeenCalled();
+
 		// La nouvelle annonce peut lancer son propre scan.
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		expect(t.client.scan).toHaveBeenCalledTimes(2);
+		expect(t.scans[1]?.request.listing.externalId).toBe("m2");
+	});
+
+	test("unmount cancels", async () => {
+		const t = setup();
+		act(() => t.result.current.scan());
+		t.scans[0]?.emit(photos);
+		const before = t.result.current;
+		t.unmount();
+		expect(t.scans[0]?.cancel).toHaveBeenCalledTimes(1);
+
+		t.scans[0]?.emit(search);
+		await settle();
+		expect(t.result.current).toBe(before);
+		expect(t.client.access).not.toHaveBeenCalled();
+	});
+
+	test("un scan terminé n'est pas annulé au changement d'annonce", async () => {
+		const t = setup(viewOf("m1"));
+		act(() => t.result.current.scan());
+		t.scans[0]?.resolve(ok(sampleAnalysis));
+		await settle();
+		t.rerender({ view: viewOf("m2") });
+		expect(t.scans[0]?.cancel).not.toHaveBeenCalled();
 	});
 
 	test("R8 : la clé change, l'accès actif est gardé sans relecture", async () => {
@@ -333,21 +433,21 @@ describe("useAiScan : scans", () => {
 
 	test("I2 : même annonce, description modifiée après un scan : retour à idle (analyse locale)", async () => {
 		const t = setup(viewOf("m1"));
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		t.scans[0]?.resolve(ok(sampleAnalysis));
 		await settle();
 		t.rerender({
 			view: { report, listing: listingOf("m1", { description: "Autre." }) },
 		});
-		expect(t.result.current.text).toEqual({ status: "idle" });
+		expect(t.result.current.ai).toEqual({ status: "idle" });
 		// Un nouveau scan est possible sur l'annonce modifiée.
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		expect(t.client.scan).toHaveBeenCalledTimes(2);
 	});
 
-	test("I2 : même annonce, autres champs (photos, vendeur) modifiés : états conservés", async () => {
+	test("I2 : même annonce, autres champs (photos, vendeur) modifiés : état conservé", async () => {
 		const t = setup(viewOf("m1"));
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		t.scans[0]?.resolve(ok(sampleAnalysis));
 		await settle();
 		t.rerender({
@@ -356,30 +456,32 @@ describe("useAiScan : scans", () => {
 				listing: listingOf("m1", { images: [], seller: { name: "B" } }),
 			},
 		});
-		expect(t.result.current.text.status).toBe("done");
+		expect(t.result.current.ai.status).toBe("done");
 	});
 
 	test("I2 : annonce modifiée pendant le scan : le résultat de l'ancienne version n'est pas affiché", async () => {
 		const t = setup(viewOf("m1"));
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		t.rerender({
 			view: { report, listing: listingOf("m1", { title: "Vélo neuf" }) },
 		});
+		// Même annonce : le scan n'est pas annulé.
+		expect(t.scans[0]?.cancel).not.toHaveBeenCalled();
 		t.scans[0]?.resolve(ok(sampleAnalysis));
 		await settle();
-		expect(t.result.current.text).toEqual({ status: "idle" });
+		expect(t.result.current.ai).toEqual({ status: "idle" });
 	});
 
-	test("fail('session_expired') : text en erreur et accès relu", async () => {
+	test("fail('session_expired') : ai en erreur et accès relu", async () => {
 		const t = setup();
 		act(() => t.result.current.loadAccess());
 		t.accesses[0]?.resolve(ok(active));
 		await settle();
 
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		t.scans[0]?.resolve(fail("session_expired"));
 		await settle();
-		expect(t.result.current.text).toEqual({
+		expect(t.result.current.ai).toEqual({
 			status: "error",
 			code: "session_expired",
 		});
@@ -393,12 +495,27 @@ describe("useAiScan : scans", () => {
 		expect(t.result.current.access).toEqual({ status: "signedOut" });
 	});
 
+	test.each(["stream_interrupted", "timeout"])(
+		"fail('%s') : ai en erreur, un nouveau scan est possible",
+		async (code) => {
+			const t = setup();
+			act(() => t.result.current.scan());
+			t.scans[0]?.emit(photos);
+			t.scans[0]?.resolve(fail(code));
+			await settle();
+			expect(t.result.current.ai).toEqual({ status: "error", code });
+			act(() => t.result.current.scan());
+			expect(t.client.scan).toHaveBeenCalledTimes(2);
+			expect(t.result.current.ai).toEqual(LOADING);
+		},
+	);
+
 	test("pendant la relecture de l'accès, l'accès précédent reste affiché", async () => {
 		const t = setup();
 		act(() => t.result.current.loadAccess());
 		t.accesses[0]?.resolve(ok(active));
 		await settle();
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		t.scans[0]?.resolve(ok(sampleAnalysis));
 		await settle();
 		expect(t.client.access).toHaveBeenCalledTimes(2);
@@ -410,14 +527,11 @@ describe("useAiScan : scans", () => {
 		act(() => t.result.current.loadAccess());
 		t.accesses[0]?.resolve(ok(active));
 		await settle();
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		t.scans[0]?.resolve(ok(sampleAnalysis));
 		await settle();
 		expect(t.client.access).toHaveBeenCalledTimes(2);
-		const after: ContentAccess = {
-			...active,
-			remaining: { text: 2, image: 3, total: null },
-		};
+		const after: ContentAccess = { ...active, remaining: { scans: 2 } };
 		t.accesses[1]?.resolve(ok(after));
 		await settle();
 		expect(t.result.current.access).toEqual(after);
@@ -431,7 +545,7 @@ describe("useAiScan : démontage", () => {
 		act(() => t.result.current.loadAccess());
 		t.accesses[0]?.resolve(ok(active));
 		await settle();
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		const before = t.result.current;
 		t.unmount();
 
@@ -476,67 +590,46 @@ describe("useAiScan : connexion", () => {
 });
 
 /**
- * Magasin simulé : par `site|externalId`, une entrée ou une liste d'entrées
- * (une par type), rendues telles quelles ; lectures résolues tout de suite.
+ * Magasin simulé : une entrée par `site|externalId`, rendue telle quelle ;
+ * lectures résolues tout de suite.
  */
-function fakeStore(
-	initial: Record<string, StoredAiResult | StoredAiResult[]> = {},
-) {
-	const entries: Record<string, StoredAiResults> = {};
-	for (const [key, value] of Object.entries(initial))
-		entries[key] = slotsOf(...[value].flat());
+function fakeStore(initial: Record<string, StoredAiResult> = {}) {
+	const entries: Record<string, StoredAiResult> = { ...initial };
 	return {
 		get: vi.fn<AiResultStore["get"]>(
 			async (site, id) => entries[`${site}|${id}`] ?? null,
 		),
 		put: vi.fn<AiResultStore["put"]>(async (site, id, entry) => {
-			const key = `${site}|${id}`;
-			entries[key] = { ...entries[key], [entry.scanKind]: entry };
+			entries[`${site}|${id}`] = entry;
 		}),
 		prune: vi.fn<AiResultStore["prune"]>(async () => {}),
 	} satisfies AiResultStore;
 }
 
-/** Entrées rangées par type, comme `get` les rend. */
-const slotsOf = (...list: StoredAiResult[]): StoredAiResults =>
-	Object.fromEntries(list.map((e) => [e.scanKind, e]));
-
 /** Résultat tel qu'adopté : sans le quota restant de l'époque (I1). */
 const adopted = { ...sampleAnalysis, remaining: NO_REMAINING };
+
+/** État d'un résultat repris du magasin : sans progression (rien n'a été suivi). */
+const ADOPTED = { status: "done", result: adopted, progress: null };
 
 const storedFor = (
 	listing: Listing,
 	overrides: Partial<StoredAiResult> = {},
 ): StoredAiResult => ({
 	result: sampleAnalysis,
-	scanKind: "text",
 	fingerprint: listingFingerprint(listing),
 	storedAt: 1,
 	...overrides,
 });
 
 describe("useAiScan : résultats gardés 24 h", () => {
-	test("entrée stockée, même empreinte : done sans appel à client.scan", async () => {
+	test("stored result adopted without scan", async () => {
 		const store = fakeStore({ "2ememain.be|m1": storedFor(listingOf("m1")) });
 		const t = setup(viewOf("m1"), store);
 		await settle();
 		expect(store.get).toHaveBeenCalledWith("2ememain.be", "m1");
-		expect(t.result.current.text).toEqual({
-			status: "done",
-			result: adopted,
-		});
-		expect(t.result.current.image).toEqual({ status: "idle" });
+		expect(t.result.current.ai).toEqual(ADOPTED);
 		expect(t.client.scan).not.toHaveBeenCalled();
-	});
-
-	test("entrée de type image : c'est l'état image qui passe à done", async () => {
-		const store = fakeStore({
-			"2ememain.be|m1": storedFor(listingOf("m1"), { scanKind: "image" }),
-		});
-		const t = setup(viewOf("m1"), store);
-		await settle();
-		expect(t.result.current.image.status).toBe("done");
-		expect(t.result.current.text).toEqual({ status: "idle" });
 	});
 
 	test("I1 : entrée stockée avec un quota (scans = 3) : aucun compteur repris", async () => {
@@ -550,83 +643,18 @@ describe("useAiScan : résultats gardés 24 h", () => {
 		});
 		const t = setup(viewOf("m1"), store);
 		await settle();
-		const text = t.result.current.text;
-		expect(text.status).toBe("done");
-		expect(text.status === "done" && text.result.remaining).toEqual({
+		const ai = t.result.current.ai;
+		expect(ai.status).toBe("done");
+		expect(ai.status === "done" && ai.result.remaining).toEqual({
 			scans: null,
 		});
 	});
 
-	test("R4 : texte et photos stockés, tous deux valables : les deux à done", async () => {
-		const store = fakeStore({
-			"2ememain.be|m1": [
-				storedFor(listingOf("m1")),
-				storedFor(listingOf("m1"), {
-					scanKind: "image",
-					result: { ...sampleAnalysis, analysisId: 8 },
-				}),
-			],
-		});
-		const t = setup(viewOf("m1"), store);
-		await settle();
-		expect(t.result.current.text).toEqual({ status: "done", result: adopted });
-		expect(t.result.current.image).toEqual({
-			status: "done",
-			result: { ...adopted, analysisId: 8 },
-		});
-		expect(t.client.scan).not.toHaveBeenCalled();
-	});
-
-	test("R4 : chaque type est adopté seul (photos d'une autre empreinte, texte partiel)", async () => {
-		const store = fakeStore({
-			"2ememain.be|m1": [
-				storedFor(listingOf("m1"), {
-					result: { ...sampleAnalysis, partial: true },
-				}),
-				storedFor(listingOf("m1"), { scanKind: "image" }),
-			],
-			"2ememain.be|m2": [
-				storedFor(listingOf("m2")),
-				storedFor(listingOf("m2", { title: "Ancien" }), { scanKind: "image" }),
-			],
-		});
-		const t = setup(viewOf("m1"), store);
-		await settle();
-		expect(t.result.current.text).toEqual({ status: "idle" });
-		expect(t.result.current.image.status).toBe("done");
-		t.rerender({ view: viewOf("m2") });
-		await settle();
-		expect(t.result.current.text.status).toBe("done");
-		expect(t.result.current.image).toEqual({ status: "idle" });
-	});
-
-	test("R4 : un scan photos en cours n'empêche pas l'adoption du texte", async () => {
-		const pending = deferred<StoredAiResults | null>();
-		const store = fakeStore();
-		store.get.mockImplementationOnce(() => pending.promise);
-		const t = setup(viewOf("m1"), store);
-		act(() => t.result.current.scan("image"));
-		pending.resolve(
-			slotsOf(
-				storedFor(listingOf("m1")),
-				storedFor(listingOf("m1"), { scanKind: "image" }),
-			),
-		);
-		await settle();
-		expect(t.result.current.text.status).toBe("done");
-		expect(t.result.current.image).toEqual({ status: "loading" });
-	});
-
 	test("I2 : entrée restaurée, puis prix changé sous la même clé : idle", async () => {
-		const store = fakeStore({
-			"2ememain.be|m1": [
-				storedFor(listingOf("m1")),
-				storedFor(listingOf("m1"), { scanKind: "image" }),
-			],
-		});
+		const store = fakeStore({ "2ememain.be|m1": storedFor(listingOf("m1")) });
 		const t = setup(viewOf("m1"), store);
 		await settle();
-		expect(t.result.current.text.status).toBe("done");
+		expect(t.result.current.ai.status).toBe("done");
 		t.rerender({
 			view: {
 				report,
@@ -635,8 +663,7 @@ describe("useAiScan : résultats gardés 24 h", () => {
 				}),
 			},
 		});
-		expect(t.result.current.text).toEqual({ status: "idle" });
-		expect(t.result.current.image).toEqual({ status: "idle" });
+		expect(t.result.current.ai).toEqual({ status: "idle" });
 		expect(t.client.scan).not.toHaveBeenCalled();
 	});
 
@@ -646,7 +673,7 @@ describe("useAiScan : résultats gardés 24 h", () => {
 		});
 		const t = setup(viewOf("m1"), store);
 		await settle();
-		expect(t.result.current.text).toEqual({ status: "idle" });
+		expect(t.result.current.ai).toEqual({ status: "idle" });
 		expect(t.client.scan).not.toHaveBeenCalled();
 	});
 
@@ -658,7 +685,7 @@ describe("useAiScan : résultats gardés 24 h", () => {
 		});
 		const t = setup(viewOf("m1"), store);
 		await settle();
-		expect(t.result.current.text).toEqual({ status: "idle" });
+		expect(t.result.current.ai).toEqual({ status: "idle" });
 	});
 
 	test("entrée partielle (carte Facebook) : idle", async () => {
@@ -669,81 +696,78 @@ describe("useAiScan : résultats gardés 24 h", () => {
 		});
 		const t = setup(viewOf("m1"), store);
 		await settle();
-		expect(t.result.current.text).toEqual({ status: "idle" });
+		expect(t.result.current.ai).toEqual({ status: "idle" });
 	});
 
 	test("après un scan réussi, l'entrée est écrite avec l'empreinte de l'annonce scannée", async () => {
 		const store = fakeStore();
 		const t = setup(viewOf("m1"), store);
-		act(() => t.result.current.scan("image"));
+		act(() => t.result.current.scan());
 		// L'annonce change pendant le scan : l'empreinte reste celle du clic.
 		t.rerender({
 			view: { report, listing: listingOf("m1", { description: "Autre." }) },
 		});
 		const result = { ...sampleAnalysis, analysisId: 7 };
+		t.scans[0]?.emit(photos);
 		t.scans[0]?.resolve(ok(result));
 		await settle();
 		expect(store.put).toHaveBeenCalledTimes(1);
-		expect(store.put).toHaveBeenCalledWith(
-			"2ememain.be",
-			"m1",
-			expect.objectContaining({
-				result,
-				scanKind: "image",
-				fingerprint: listingFingerprint(listingOf("m1")),
-				storedAt: expect.any(Number),
-			}),
-		);
+		// Une seule place par annonce, sans type ni progression.
+		expect(store.put).toHaveBeenCalledWith("2ememain.be", "m1", {
+			result,
+			fingerprint: listingFingerprint(listingOf("m1")),
+			storedAt: expect.any(Number),
+		});
 	});
 
 	test("scan en échec : rien n'est écrit", async () => {
 		const store = fakeStore();
 		const t = setup(viewOf("m1"), store);
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		t.scans[0]?.resolve(fail("quota_exceeded"));
 		await settle();
 		expect(store.put).not.toHaveBeenCalled();
 	});
 
 	test("scan terminé avant la lecture du magasin : la lecture ne l'écrase pas", async () => {
-		const pending = deferred<StoredAiResults | null>();
+		const pending = deferred<StoredAiResult | null>();
 		const store = fakeStore();
 		store.get.mockImplementationOnce(() => pending.promise);
 		const t = setup(viewOf("m1"), store);
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		const fresh = { ...sampleAnalysis, analysisId: 99 };
 		t.scans[0]?.resolve(ok(fresh));
 		await settle();
-		pending.resolve(slotsOf(storedFor(listingOf("m1"))));
+		pending.resolve(storedFor(listingOf("m1")));
 		await settle();
-		expect(t.result.current.text).toEqual({ status: "done", result: fresh });
+		expect(t.result.current.ai).toEqual(doneWith(fresh));
 	});
 
-	test("lecture du magasin pendant un scan du même type : le scan en cours l'emporte", async () => {
-		const pending = deferred<StoredAiResults | null>();
+	test("lecture du magasin pendant un scan : le scan en cours l'emporte", async () => {
+		const pending = deferred<StoredAiResult | null>();
 		const store = fakeStore();
 		store.get.mockImplementationOnce(() => pending.promise);
 		const t = setup(viewOf("m1"), store);
-		act(() => t.result.current.scan("text"));
-		pending.resolve(slotsOf(storedFor(listingOf("m1"))));
+		act(() => t.result.current.scan());
+		pending.resolve(storedFor(listingOf("m1")));
 		await settle();
-		expect(t.result.current.text).toEqual({ status: "loading" });
+		expect(t.result.current.ai).toEqual(LOADING);
 	});
 
 	test("nouvelle annonce : le magasin est relu pour elle ; la lecture de l'ancienne est ignorée", async () => {
-		const slow = deferred<StoredAiResults | null>();
+		const slow = deferred<StoredAiResult | null>();
 		const store = fakeStore({ "2ememain.be|m2": storedFor(listingOf("m2")) });
 		store.get.mockImplementationOnce(() => slow.promise);
 		const t = setup(viewOf("m1"), store);
 		t.rerender({ view: viewOf("m2") });
 		await settle();
 		expect(store.get).toHaveBeenLastCalledWith("2ememain.be", "m2");
-		expect(t.result.current.text.status).toBe("done");
-		// La réponse tardive pour m1 n'est pas appliquée à m2 (empreinte de m1 identique).
+		expect(t.result.current.ai.status).toBe("done");
+		// La réponse tardive pour m1 n'est pas appliquée à m3 (empreinte identique).
 		t.rerender({ view: viewOf("m3") });
-		slow.resolve(slotsOf(storedFor(listingOf("m3"))));
+		slow.resolve(storedFor(listingOf("m3")));
 		await settle();
-		expect(t.result.current.text).toEqual({ status: "idle" });
+		expect(t.result.current.ai).toEqual({ status: "idle" });
 	});
 
 	test("même annonce, nouveaux rendus : le magasin n'est lu qu'une fois", async () => {
@@ -764,11 +788,11 @@ describe("useAiScan : résultats gardés 24 h", () => {
 		store.put.mockRejectedValue(new Error("indisponible"));
 		const t = setup(viewOf("m1"), store);
 		await settle();
-		expect(t.result.current.text).toEqual({ status: "idle" });
-		act(() => t.result.current.scan("text"));
+		expect(t.result.current.ai).toEqual({ status: "idle" });
+		act(() => t.result.current.scan());
 		t.scans[0]?.resolve(ok(sampleAnalysis));
 		await settle();
-		expect(t.result.current.text.status).toBe("done");
+		expect(t.result.current.ai.status).toBe("done");
 	});
 });
 
@@ -790,65 +814,82 @@ function fakeSink() {
 describe("useAiScan : relance sans cache (superuser)", () => {
 	test("un scan ordinaire n'envoie pas noCache", () => {
 		const t = setup();
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		expect(t.client.scan.mock.calls[0]?.[0]).not.toHaveProperty("noCache");
 	});
 
-	test("rescan envoie la même requête avec noCache: true, pour le type demandé", async () => {
+	test("rescan envoie la même requête avec noCache: true", async () => {
 		const t = setup();
-		act(() => t.result.current.scan("image"));
+		act(() => t.result.current.scan());
 		t.scans[0]?.resolve(ok(debugAnalysis));
 		await settle();
-		act(() => t.result.current.rescan("image"));
+		act(() => t.result.current.rescan());
 		const [first, second] = t.client.scan.mock.calls.map((c) => c[0]);
 		expect(second).toEqual({ ...first, noCache: true });
-		expect(second?.scanKind).toBe("image");
 	});
 
-	test("sticky : le résultat reste affiché pendant la relance, puis il est remplacé", async () => {
+	test("rescan keeps result displayed", async () => {
 		const t = setup();
-		act(() => t.result.current.scan("text"));
+		expect(t.result.current.rescanning).toBe(false);
+		expect(t.result.current.rescanError).toBeNull();
+		act(() => t.result.current.scan());
 		t.scans[0]?.resolve(ok(debugAnalysis));
 		await settle();
+		const displayed = t.result.current.ai;
 
-		act(() => t.result.current.rescan("text"));
+		act(() => t.result.current.rescan());
 		// Pas de retour à `loading` (analyse locale) : seul le bouton l'indique.
-		expect(t.result.current.text).toEqual({
-			status: "done",
-			result: debugAnalysis,
-		});
-		expect(t.result.current.rescanning.text).toBe(true);
+		expect(t.result.current.ai).toBe(displayed);
+		expect(t.result.current.rescanning).toBe(true);
+		// Les événements de la relance ne remplacent pas le résultat affiché.
+		t.scans[1]?.emit(photos);
+		expect(t.result.current.ai).toBe(displayed);
 		// Double clic pendant la relance : ignoré.
-		act(() => t.result.current.rescan("text"));
+		act(() => t.result.current.rescan());
+		act(() => t.result.current.scan());
 		expect(t.client.scan).toHaveBeenCalledTimes(2);
 
 		const fresh = { ...debugAnalysis, score: 90, level: "high" as const };
 		t.scans[1]?.resolve(ok(fresh));
 		await settle();
-		expect(t.result.current.text).toEqual({ status: "done", result: fresh });
-		expect(t.result.current.rescanning.text).toBeFalsy();
+		const state = t.result.current.ai;
+		expect(state).toEqual(doneWith(fresh));
+		// Le déroulé de la relance accompagne le nouveau résultat.
+		expect(state.status === "done" && state.progress?.steps).toHaveLength(1);
+		expect(t.result.current.rescanning).toBe(false);
 	});
 
 	test("relance en erreur : le résultat reste, l'erreur est gardée à part, effacée à la relance suivante", async () => {
 		const t = setup();
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		t.scans[0]?.resolve(ok(debugAnalysis));
 		await settle();
-		act(() => t.result.current.rescan("text"));
+		act(() => t.result.current.rescan());
 		t.scans[1]?.resolve(fail("rate_limited"));
 		await settle();
-		expect(t.result.current.text).toEqual({
-			status: "done",
-			result: debugAnalysis,
-		});
-		expect(t.result.current.rescanError.text).toBe("rate_limited");
-		expect(t.result.current.rescanning.text).toBeFalsy();
+		expect(t.result.current.ai).toEqual(doneWith(debugAnalysis));
+		expect(t.result.current.rescanError).toBe("rate_limited");
+		expect(t.result.current.rescanning).toBe(false);
 
-		act(() => t.result.current.rescan("text"));
-		expect(t.result.current.rescanError.text).toBeUndefined();
+		act(() => t.result.current.rescan());
+		expect(t.result.current.rescanError).toBeNull();
 		t.scans[2]?.resolve(ok(debugAnalysis));
 		await settle();
-		expect(t.result.current.rescanError.text).toBeUndefined();
+		expect(t.result.current.rescanError).toBeNull();
+	});
+
+	test("relance annulée par un changement d'annonce : ni erreur, ni relance en cours", async () => {
+		const t = setup(viewOf("m1"));
+		act(() => t.result.current.scan());
+		t.scans[0]?.resolve(ok(debugAnalysis));
+		await settle();
+		act(() => t.result.current.rescan());
+		t.rerender({ view: viewOf("m2") });
+		expect(t.scans[1]?.cancel).toHaveBeenCalledTimes(1);
+		await settle();
+		expect(t.result.current.ai).toEqual({ status: "idle" });
+		expect(t.result.current.rescanning).toBe(false);
+		expect(t.result.current.rescanError).toBeNull();
 	});
 
 	test("relance en erreur de session : l'accès en cache est invalidé, le résultat reste", async () => {
@@ -856,18 +897,18 @@ describe("useAiScan : relance sans cache (superuser)", () => {
 		act(() => t.result.current.loadAccess());
 		t.accesses[0]?.resolve(ok({ ...active, debug: true }));
 		await settle();
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		t.scans[0]?.resolve(ok(debugAnalysis));
 		await settle();
 		t.accesses[1]?.resolve(ok({ ...active, debug: true }));
 		await settle();
 		expect(t.cache.current()).not.toBeNull();
 
-		act(() => t.result.current.rescan("text"));
+		act(() => t.result.current.rescan());
 		t.scans[1]?.resolve(fail("session_expired"));
 		await settle();
-		expect(t.result.current.text.status).toBe("done");
-		expect(t.result.current.rescanError.text).toBe("session_expired");
+		expect(t.result.current.ai.status).toBe("done");
+		expect(t.result.current.rescanError).toBe("session_expired");
 		// R8 : cache vidé, l'accès est relu.
 		expect(t.cache.current()).toBeNull();
 		expect(t.client.access).toHaveBeenCalledTimes(3);
@@ -882,13 +923,14 @@ describe("useAiScan : logs de debug (superuser)", () => {
 			undefined,
 			createDebugLog(() => true, sink),
 		);
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		expect(groups()).toEqual([
 			{
 				title: "[Radarnaque debug] scan demandé",
 				data: t.client.scan.mock.calls[0]?.[0],
 			},
 		]);
+		t.scans[0]?.emit(photos);
 		t.scans[0]?.resolve(ok(debugAnalysis));
 		await settle();
 		expect(groups()[1]).toEqual({
@@ -905,13 +947,28 @@ describe("useAiScan : logs de debug (superuser)", () => {
 			undefined,
 			createDebugLog(() => true, sink),
 		);
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		t.scans[0]?.resolve(fail("quota_exhausted"));
 		await settle();
 		expect(groups()[1]).toEqual({
 			title: "[Radarnaque debug] scan reçu",
 			data: { error: "quota_exhausted" },
 		});
+	});
+
+	test("scan annulé (navigation) : aucun « scan reçu »", async () => {
+		const { sink, groups } = fakeSink();
+		const t = setup(
+			viewOf("m1"),
+			undefined,
+			createDebugLog(() => true, sink),
+		);
+		act(() => t.result.current.scan());
+		t.rerender({ view: viewOf("m2") });
+		await settle();
+		expect(groups().map((g) => g.title)).toEqual([
+			"[Radarnaque debug] scan demandé",
+		]);
 	});
 
 	test("utilisateur standard : aucun log", async () => {
@@ -921,7 +978,7 @@ describe("useAiScan : logs de debug (superuser)", () => {
 			undefined,
 			createDebugLog(() => false, sink),
 		);
-		act(() => t.result.current.scan("text"));
+		act(() => t.result.current.scan());
 		t.scans[0]?.resolve(ok(sampleAnalysis));
 		await settle();
 		expect(t.client.scan).toHaveBeenCalledTimes(1);

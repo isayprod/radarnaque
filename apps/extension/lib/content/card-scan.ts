@@ -1,4 +1,4 @@
-import type { AnalysisResult } from "@radarnaque/shared";
+import type { AnalysisResult, ScanProgressEvent } from "@radarnaque/shared";
 import type {
 	CardRef,
 	ExtractResult,
@@ -8,7 +8,7 @@ import type { DebugLog } from "../debug-log";
 import type { Listing } from "../listing/types";
 import type { BgResponse, ScanRequest } from "../messages";
 import { evaluate, type UnknownField } from "../rules/score";
-import type { AiClient } from "./ai-client";
+import { type AiClient, CANCELLED } from "./ai-client";
 
 /** Délai maximal de récupération de la fiche d'une carte. */
 const FETCH_TIMEOUT_MS = 10_000;
@@ -35,6 +35,10 @@ export interface ScanCardDeps {
 	onListing?(listing: Listing): void;
 	/** Logs du superuser (fiche récupérée, scan demandé) ; aucun par défaut. */
 	debugLog?: DebugLog;
+	/** Chaque événement de progression de l'analyse, pour l'icône de la carte. */
+	onEvent?(e: ScanProgressEvent): void;
+	/** Abandon (contrôleur retiré) : l'analyse est annulée, l'issue vaut `cancelled`. */
+	signal?: AbortSignal;
 }
 
 const fail = (code: string): BgResponse<never> => ({
@@ -80,7 +84,8 @@ async function fetchListing(
 /**
  * Analyse IA d'une carte de résultats : la fiche est récupérée et lue en
  * entier ; si elle est illisible, l'annonce lue sur la carte est envoyée en
- * `partial`. Jamais de requête hors de l'origine de la page.
+ * `partial`. Jamais de requête hors de l'origine de la page. Les événements de
+ * l'analyse passent à `onEvent` ; `signal` l'annule (port fermé, scan rendu).
  */
 export async function scanCard(
 	card: CardRef,
@@ -117,16 +122,24 @@ export async function scanCard(
 		partial = true;
 	}
 
+	// Abandonnée pendant la lecture de la fiche : aucune analyse n'est lancée.
+	if (deps.signal?.aborted) return fail(CANCELLED);
 	const report = evaluate(listing, { unknown });
 	deps.onListing?.(listing);
 	const request: ScanRequest = {
 		listing,
 		signals: report.signals,
 		rulesVersion: report.rulesVersion,
-		scanKind: "text",
 		trigger: "card",
 		partial,
 	};
 	deps.debugLog?.group("scan demandé", request);
-	return deps.ai.scan(request);
+	const handle = deps.ai.scan(request, (e) => deps.onEvent?.(e));
+	const abort = () => handle.cancel();
+	deps.signal?.addEventListener("abort", abort, { once: true });
+	try {
+		return await handle.done;
+	} finally {
+		deps.signal?.removeEventListener("abort", abort);
+	}
 }

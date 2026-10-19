@@ -1,4 +1,4 @@
-import type { Locale } from "@radarnaque/shared";
+import type { Locale, ScanProgressEvent } from "@radarnaque/shared";
 import { canUse } from "../access";
 import { adapterFor } from "../adapters/registry";
 import type { CardRef, MarketplaceAdapter } from "../adapters/types";
@@ -11,7 +11,12 @@ import {
 	isContentAccess,
 	RELOGIN_CODES,
 } from "./access-policy";
-import { type AiClient, type ScanState, scanOutcome } from "./ai-client";
+import {
+	type AiClient,
+	CANCELLED,
+	type ScanState,
+	scanOutcome,
+} from "./ai-client";
 import {
 	type AiResultStore,
 	listingFingerprint,
@@ -19,6 +24,7 @@ import {
 } from "./ai-results";
 import { defaultFetchPage, scanCard } from "./card-scan";
 import { BADGE_HOST_TAG, CARD_HOST_TAG } from "./controller";
+import { addEvent, startProgress } from "./scan-progress";
 
 export { CARD_HOST_TAG };
 
@@ -33,7 +39,7 @@ const MAX_REMOUNTS = 3;
 
 const IDLE: ScanState = { status: "idle" };
 
-/** Ce que l'icône d'une carte affiche, et son action au clic. */
+/** Ce que l'icône d'une carte affiche (progression en direct comprise), et son action au clic. */
 export interface CardView {
 	state: ScanState;
 	locale: Locale;
@@ -122,7 +128,8 @@ function mountPointOf(
  * garde l'état du scan de chaque annonce (par `externalId`), qui survit au
  * remontage de son icône. Aucun scan sans clic : un résultat gardé (`aiResults`)
  * est affiché tel quel, même partiel et quelle que soit son empreinte, car la
- * carte ne montre pas toute l'annonce.
+ * carte ne montre pas toute l'annonce. Pendant une analyse, chaque événement
+ * met à jour la progression de sa carte ; `dispose` annule les analyses en cours.
  */
 export function createCardController(deps: CardControllerDeps): {
 	refresh(): Promise<void>;
@@ -157,6 +164,8 @@ export function createCardController(deps: CardControllerDeps): {
 	let stepUrl = "";
 	let queue: Promise<void> = Promise.resolve();
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	/** Annule à `dispose` les analyses en cours : leurs ports sont fermés. */
+	const abort = new AbortController();
 
 	const stateOf = (id: string) => states.get(id) ?? IDLE;
 	const viewOf = (id: string): CardView => ({
@@ -211,10 +220,11 @@ export function createCardController(deps: CardControllerDeps): {
 			(entry) => {
 				// Un clic entre-temps (chargement, résultat, erreur) l'emporte.
 				if (disposed || !entry || stateOf(id).status !== "idle") return;
-				// I1 : jamais le quota restant de l'époque.
+				// I1 : jamais le quota restant de l'époque. Aucun déroulé n'est gardé.
 				setState(id, {
 					status: "done",
 					result: withoutRemaining(entry.result),
+					progress: null,
 				});
 			},
 			() => {},
@@ -230,10 +240,17 @@ export function createCardController(deps: CardControllerDeps): {
 		const adapter = adapterFor(pageUrl);
 		const site = adapter?.siteOf(pageUrl);
 		if (!adapter || !site) return;
-		setState(id, { status: "loading" });
+		let progress = startProgress(Date.now());
+		setState(id, { status: "loading", progress });
 		let scanned: Listing | null = null;
 		const onListing = (listing: Listing) => {
 			scanned = listing;
+		};
+		// L'infobulle suit le dernier événement ; le résultat garde le déroulé.
+		const onEvent = (e: ScanProgressEvent) => {
+			if (disposed || stateOf(id).status !== "loading") return;
+			progress = addEvent(progress, e, Date.now());
+			setState(id, { status: "loading", progress });
 		};
 		void scan(entry.card, {
 			pageUrl,
@@ -242,22 +259,25 @@ export function createCardController(deps: CardControllerDeps): {
 			fetchPage,
 			onListing,
 			debugLog: deps.debugLog,
+			onEvent,
+			signal: abort.signal,
 		})
 			.then(
 				(response): ScanState =>
 					response.ok
-						? { status: "done", result: response.data }
+						? { status: "done", result: response.data, progress }
 						: { status: "error", code: response.error.code },
 				(): ScanState => ({ status: "error", code: "background_unavailable" }),
 			)
 			.then((state) => {
+				// Annulée par `dispose` : ni log, ni écriture, ni état.
+				if (state.status === "error" && state.code === CANCELLED) return;
 				deps.debugLog?.group("scan reçu", scanOutcome(state));
 				// Gardé 24 h avec l'empreinte de l'annonce analysée (fiche ou carte).
 				if (state.status === "done" && scanned)
 					void deps.aiResults
 						?.put(site, id, {
 							result: state.result,
-							scanKind: "text",
 							fingerprint: listingFingerprint(scanned),
 							storedAt: Date.now(),
 						})
@@ -441,6 +461,7 @@ export function createCardController(deps: CardControllerDeps): {
 	function dispose() {
 		if (disposed) return;
 		disposed = true;
+		abort.abort();
 		observer.disconnect();
 		clearTimeout(timer);
 		timer = undefined;

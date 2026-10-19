@@ -9,6 +9,12 @@ import {
 import { type PortLike, type PortMessage, SCAN_PORT } from "../scan-port";
 import type { ScanProgress } from "./scan-progress";
 
+/**
+ * Code de l'issue d'une analyse abandonnée par `cancel()`. Ce n'est pas une erreur :
+ * l'appelant n'affiche rien, ne garde rien et ne relit pas l'accès.
+ */
+export const CANCELLED = "cancelled";
+
 /** Une analyse lancée : son issue, et de quoi l'abandonner (navigation, démontage). */
 export interface ScanHandle {
 	/** Résout toujours, jamais en rejet ; `cancelled` après `cancel()`. */
@@ -127,7 +133,7 @@ function scanByPort(
 		cancel() {
 			if (over) return;
 			// `disconnect()` ne déclenche pas `onDisconnect` de ce côté : l'issue est posée ici.
-			finish(failure("cancelled"));
+			finish(failure(CANCELLED));
 			close();
 		},
 	};

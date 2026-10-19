@@ -7,7 +7,7 @@ import { RiskBadge } from "../components/RiskBadge";
 import type { AiClient } from "../lib/content/ai-client";
 import { contentText } from "../lib/content-i18n";
 import type { Listing } from "../lib/listing/types";
-import type { ContentAccess } from "../lib/messages";
+import type { BgResponse, ContentAccess } from "../lib/messages";
 import type { RiskReport } from "../lib/rules/score";
 import { debugAnalysis, sampleDebug } from "./helpers";
 
@@ -53,7 +53,8 @@ const superuser: ContentAccess = {
 	features: [],
 	unlimited: true,
 	debug: true,
-	remaining: { text: 3, image: null, total: null },
+	maxImages: 4,
+	remaining: { scans: 3 },
 };
 
 const low: RiskReport = {
@@ -67,20 +68,24 @@ describe("RiskBadge : section Debug après une erreur de rendu", () => {
 	test("la section en échec revient avec le résultat de la relance (même analyse)", async () => {
 		const user = userEvent.setup();
 		vi.spyOn(console, "error").mockImplementation(() => {});
-		let answer!: (value: Awaited<ReturnType<AiClient["scan"]>>) => void;
+		let answer!: (value: BgResponse<AnalysisResult>) => void;
+		const reply = vi
+			.fn<() => Promise<BgResponse<AnalysisResult>>>()
+			.mockResolvedValueOnce({ ok: true, data: debugAnalysis })
+			.mockReturnValueOnce(
+				new Promise((resolve) => {
+					answer = resolve;
+				}),
+			);
 		const ai = {
 			access: vi.fn<AiClient["access"]>(async () => ({
 				ok: true,
 				data: superuser,
 			})),
-			scan: vi
-				.fn<AiClient["scan"]>()
-				.mockResolvedValueOnce({ ok: true, data: debugAnalysis })
-				.mockReturnValueOnce(
-					new Promise((resolve) => {
-						answer = resolve;
-					}),
-				),
+			scan: vi.fn<AiClient["scan"]>(() => ({
+				done: reply(),
+				cancel: () => {},
+			})),
 			openLogin: vi.fn<AiClient["openLogin"]>(async () => ({
 				ok: true,
 				data: null,

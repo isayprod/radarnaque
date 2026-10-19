@@ -25,9 +25,9 @@ let ai: AiClient & { scan: ReturnType<typeof vi.fn<AiClient["scan"]>> };
 beforeEach(() => {
 	ai = {
 		access: vi.fn<AiClient["access"]>(),
-		scan: vi.fn<AiClient["scan"]>(async () => ({
-			ok: true,
-			data: sampleAnalysis,
+		scan: vi.fn<AiClient["scan"]>(() => ({
+			done: Promise.resolve({ ok: true, data: sampleAnalysis }),
+			cancel: vi.fn(),
 		})),
 		openLogin: vi.fn<AiClient["openLogin"]>(),
 	};
@@ -72,14 +72,81 @@ describe("scanCard", () => {
 				),
 			),
 		});
-		expect(ai.scan).toHaveBeenCalledExactlyOnceWith({
-			listing: expected.listing,
-			signals: report.signals,
-			rulesVersion: report.rulesVersion,
-			scanKind: "text",
-			trigger: "card",
-			partial: false,
+		expect(ai.scan).toHaveBeenCalledExactlyOnceWith(
+			{
+				listing: expected.listing,
+				signals: report.signals,
+				rulesVersion: report.rulesVersion,
+				trigger: "card",
+				partial: false,
+			},
+			expect.any(Function),
+		);
+		expect(ai.scan.mock.calls[0]?.[0]).not.toHaveProperty("scanKind");
+	});
+
+	test("événements de l'analyse passés à onEvent, dans l'ordre", async () => {
+		const photos = { type: "stage", stage: "photos", count: 1 } as const;
+		const writing = { type: "stage", stage: "writing" } as const;
+		ai.scan.mockImplementationOnce((_req, onEvent) => {
+			onEvent(photos);
+			onEvent(writing);
+			return {
+				done: Promise.resolve({ ok: true, data: sampleAnalysis }),
+				cancel: vi.fn(),
+			};
 		});
+		const onEvent = vi.fn();
+		await scanCard(twhCard(), {
+			pageUrl: TWH_SEARCH,
+			adapter: twhAdapter,
+			ai,
+			fetchPage: vi.fn(async () => FIXED_HTML),
+			onEvent,
+		});
+		expect(onEvent.mock.calls).toEqual([[photos], [writing]]);
+	});
+
+	test("signal annulé pendant l'analyse : le scan est annulé", async () => {
+		const cancel = vi.fn();
+		let settle!: (r: { ok: false; error: { code: string } }) => void;
+		ai.scan.mockImplementationOnce(() => ({
+			done: new Promise((resolve) => {
+				settle = resolve;
+			}),
+			cancel: () => {
+				cancel();
+				settle({ ok: false, error: { code: "cancelled" } });
+			},
+		}));
+		const abort = new AbortController();
+		const pending = scanCard(twhCard(), {
+			pageUrl: TWH_SEARCH,
+			adapter: twhAdapter,
+			ai,
+			fetchPage: vi.fn(async () => FIXED_HTML),
+			signal: abort.signal,
+		});
+		await vi.waitFor(() => expect(ai.scan).toHaveBeenCalledTimes(1));
+		abort.abort();
+		expect(cancel).toHaveBeenCalledTimes(1);
+		expect(await pending).toEqual({ ok: false, error: { code: "cancelled" } });
+	});
+
+	test("signal annulé pendant la lecture de la fiche : cancelled, sans requête", async () => {
+		const abort = new AbortController();
+		const response = await scanCard(twhCard(), {
+			pageUrl: TWH_SEARCH,
+			adapter: twhAdapter,
+			ai,
+			fetchPage: vi.fn(async () => {
+				abort.abort();
+				return FIXED_HTML;
+			}),
+			signal: abort.signal,
+		});
+		expect(response).toEqual({ ok: false, error: { code: "cancelled" } });
+		expect(ai.scan).not.toHaveBeenCalled();
 	});
 
 	test("Facebook, fiche illisible : repli sur la carte, partial true", async () => {
@@ -104,7 +171,6 @@ describe("scanCard", () => {
 			listing,
 			signals: report.signals,
 			rulesVersion: report.rulesVersion,
-			scanKind: "text",
 			trigger: "card",
 			partial: true,
 		});

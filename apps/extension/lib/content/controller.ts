@@ -111,6 +111,10 @@ export function createController(deps: ControllerDeps): {
 	let queue: Promise<void> = Promise.resolve();
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
+	/**
+	 * Pastille retirée (autre annonce sans rechargement, page sans fiche) : son
+	 * analyse IA en cours est annulée avec elle, `useAiScan` fermant le port.
+	 */
 	function clear() {
 		if (!current) return;
 		current.anchor.removeAttribute(MARK_ATTR);

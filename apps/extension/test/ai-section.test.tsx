@@ -5,6 +5,7 @@ import type { ComponentProps } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { AiSection } from "../components/AiSection";
 import type { ScanState } from "../lib/content/ai-client";
+import { startProgress } from "../lib/content/scan-progress";
 import { shownResult } from "../lib/content/shown-result";
 import { contentText } from "../lib/content-i18n";
 import type { ContentAccess } from "../lib/messages";
@@ -418,40 +419,18 @@ describe("AiSection : erreurs", () => {
 });
 
 describe("shownResult", () => {
-	const imageResult: AnalysisResult = { ...result, score: 30, level: "low" };
-
-	test("photos d'abord, sinon texte", () => {
-		expect(
-			shownResult(
-				{ status: "done", result },
-				{ status: "done", result: imageResult },
-			),
-		).toEqual({ kind: "image", result: imageResult });
-		expect(shownResult({ status: "done", result }, idle)).toEqual({
-			kind: "text",
+	test("analyse terminée : son résultat", () => {
+		expect(shownResult({ status: "done", result, progress: null })).toBe(
 			result,
-		});
-		expect(shownResult(idle, { status: "done", result: imageResult })).toEqual({
-			kind: "image",
-			result: imageResult,
-		});
+		);
 	});
 
-	test("en cours ou en erreur : le résultat texte reste affiché", () => {
+	test("aucune analyse terminée : null", () => {
+		expect(shownResult(idle)).toBeNull();
 		expect(
-			shownResult({ status: "done", result }, { status: "loading" }),
-		).toEqual({ kind: "text", result });
-		expect(
-			shownResult({ status: "done", result }, { status: "error", code: "x" }),
-		).toEqual({ kind: "text", result });
-	});
-
-	test("aucun résultat done : null", () => {
-		expect(shownResult(idle, idle)).toBeNull();
-		expect(shownResult({ status: "loading" }, idle)).toBeNull();
-		expect(
-			shownResult({ status: "error", code: "network" }, { status: "loading" }),
+			shownResult({ status: "loading", progress: startProgress(0) }),
 		).toBeNull();
+		expect(shownResult({ status: "error", code: "network" })).toBeNull();
 	});
 });
 
