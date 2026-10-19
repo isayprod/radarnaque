@@ -3,10 +3,12 @@ base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 structured_output = "json_schema"
 cost_source = "usage_cost"
+# Réflexion légère : `reasoning = { effort = "low" }` envoyé dans le corps (API Chat), résumés
+# (`delta.reasoning`) relayés en direct à l'extension.
+reasoning_effort = "low"
 [providers.openrouter.extra_body]
 provider = { data_collection = "deny" }
 usage = { include = true }
-reasoning = { enabled = false }
 
 # Groq : clé gratuite sur console.groq.com (offre gratuite limitée en requêtes et en tokens).
 # JSON simple : la sortie stricte n'est acceptée que par certains modèles. Le modèle vision

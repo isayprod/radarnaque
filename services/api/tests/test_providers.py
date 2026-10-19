@@ -83,8 +83,14 @@ def test_api_defaults_to_chat(tmp_path):
 def test_repo_file_reasoning_effort():
     providers = load_providers(REPO_PROVIDERS)
     assert providers["openai-oauth"].reasoning_effort == "high"
-    others = {p.reasoning_effort for code, p in providers.items() if code != "openai-oauth"}
-    assert others == {"none"}  # openrouter passe à « low » en tâche 6
+    assert providers["openrouter"].reasoning_effort == "low"
+    assert "reasoning" not in providers["openrouter"].extra_body  # plus de `enabled = false`
+    others = {
+        p.reasoning_effort
+        for code, p in providers.items()
+        if code not in ("openai-oauth", "openrouter")
+    }
+    assert others == {"none"}
 
 
 @pytest.mark.parametrize("value", ["none", "low", "medium", "high"])

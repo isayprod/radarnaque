@@ -1,0 +1,16 @@
+data: {"id": "gen-think", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": null}]}
+
+data: {"id": "gen-think", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"reasoning": "Vérif"}, "finish_reason": null}]}
+
+data: {"id": "gen-think", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"reasoning": "ie le prix"}, "finish_reason": null}]}
+
+data: {"id": "gen-think", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"content": "{\"score\": 72, \"professional\": false, \"summary\": {\"fr\": \"Prix"}, "finish_reason": null}]}
+
+data: {"id": "gen-think", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"content": " cohérent avec le marché.\", \"nl\": \"Prijs in lijn met de markt.\"}, \"advice\": {\"fr\": \"Vérifiez l'objet en main propre.\", \"nl\": \"Controleer het toestel ter plaatse.\"}, \"reasons\": [{\"severity\": \"info\", \"fr\": \"Prix proche du marché (exemple.be).\", \"nl\": \"Prijs dicht bij de markt (exemple.be).\"}]}"}, "finish_reason": null}]}
+
+data: {"id": "gen-think", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+
+data: {"id": "gen-think", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [], "usage": {"prompt_tokens": 50, "completion_tokens": 40, "total_tokens": 90}}
+
+data: [DONE]
+

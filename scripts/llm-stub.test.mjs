@@ -105,6 +105,84 @@ test("la réponse est une complétion OpenAI dont le contenu est une LLMAnalysis
 	}
 });
 
+// Blocs SSE d'une réponse en flux : chacun est une ligne `data:`.
+const readEvents = async (response) => {
+	const text = await response.text();
+	assert.ok(text.endsWith("\n\n"), "flux terminé par une ligne vide");
+	const blocks = text.slice(0, -2).split("\n\n");
+	for (const block of blocks) assert.match(block, /^data: /);
+	return blocks.map((block) => block.slice("data: ".length));
+};
+
+test("avec stream: true, la réponse est un flux SSE de morceaux data: puis data: [DONE]", async () => {
+	const { server, lines, port } = await start();
+	try {
+		const response = await post(port, "/v1/chat/completions", {
+			...request("stub-flux"),
+			stream: true,
+			stream_options: { include_usage: true },
+		});
+		assert.equal(response.status, 200);
+		assert.match(response.headers.get("content-type"), /text\/event-stream/);
+		const events = await readEvents(response);
+		assert.equal(events.at(-1), "[DONE]");
+		const chunks = events.slice(0, -1).map((data) => JSON.parse(data));
+		assert.ok(chunks.length > 3, "plusieurs morceaux");
+		for (const chunk of chunks) {
+			assert.equal(chunk.object, "chat.completion.chunk");
+			assert.equal(chunk.model, "stub-flux");
+			assert.equal(chunk.id, chunks[0].id);
+		}
+		// Le dernier morceau porte l'usage, sans choix.
+		const usage = chunks.at(-1);
+		assert.deepEqual(usage.choices, []);
+		assert.equal(usage.usage.prompt_tokens, 100);
+		assert.equal(usage.usage.completion_tokens, 50);
+		const deltas = chunks.slice(0, -1).map((chunk) => chunk.choices[0]);
+		assert.equal(deltas.at(-1).finish_reason, "stop");
+		assert.ok(
+			deltas.slice(0, -1).every((choice) => choice.finish_reason === null),
+		);
+		assert.ok(
+			deltas.some((choice) => typeof choice.delta.reasoning === "string"),
+		);
+		const parts = deltas.map((choice) => choice.delta.content ?? "");
+		assert.ok(
+			parts.filter(Boolean).length > 1,
+			"analyse en plusieurs morceaux",
+		);
+		const analysis = JSON.parse(parts.join(""));
+		assertAnalysis(analysis);
+		assert.equal(analysis.score, 42);
+		assert.ok(deltas.every((choice) => !("tool_calls" in choice.delta)));
+		assert.match(lines[0], /flux=oui/);
+	} finally {
+		await stop(server);
+	}
+});
+
+test("en flux sans stream_options.include_usage, aucun morceau d'usage", async () => {
+	const { server, lines, port } = await start();
+	try {
+		const response = await post(port, "/v1/chat/completions", {
+			...request("stub-flux"),
+			stream: true,
+		});
+		const events = await readEvents(response);
+		assert.equal(events.at(-1), "[DONE]");
+		const chunks = events.slice(0, -1).map((data) => JSON.parse(data));
+		assert.ok(chunks.every((chunk) => chunk.usage === undefined));
+		assert.equal(chunks.at(-1).choices[0].finish_reason, "stop");
+		// Sans `stream: true`, la complétion reste un seul objet JSON.
+		const plain = await post(port, "/v1/chat/completions", request("m"));
+		assert.match(plain.headers.get("content-type"), /application\/json/);
+		assert.equal((await plain.json()).object, "chat.completion");
+		assert.match(lines[1], /flux=non/);
+	} finally {
+		await stop(server);
+	}
+});
+
 test("une ligne de log par requête : modèle, messages, images ; jamais le contenu ni la clé", async () => {
 	const { server, lines, port } = await start();
 	try {
