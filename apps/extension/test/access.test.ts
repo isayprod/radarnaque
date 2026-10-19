@@ -8,7 +8,8 @@ const standardMe: Me = {
 	...trialMe,
 	plan: "standard",
 	features: [],
-	quotas: [{ scanKind: "text", limit: 30, used: 5, remaining: 25 }],
+	maxImages: 1,
+	quotas: [{ scanKind: "full", limit: 150, used: 5, remaining: 145 }],
 	totalCap: null,
 };
 
@@ -26,14 +27,46 @@ const adminMe: Me = {
 const adminWithoutPlanMe: Me = { ...adminMe, plan: null };
 
 describe("accessOf", () => {
-	test("un essai donne ses fonctionnalités et ses quotas restants", () => {
+	test("un essai donne ses fonctionnalités, ses photos et ses scans restants", () => {
 		expect(accessOf(trialMe)).toEqual({
 			status: "active",
-			features: ["card_icons", "image_scan"],
+			features: ["card_icons"],
 			unlimited: false,
 			debug: false,
-			remaining: { text: 3, image: 3, total: 3 },
+			maxImages: 4,
+			remaining: { scans: 3 },
 		});
+	});
+
+	test("remaining.scans vient du quota full, limité par totalCap", () => {
+		const withCap = (quota: number, cap: number) =>
+			accessOf({
+				...trialMe,
+				quotas: [
+					{ scanKind: "full", limit: 10, used: 10 - quota, remaining: quota },
+				],
+				totalCap: { scanKind: null, limit: 10, used: 10 - cap, remaining: cap },
+			});
+		expect(withCap(5, 2)).toMatchObject({ remaining: { scans: 2 } });
+		expect(withCap(1, 4)).toMatchObject({ remaining: { scans: 1 } });
+		expect(withCap(0, 4)).toMatchObject({ remaining: { scans: 0 } });
+		// Plafond seul, ou quota seul.
+		expect(accessOf({ ...trialMe, quotas: [] })).toMatchObject({
+			remaining: { scans: 3 },
+		});
+		expect(accessOf(standardMe)).toMatchObject({
+			maxImages: 1,
+			remaining: { scans: 145 },
+		});
+	});
+
+	test("un quota d'un autre type n'est pas compté", () => {
+		expect(
+			accessOf({
+				...standardMe,
+				quotas: [{ scanKind: "text", limit: 30, used: 0, remaining: 30 }],
+			}),
+		).toMatchObject({ remaining: { scans: null } });
 	});
 
 	test("sans plan, pas d'abonnement", () => {
@@ -48,51 +81,55 @@ describe("accessOf", () => {
 			features: [],
 			unlimited: true,
 			debug: false,
-			remaining: { text: null, image: null, total: null },
+			maxImages: 4,
+			remaining: { scans: null },
 		});
 	});
 
 	test("un admin sans abonnement reste actif", () => {
-		expect(accessOf(adminWithoutPlanMe)).toEqual({
+		expect(accessOf(adminWithoutPlanMe)).toMatchObject({
 			status: "active",
-			features: [],
 			unlimited: true,
-			debug: false,
-			remaining: { text: null, image: null, total: null },
+			remaining: { scans: null },
 		});
 	});
 
-	test("un quota absent vaut null, jamais 0", () => {
-		expect(accessOf(standardMe)).toEqual({
-			status: "active",
-			features: [],
-			unlimited: false,
-			debug: false,
-			remaining: { text: 25, image: null, total: null },
-		});
+	test("un admin à qui l'API renverrait un quota reste sans quota affiché", () => {
+		expect(
+			accessOf({
+				...adminMe,
+				totalCap: { scanKind: null, limit: 3, used: 0, remaining: 3 },
+			}),
+		).toMatchObject({ remaining: { scans: null } });
 	});
 });
 
 describe("superuser", () => {
-	test("superuser : actif, illimité, toutes les fonctionnalités et debug", () => {
+	test("superuser : Premium, illimité, debug, 4 photos", () => {
 		expect(accessOf(superuserMe)).toEqual({
 			status: "active",
-			features: ["card_icons", "image_scan"],
+			features: ["card_icons"],
 			unlimited: true,
 			debug: true,
-			remaining: { text: null, image: null, total: null },
+			maxImages: 4,
+			remaining: { scans: null },
 		});
 	});
 
 	test("superuser : illimité et actif même si l'API omet unlimited et les fonctionnalités", () => {
-		const access = accessOf({ ...superuserMe, unlimited: false, features: [] });
+		const access = accessOf({
+			...superuserMe,
+			plan: null,
+			unlimited: false,
+			features: [],
+		});
 		expect(access).toMatchObject({
 			status: "active",
 			unlimited: true,
 			debug: true,
-			remaining: { text: null, image: null, total: null },
+			remaining: { scans: null },
 		});
-		for (const feature of ["text", "image", "cards"] as const) {
+		for (const feature of ["ai", "cards"] as const) {
 			expect(canUse(access, feature)).toBe(true);
 		}
 	});
@@ -112,16 +149,15 @@ describe("superuser", () => {
 });
 
 describe("canUse", () => {
-	const features = ["text", "image", "cards"] as const;
+	const features = ["ai", "cards"] as const;
 
-	test("standard : texte seulement", () => {
+	test("standard : l'analyse IA seulement", () => {
 		const access = accessOf(standardMe);
-		expect(canUse(access, "text")).toBe(true);
-		expect(canUse(access, "image")).toBe(false);
+		expect(canUse(access, "ai")).toBe(true);
 		expect(canUse(access, "cards")).toBe(false);
 	});
 
-	test("essai : texte, photos et cartes", () => {
+	test("essai : analyse IA et cartes", () => {
 		const access = accessOf(trialMe);
 		for (const feature of features) expect(canUse(access, feature)).toBe(true);
 	});

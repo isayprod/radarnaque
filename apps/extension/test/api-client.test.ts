@@ -9,6 +9,8 @@ import {
 	requestOf,
 	sampleAnalysis,
 	sampleScanIn,
+	sseEvent,
+	sseResponse,
 	trialMe,
 } from "./helpers";
 
@@ -183,5 +185,67 @@ describe("api client", () => {
 		expect((error as ApiRequestError).body.error.details).toEqual(details);
 		expect(fetch).toHaveBeenCalledTimes(1);
 		expect(onUnauthenticated).not.toHaveBeenCalled();
+	});
+
+	test("scanStream posts to /api/scans/stream with the signal and yields the SSE messages", async () => {
+		const jwt = fakeJwt("jwt-1");
+		const fetch = fetchSequence(
+			sseResponse(
+				": ping\n\n",
+				sseEvent("stage", { stage: "photos", count: 1 }),
+				sseEvent("result", sampleAnalysis),
+			),
+		);
+		const api = createApiClient({ jwt, fetch, onUnauthenticated: vi.fn() });
+		const controller = new AbortController();
+		const messages = [];
+		for await (const m of await api.scanStream(
+			sampleScanIn,
+			controller.signal,
+		)) {
+			messages.push(m);
+		}
+		expect(messages).toEqual([
+			{ event: "stage", data: '{"stage":"photos","count":1}' },
+			{ event: "result", data: JSON.stringify(sampleAnalysis) },
+		]);
+		const req = requestOf(fetch);
+		expect(req.url).toBe("http://localhost:8080/api/scans/stream");
+		expect(req.method).toBe("POST");
+		expect(req.headers.get("authorization")).toBe("Bearer jwt-1");
+		expect(req.credentials).toBe("omit");
+		expect(req.body).toEqual(sampleScanIn);
+		expect(fetch.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+	});
+
+	test("scanStream: 401 then stream renews the JWT once; refusals before the stream throw", async () => {
+		const jwt = fakeJwt("old", "new", "jwt-2");
+		const fetch = fetchSequence(
+			errorResponse(401, "unauthenticated"),
+			sseResponse(sseEvent("result", sampleAnalysis)),
+			jsonResponse(402, {
+				error: {
+					code: "quota_exhausted",
+					message: "Quota épuisé",
+					details: {},
+				},
+			}),
+		);
+		const onUnauthenticated = vi.fn();
+		const api = createApiClient({ jwt, fetch, onUnauthenticated });
+		const signal = new AbortController().signal;
+		const messages = [];
+		for await (const m of await api.scanStream(sampleScanIn, signal)) {
+			messages.push(m);
+		}
+		expect(messages).toHaveLength(1);
+		expect(jwt.invalidate).toHaveBeenCalledTimes(1);
+		expect(requestOf(fetch, 1).headers.get("authorization")).toBe("Bearer new");
+		expect(onUnauthenticated).not.toHaveBeenCalled();
+
+		await expect(api.scanStream(sampleScanIn, signal)).rejects.toMatchObject({
+			status: 402,
+			body: { error: { code: "quota_exhausted" } },
+		});
 	});
 });

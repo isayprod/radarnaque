@@ -42,7 +42,7 @@ export class ScanPayloadError extends Error {
  * Tronque en points de code, comme le serveur compte les longueurs : un emoji
  * (paire de substitution) n'est jamais coupé en deux.
  */
-function cut(value: string, max: number): string {
+export function cut(value: string, max: number): string {
 	const chars = Array.from(value);
 	return chars.length <= max ? value : chars.slice(0, max).join("");
 }
@@ -109,7 +109,8 @@ function signal(s: Signal): SignalIn {
 
 /**
  * Point de passage unique vers l'API : retire l'identité du vendeur et applique les
- * bornes d'entrée. Un titre vide (après `trim`) lève `ScanPayloadError("invalid_listing")`.
+ * bornes d'entrée. Seuls les champs connus sont recopiés : un `scanKind` encore envoyé
+ * par la page ne part pas. Un titre vide (après `trim`) lève `ScanPayloadError("invalid_listing")`.
  */
 export function toScanIn(req: ScanRequest): ScanIn {
 	const l = req.listing;
@@ -146,7 +147,6 @@ export function toScanIn(req: ScanRequest): ScanIn {
 			version: req.rulesVersion,
 			signals: req.signals.slice(0, BOUNDS.signals).map(signal),
 		},
-		scanKind: req.scanKind,
 		trigger: req.trigger,
 		partial: req.partial,
 	};
