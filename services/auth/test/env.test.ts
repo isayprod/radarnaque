@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { loadEnv } from "../src/env";
 
 const valid = {
@@ -121,6 +121,27 @@ describe("loadEnv", () => {
 			loadEnv({ ...valid, DEV_SUPERUSER_EMAIL: "  SuperUser@Radarnaque.TEST " })
 				.DEV_SUPERUSER_EMAIL,
 		).toBe("superuser@radarnaque.test");
+	});
+
+	test("in production, DEV_SUPERUSER_EMAIL is ignored (undefined), even when invalid", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			for (const value of ["pas-un-email", "superuser@radarnaque.test"]) {
+				const env = loadEnv({
+					...valid,
+					NODE_ENV: "production",
+					RESEND_API_KEY: "re_x",
+					DEV_SUPERUSER_EMAIL: value,
+				});
+				expect(env.DEV_SUPERUSER_EMAIL).toBeUndefined();
+			}
+			const logged = warn.mock.calls.flat().map(String).join("\n");
+			expect(logged).toMatch(/DEV_SUPERUSER_EMAIL/);
+			expect(logged).not.toContain("pas-un-email");
+			expect(logged).not.toContain("superuser@");
+		} finally {
+			warn.mockRestore();
+		}
 	});
 
 	test("rejects an invalid DEV_SUPERUSER_EMAIL without echoing it", () => {
