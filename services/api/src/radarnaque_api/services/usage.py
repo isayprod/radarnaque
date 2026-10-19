@@ -4,6 +4,8 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from radarnaque_api.auth.privileges import Privileges
+from radarnaque_api.images import MAX_IMAGES
 from radarnaque_api.models import Plan, PlanQuota, ScanEvent, ScanFailure, Subscription
 from radarnaque_api.services.periods import current_period_start
 
@@ -68,3 +70,18 @@ async def compute_usage(session: AsyncSession, sub: Subscription, now: datetime)
         None if cap is None else KindUsage(limit=cap, used=total_used, remaining=cap_remaining or 0)
     )
     return UsageSummary(period_start=period_start, per_kind=per_kind, total=total)
+
+
+async def plan_max_images(
+    session: AsyncSession, plan_code: str | None, privileges: Privileges
+) -> int:
+    """Nombre maximal de photos analysées par scan : `MAX_IMAGES` pour l'admin, celui du plan
+    de substitution pour le superuser hors production, celui du plan du compte sinon ; 0 sans
+    plan."""
+    if privileges.unlimited and privileges.plan_override is None:
+        return MAX_IMAGES
+    code = privileges.plan_override or plan_code
+    if code is None:
+        return 0
+    plan = await session.get(Plan, code)
+    return 0 if plan is None else plan.max_images

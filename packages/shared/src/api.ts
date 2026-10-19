@@ -303,6 +303,8 @@ export interface components {
             email: string;
             /** Features */
             features: string[];
+            /** Maximages */
+            maxImages: number;
             /** Periodstart */
             periodStart: string | null;
             /** Plan */
@@ -343,7 +345,7 @@ export interface components {
              * Scankind
              * @enum {string}
              */
-            scanKind: "text" | "image";
+            scanKind: "text" | "image" | "full";
             /** Version */
             version: number;
         };
@@ -440,7 +442,7 @@ export interface components {
              * Scankind
              * @enum {string}
              */
-            scanKind: "text" | "image";
+            scanKind: "text" | "image" | "full";
             /** Score */
             score: number | null;
             /** Site */
@@ -479,7 +481,7 @@ export interface components {
              * Scankind
              * @enum {string}
              */
-            scanKind: "text" | "image";
+            scanKind: "text" | "image" | "full";
             /**
              * Trigger
              * @enum {string}

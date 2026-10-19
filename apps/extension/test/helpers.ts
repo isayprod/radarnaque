@@ -67,6 +67,7 @@ export const trialMe: Me = {
 	plan: "trial",
 	features: ["card_icons", "image_scan"],
 	unlimited: false,
+	maxImages: 4,
 	periodStart: null,
 	quotas: [
 		{ scanKind: "text", limit: 3, used: 0, remaining: 3 },
@@ -83,6 +84,7 @@ export const superuserMe: Me = {
 	plan: null,
 	features: ["card_icons", "image_scan"],
 	unlimited: true,
+	maxImages: 4,
 	periodStart: null,
 	quotas: [],
 	totalCap: null,

@@ -15,7 +15,7 @@ from radarnaque_api.config import DEFAULT_PROVIDERS_FILE, normalize_database_url
 from radarnaque_api.llm.providers import ProviderConfig, ProviderError, load_providers
 from radarnaque_api.models.reference import Model, ScanKind
 
-KINDS = ("text", "image")
+KINDS = ("text", "image", "full")
 EXIT_OK = 0
 EXIT_USAGE = 2
 
