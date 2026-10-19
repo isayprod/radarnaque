@@ -17,6 +17,8 @@ StructuredOutput = Literal["json_schema", "json_object"]
 CostSource = Literal["usage_cost", "omniroute_headers", "none"]
 # Paramètres d'appel qu'un fournisseur peut refuser (modèles de raisonnement, par exemple).
 OmittableParam = Literal["temperature", "max_tokens"]
+# API d'appel : Chat Completions (`/chat/completions`, par défaut) ou Responses (`/responses`).
+ProviderApi = Literal["chat", "responses"]
 
 _KNOWN_KEYS = {
     "base_url",
@@ -27,6 +29,7 @@ _KNOWN_KEYS = {
     "extra_body",
     "max_images",
     "omit_params",
+    "api",
 }
 
 
@@ -72,6 +75,8 @@ class ProviderConfig:
     max_images: int | None = None
     # Paramètres d'appel à ne pas envoyer à ce fournisseur.
     omit_params: tuple[OmittableParam, ...] = ()
+    # API d'appel ; `max_tokens` dans `omit_params` retire aussi `max_output_tokens` (Responses).
+    api: ProviderApi = "chat"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "extra_body", _freeze(deepcopy(dict(self.extra_body))))
@@ -129,9 +134,11 @@ def _omit_params(code: str, raw: Mapping[str, Any]) -> tuple[OmittableParam, ...
     return tuple(value)
 
 
-def _choice[T: str](code: str, raw: Mapping[str, Any], key: str, literal: Any) -> T:
+def _choice[T: str](
+    code: str, raw: Mapping[str, Any], key: str, literal: Any, default: T | None = None
+) -> T:
     allowed = get_args(literal)
-    value = raw.get(key)
+    value = raw.get(key, default)
     if value not in allowed:
         raise ProviderError(f"providers.{code}.{key} : valeur parmi {', '.join(allowed)} attendue")
     return value  # type: ignore[return-value]
@@ -159,6 +166,7 @@ def _parse_provider(code: str, raw: object) -> ProviderConfig:
         extra_body=extra_body,
         max_images=_optional_positive_int(code, raw, "max_images"),
         omit_params=_omit_params(code, raw),
+        api=_choice(code, raw, "api", ProviderApi, default="chat"),
     )
 
 

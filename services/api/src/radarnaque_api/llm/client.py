@@ -171,6 +171,45 @@ class _Invalid(Exception):
     pass
 
 
+# Nom, dans l'API Responses, des paramètres de `omit_params` (désignés par leur nom Chat).
+_RESPONSES_PARAMS: dict[str, str] = {
+    "temperature": "temperature",
+    "max_tokens": "max_output_tokens",
+}
+
+
+def _responses_content(content: str | list[dict]) -> list[dict[str, Any]]:
+    """Contenu d'un message au format Chat converti en parts de l'API Responses : `text` devient
+    `input_text`, `image_url` devient `input_image` (l'URL, data URL comprise, passe telle
+    quelle)."""
+    if isinstance(content, str):
+        return [{"type": "input_text", "text": content}]
+    parts: list[dict[str, Any]] = []
+    for part in content:
+        if part.get("type") == "image_url":
+            parts.append({"type": "input_image", "image_url": part["image_url"]["url"]})
+        else:
+            parts.append({"type": "input_text", "text": part.get("text", "")})
+    return parts
+
+
+def response_text(response: Any) -> str:
+    """Texte d'une réponse de l'API Responses : `output_text` (raccourci du SDK) ou, à défaut,
+    la concaténation des parts `output_text` des messages de `output`."""
+    text = getattr(response, "output_text", None)
+    if isinstance(text, str):
+        return text
+    texts: list[str] = []
+    for item in getattr(response, "output", None) or []:
+        if getattr(item, "type", None) != "message":
+            continue
+        for part in getattr(item, "content", None) or []:
+            value = getattr(part, "text", None)
+            if getattr(part, "type", None) == "output_text" and isinstance(value, str):
+                texts.append(value)
+    return "".join(texts)
+
+
 class OpenAICompatibleClient:
     def __init__(
         self,
@@ -246,6 +285,8 @@ class OpenAICompatibleClient:
                 return 0
 
     async def _attempt(self, client: AsyncOpenAI, request: dict[str, Any]) -> LLMResult:
+        if self._provider.api == "responses":
+            return await self._attempt_responses(client, request)
         raw = await client.chat.completions.with_raw_response.create(**request)
         try:
             completion = raw.parse()
@@ -271,22 +312,61 @@ class OpenAICompatibleClient:
             system_prompt=request["messages"][0]["content"],
         )
 
-    async def analyze(self, *, model: str, system_prompt: str, messages: list[dict]) -> LLMResult:
-        client = self._openai()
+    async def _attempt_responses(self, client: AsyncOpenAI, request: dict[str, Any]) -> LLMResult:
+        """Un appel à l'API Responses ; mêmes règles de validation que la voie Chat."""
+        raw = await client.responses.with_raw_response.create(**request)
+        try:
+            response = raw.parse()
+            content = response_text(response)
+            if not content:
+                raise _Invalid
+            analysis = LLMAnalysis.model_validate_json(content)
+        except (
+            ValueError,  # inclut ValidationError et les JSON illisibles
+            TypeError,
+            IndexError,
+            AttributeError,
+            openai.APIResponseValidationError,
+        ):
+            raise _Invalid from None
+        usage = response.usage
+        return LLMResult(
+            analysis=analysis,
+            tokens_in=_count(getattr(usage, "input_tokens", None)),
+            tokens_out=_count(getattr(usage, "output_tokens", None)),
+            cost_usd_micros=self._cost(usage, raw.headers),
+            raw_text=content,
+            system_prompt=request["instructions"],
+        )
+
+    def _responses_request(
+        self, model: str, system_prompt: str, messages: list[dict]
+    ) -> dict[str, Any]:
+        """Requête de l'API Responses : prompt système dans `instructions`, messages convertis
+        dans `input`. Pas de `response_format` : le JSON est imposé par le prompt (schéma
+        ajouté en mode `json_object`) puis vérifié par Pydantic."""
         extra_body = self._provider.extra_body_dict()
         request: dict[str, Any] = {
             "model": model,
-            "messages": [
-                {"role": "system", "content": self.final_system_prompt(system_prompt)},
-                *messages,
+            "instructions": self.final_system_prompt(system_prompt),
+            "input": [
+                {"role": message["role"], "content": _responses_content(message["content"])}
+                for message in messages
             ],
             "temperature": TEMPERATURE,
-            "max_tokens": MAX_TOKENS,
-            "response_format": self._response_format(),
+            "max_output_tokens": MAX_TOKENS,
             "extra_body": extra_body or None,
         }
         for param in self._provider.omit_params:
-            del request[param]
+            del request[_RESPONSES_PARAMS[param]]
+        return request
+
+    async def analyze(self, *, model: str, system_prompt: str, messages: list[dict]) -> LLMResult:
+        client = self._openai()
+        if self._provider.api == "responses":
+            request = self._responses_request(model, system_prompt, messages)
+        else:
+            request = self._chat_request(model, system_prompt, messages)
         # Chaque `except` ne fait que noter le code ; l'erreur est levée après le bloc, pour
         # qu'aucune exception d'origine (corps, requête, Authorization) ne lui soit chaînée.
         code: LLMErrorCode = "transport"
@@ -308,6 +388,23 @@ class OpenAICompatibleClient:
             if fatal is not None:
                 raise self._error(fatal)
         raise self._error(code)
+
+    def _chat_request(self, model: str, system_prompt: str, messages: list[dict]) -> dict[str, Any]:
+        extra_body = self._provider.extra_body_dict()
+        request: dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": self.final_system_prompt(system_prompt)},
+                *messages,
+            ],
+            "temperature": TEMPERATURE,
+            "max_tokens": MAX_TOKENS,
+            "response_format": self._response_format(),
+            "extra_body": extra_body or None,
+        }
+        for param in self._provider.omit_params:
+            del request[param]
+        return request
 
 
 class LLMClientFactory:

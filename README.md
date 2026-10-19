@@ -238,7 +238,9 @@ l'entrée `openai-oauth` a `omit_params = ["temperature"]`. Sans cela, chaque sc
 `502` avec la raison `transport` (le proxy transforme le refus en erreur 500). Le proxy n'a
 pas de clé et ignore `response_format` : l'entrée `openai-oauth` est donc en
 `json_object` (schéma dans le prompt système, réponse validée par l'API, une nouvelle
-tentative si elle est invalide). **À n'utiliser qu'en local** : toute requête qui atteint le
+tentative si elle est invalide). Ce fournisseur passe par l'API Responses
+(`api = "responses"`, `POST <base_url>/responses`) : le proxy n'accepte pas les photos dans
+les chat completions. **À n'utiliser qu'en local** : toute requête qui atteint le
 proxy est décomptée de l'abonnement, OpenAI peut changer ou fermer ce service interne à tout
 moment, et ses conditions d'utilisation ne prévoient pas cet usage. Il n'est jamais passé à
 la composition de production. Le coût enregistré est nul.
@@ -514,7 +516,9 @@ Ajouter un fournisseur compatible OpenAI (`POST <base_url>/chat/completions`) :
    `max_images` (facultatif) réduit le nombre de photos envoyées si le fournisseur en accepte
    moins de 4 par requête (voir l'entrée `groq`), et `omit_params` (facultatif, parmi
    `temperature` et `max_tokens`) retire des paramètres d'appel qu'il refuse (voir l'entrée
-   `openai-oauth`).
+   `openai-oauth`). `api` (facultatif, `"chat"` par défaut) choisit l'API d'appel : `"chat"`
+   (`/chat/completions`) ou `"responses"` (`/responses`, pour un fournisseur qui n'accepte
+   les photos que par l'API Responses, voir l'entrée `openai-oauth`).
 2. Définir la variable dans `infra/.env` ; en production, l'ajouter aussi à l'environnement
    du service `api` dans `infra/docker-compose.yml` (`MONFOURNISSEUR_API_KEY:
    ${MONFOURNISSEUR_API_KEY:-}`).

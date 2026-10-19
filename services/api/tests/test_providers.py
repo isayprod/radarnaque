@@ -65,6 +65,33 @@ def test_repo_file_groq_and_openai_oauth():
     assert providers["openrouter"].omit_params == ()
 
 
+def test_repo_file_openai_oauth_uses_the_responses_api():
+    # Le proxy openai-oauth refuse les images en data URL sur /chat/completions (500), mais
+    # les accepte sur /responses.
+    providers = load_providers(REPO_PROVIDERS)
+    assert providers["openai-oauth"].api == "responses"
+    others = {code: p.api for code, p in providers.items() if code != "openai-oauth"}
+    assert set(others.values()) == {"chat"}
+
+
+def test_api_defaults_to_chat(tmp_path):
+    assert load_providers(_write(tmp_path, VALID))["p"].api == "chat"
+    assert _config().api == "chat"
+
+
+@pytest.mark.parametrize("value", ['"responses"', '"chat"'])
+def test_api_is_read(tmp_path, value):
+    path = _write(tmp_path, VALID + f"api = {value}\n")
+    assert load_providers(path)["p"].api == value.strip('"')
+
+
+@pytest.mark.parametrize("value", ['"completions"', '""', "1", '["chat"]'])
+def test_invalid_api_names_the_key(tmp_path, value):
+    path = _write(tmp_path, VALID + f"api = {value}\n")
+    with pytest.raises(ProviderError, match=r"providers\.p\.api"):
+        load_providers(path)
+
+
 def test_omit_params_is_read(tmp_path):
     path = _write(tmp_path, VALID + 'omit_params = ["temperature", "max_tokens"]\n')
     assert load_providers(path)["p"].omit_params == ("temperature", "max_tokens")
