@@ -1,5 +1,5 @@
 import type { Locale } from "@radarnaque/shared";
-import { useCallback, useEffect, useId, useRef } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useRef } from "react";
 import type { ScanState } from "../lib/content/ai-client";
 import type { AiScan } from "../lib/content/use-ai-scan";
 import { aiErrorText, contentText } from "../lib/content-i18n";
@@ -147,28 +147,40 @@ function LaunchButton({
 
 /**
  * Actions de la pastille à côté du niveau : rien pendant l'analyse ni avec un
- * résultat IA ; après une erreur, son texte, puis « Relancer » (analyse coupée en
- * route) ou le bouton de lancement (rien si l'accès relu ne laisse plus d'analyse) ;
- * sinon le bouton de lancement.
+ * résultat IA ; après une erreur, son texte (sauf panneau ouvert, qui l'affiche
+ * déjà), puis « Relancer » (analyse coupée en route) ou le bouton de lancement,
+ * ni l'un ni l'autre si l'accès relu ne laisse plus d'analyse ; sinon le bouton
+ * de lancement.
  */
 export function BadgeActions({
 	scan,
 	locale,
 	busy,
+	panelOpen,
 	onLaunch,
 }: {
 	scan: AiScan;
 	locale: Locale;
 	/** Analyse en cours, ou résultat IA affiché. */
 	busy: boolean;
+	/** Panneau ouvert : l'erreur y est déjà affichée et annoncée. */
+	panelOpen: boolean;
 	onLaunch(): void;
 }) {
 	if (busy) return null;
 	const { ai, access } = scan;
-	const error = badgeError(ai, locale);
-	const relaunch = ai.status === "error" && RELAUNCH_CODES.has(ai.code);
-	const launch =
-		error !== null && noScansLeft(access) ? null : (
+	const failed = ai.status === "error";
+	const error = panelOpen ? null : badgeError(ai, locale);
+	const relaunch = failed && RELAUNCH_CODES.has(ai.code);
+	// Après un échec, plus aucune analyse d'après l'accès relu : le message suffit,
+	// jamais un bouton qui ne ferait rien.
+	let action: ReactNode = null;
+	if (!(failed && noScansLeft(access)))
+		action = relaunch ? (
+			<button type="button" onClick={onLaunch} className={LAUNCH_CLASS}>
+				{contentText(locale, "ai.retry")}
+			</button>
+		) : (
 			<LaunchButton
 				access={access}
 				locale={locale}
@@ -183,13 +195,7 @@ export function BadgeActions({
 					{error}
 				</span>
 			)}
-			{relaunch ? (
-				<button type="button" onClick={onLaunch} className={LAUNCH_CLASS}>
-					{contentText(locale, "ai.retry")}
-				</button>
-			) : (
-				launch
-			)}
+			{action}
 		</>
 	);
 }

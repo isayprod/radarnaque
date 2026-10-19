@@ -369,19 +369,23 @@ describe("useAiScan : scans", () => {
 		expect(t.scans[0]?.cancel).toHaveBeenCalledTimes(1);
 		expect(t.result.current.ai).toEqual({ status: "idle" });
 
-		// Événement et issue tardifs de l'ancienne annonce : rien ne change.
-		t.scans[0]?.emit(search);
-		t.scans[0]?.resolve(ok(sampleAnalysis));
-		await settle();
-		expect(t.result.current.ai).toEqual({ status: "idle" });
-		// `cancelled` : ni relecture de l'accès, ni écriture.
-		expect(t.client.access).toHaveBeenCalledTimes(1);
-		expect(store.put).not.toHaveBeenCalled();
-
-		// La nouvelle annonce peut lancer son propre scan.
+		// La nouvelle annonce lance son propre scan.
 		act(() => t.result.current.scan());
 		expect(t.client.scan).toHaveBeenCalledTimes(2);
 		expect(t.scans[1]?.request.listing.externalId).toBe("m2");
+
+		// Événement et issue tardifs de l'ancienne annonce, par l'ancien handle :
+		// la progression de m2 reste vide.
+		t.scans[0]?.emit(search);
+		t.scans[0]?.resolve(ok(sampleAnalysis));
+		await settle();
+		const state = t.result.current.ai;
+		expect(state.status).toBe("loading");
+		if (state.status !== "loading") return;
+		expect(state.progress.steps).toEqual([]);
+		// `cancelled` : ni relecture de l'accès, ni écriture.
+		expect(t.client.access).toHaveBeenCalledTimes(1);
+		expect(store.put).not.toHaveBeenCalled();
 	});
 
 	test("unmount cancels", async () => {

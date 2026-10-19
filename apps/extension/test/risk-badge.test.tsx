@@ -710,6 +710,69 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 		await vi.waitFor(() => expect(queryLaunch()).toBeNull());
 	});
 
+	test("analyse interrompue, accès relu à 0 : ni « Relancer » muet, ni bouton de lancement", async () => {
+		const user = userEvent.setup();
+		scanReply.mockResolvedValueOnce({
+			ok: false,
+			error: { code: "stream_interrupted" },
+		});
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { ...active, remaining: { scans: 0 } },
+		}));
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		await user.click(launch());
+		expect(
+			await screen.findByText(aiErrorText("fr", "stream_interrupted")),
+		).toBeTruthy();
+		await vi.waitFor(() => expect(ai.access).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() =>
+			expect(screen.queryByRole("button", { name: "Relancer" })).toBeNull(),
+		);
+		expect(queryLaunch()).toBeNull();
+	});
+
+	test("échec d'une analyse lancée depuis le panneau ouvert : son texte dans le panneau seulement", async () => {
+		const user = userEvent.setup();
+		scanReply.mockResolvedValueOnce({
+			ok: false,
+			error: { code: "analysis_failed" },
+		});
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		await user.click(toggle());
+		const dialog = screen.getByRole("dialog");
+		await user.click(
+			within(dialog).getByRole("button", { name: contentText("fr", "ai.run") }),
+		);
+		const text = aiErrorText("fr", "analysis_failed");
+		expect(await within(dialog).findByText(text)).toBeTruthy();
+		// Ni dans la pastille, ni dans sa région annoncée : le panneau a sa propre alerte.
+		expect(screen.getAllByText(text)).toHaveLength(1);
+		// La dernière ligne d'état laisse place au vide (2 s plus tard), pas à l'erreur.
+		await vi.waitFor(() => expect(announced()).toBe(""), { timeout: 3_000 });
+
+		// Panneau fermé : l'erreur revient dans la pastille.
+		await user.click(toggle());
+		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(await screen.findAllByText(text)).not.toHaveLength(0);
+	});
+
 	test("connexion impossible depuis la pastille : le panneau s'ouvre avec le texte de repli", async () => {
 		const user = userEvent.setup();
 		ai.access.mockImplementation(async () => ({
