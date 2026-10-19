@@ -95,7 +95,7 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
 - **Conservation :** le résultat est gardé 24 h dans le navigateur. La déconnexion l'efface, et un changement de l'annonce le rend caduc.
 - **Bandeau « annonce professionnelle » :** il signale un magasin qui utilise l'annonce comme vitrine. Il ne cache jamais le score.
 - **Sécurité :**
-  - les content scripts ne peuvent envoyer que trois messages au service worker ;
+  - les content scripts ne peuvent envoyer que quatre messages au service worker (dont `content/debug`, en dev seulement) ;
   - le service worker est le seul à détenir la session et le JWT.
 
 ### Superuser de développement

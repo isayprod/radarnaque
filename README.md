@@ -419,7 +419,9 @@ ce qui se passe pendant une analyse. La popup affiche « Superuser (dev) ».
 3. Se connecter normalement depuis la popup avec cette adresse.
 
 Changer la variable ne rétrograde pas l'ancien compte. Si besoin, dans la base :
-`update "user" set role = 'user' where email = '<email>';`
+`update auth."user" set role = 'user' where email = '<email>';`
+
+Un compte admin n'est jamais rétrogradé en superuser : il garde son rôle.
 
 Pour un autre compte, sans toucher à `infra/.env` :
 
@@ -427,7 +429,8 @@ Pour un autre compte, sans toucher à `infra/.env` :
 pnpm dev:superuser <email>
 ```
 
-Codes de sortie : `1` compte inconnu, `2` production, `64` argument absent ou invalide.
+Codes de sortie : `1` compte inconnu, `2` production, `3` compte admin (laissé tel quel),
+`64` argument absent ou invalide.
 
 > Au tout premier démarrage, le log de l'auth peut afficher une erreur d'initialisation de
 > l'essai (« trial bootstrap ») tant que l'API n'est pas encore lancée. Elle est sans gravité.
@@ -466,9 +469,11 @@ sans effet pour les autres rôles.
 
 ### Inactif en production
 
-Le rôle est ignoré par l'API quand `ENV=production`, et le service auth refuse de
-l'attribuer quand `NODE_ENV=production`. Rien de tout cela n'existe donc pour un vrai
-utilisateur.
+Le rôle est ignoré par l'API quand `ENV=production` (posé par l'image Docker de l'API), et
+le service auth refuse de l'attribuer quand `NODE_ENV=production` (`DEV_SUPERUSER_EMAIL` y
+est ignoré). Le build de production de l'extension (`pnpm --filter extension build`)
+n'envoie jamais `content/debug` et ne lit pas `me` pour le debug. Rien de tout cela
+n'existe donc pour un vrai utilisateur.
 
 ## Changer de fournisseur
 
