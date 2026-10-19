@@ -80,8 +80,8 @@ Les prix ci-dessous ont été relevés sur OpenRouter le 2026-10-15.
 - **Taille d'une analyse** (phase 3d) : la recherche web se fait en plusieurs tours, et chaque tour renvoie tout le contexte, photos comprises (l'API est sans état). La réflexion ajoute des tokens de sortie. Avec 4 photos et 3 recherches : environ 4 tours d'environ 8 000 tokens en entrée, et environ 2 000 tokens de réflexion et de réponse.
 - **Modèle de départ :** `google/gemini-3.1-flash-lite` (0,25 / 1,50 $ par million de tokens) pour le type `full`, soit environ **1,1 ¢ par analyse au pire** et environ 0,4 ¢ sans recherche.
 - **Garde-fous :** au plus 3 recherches par analyse (`settings.max_web_searches`), un cache des recherches de 24 h et le cache partagé des analyses (24 h).
-- **Coût d'un Premium** qui utiliserait ses 300 analyses au pire : environ 3,30 $ par mois. Un usage réaliste coûte une fraction de ce montant.
-- **Marge par abonné** après TVA belge (21 %) et frais Stripe : elle reste positive même au pire coût (environ 1,65 € pour 150 analyses en Standard, environ 3,30 € pour 300 en Premium). Le banc d'essai de la phase 4 la confirmera.
+- **Coût LLM au pire** d'un abonné qui utiliserait tout son quota : environ 1,65 $ par mois pour les 150 analyses d'un Standard, environ 3,30 $ pour les 300 d'un Premium. Un usage réaliste coûte une fraction de ce montant.
+- **Marge par abonné au pire coût**, après TVA belge (21 %) et frais Stripe : environ 0,6 € en Standard (2,99 € TTC ≈ 2,47 € HT ≈ 2,18 € après Stripe) et environ 2,3 € en Premium (6,99 € TTC ≈ 5,42 € après Stripe). Elle reste positive ; le banc d'essai de la phase 4 la confirmera.
 - Le choix définitif des modèles se fera avec le banc d'essai (voir §12, ligne « Qualité IA »).
 
 ## 3. Architecture globale
