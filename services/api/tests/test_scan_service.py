@@ -1362,32 +1362,23 @@ async def test_debug_block_and_log_contain_no_secret(engine, http, mock, clock, 
     caplog.set_level(logging.DEBUG)
     for url in IMAGE_URLS:
         mock.get(url).respond(200, content=_png(), headers={"content-type": "image/png"})
+    analysis = {
+        "score": 70,
+        "summary": {"fr": "Résumé", "nl": "Samenvatting"},
+        "advice": {"fr": "Conseil", "nl": "Advies"},
+        "reasons": [],
+    }
+    chunks = [
+        {"choices": [{"index": 0, "delta": {"content": json.dumps(analysis)}}]},
+        {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+        {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}},
+    ]
+    head = {"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": "m"}
+    stream = "".join(f"data: {json.dumps({**head, **chunk})}\n\n" for chunk in chunks)
     llm_route = mock.post(f"{LLM_BASE}/chat/completions").respond(
         200,
-        json={
-            "id": "c1",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "m",
-            "choices": [
-                {
-                    "index": 0,
-                    "finish_reason": "stop",
-                    "message": {
-                        "role": "assistant",
-                        "content": json.dumps(
-                            {
-                                "score": 70,
-                                "summary": {"fr": "Résumé", "nl": "Samenvatting"},
-                                "advice": {"fr": "Conseil", "nl": "Advies"},
-                                "reasons": [],
-                            }
-                        ),
-                    },
-                }
-            ],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-        },
+        headers={"content-type": "text/event-stream"},
+        content=(stream + "data: [DONE]\n\n").encode(),
     )
     provider = ProviderConfig(
         code="fake",

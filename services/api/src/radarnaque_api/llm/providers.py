@@ -80,8 +80,9 @@ class ProviderConfig:
     omit_params: tuple[OmittableParam, ...] = ()
     # API d'appel ; `max_tokens` dans `omit_params` retire aussi `max_output_tokens` (Responses).
     api: ProviderApi = "chat"
-    # Avec l'API Responses : `reasoning = { effort, summary = "auto" }` si l'effort n'est pas
-    # `none` (les résumés de réflexion sont relayés à l'extension).
+    # Si l'effort n'est pas `none` : `reasoning = { effort, summary = "auto" }` avec l'API
+    # Responses, `reasoning = { effort }` dans le corps avec l'API Chat (paramètre d'OpenRouter).
+    # Les résumés de réflexion sont relayés à l'extension.
     reasoning_effort: ReasoningEffort = "none"
 
     def __post_init__(self) -> None:

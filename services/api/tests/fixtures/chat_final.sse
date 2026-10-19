@@ -1,0 +1,16 @@
+: OPENROUTER PROCESSING
+
+data: {"id": "gen-final", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": null}]}
+
+data: {"id": "gen-final", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"content": "{\"score\": 72, \"professional\": false, \"summary\": {\"fr\": \"Prix"}, "finish_reason": null}]}
+
+data: {"id": "gen-final", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"content": " cohérent avec le marché.\", \"nl\": \"Prijs in lijn met de markt.\"}, \"advice\": {\"fr"}, "finish_reason": null}]}
+
+data: {"id": "gen-final", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"content": "\": \"Vérifiez l'objet en main propre.\", \"nl\": \"Controleer het toestel ter plaatse.\"}, \"reasons\": [{\"severity\": \"info\", \"fr\": \"Prix proche du marché (exemple.be).\", \"nl\": \"Prijs dicht bij de markt (exemple.be).\"}]}"}, "finish_reason": null}]}
+
+data: {"id": "gen-final", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+
+data: {"id": "gen-final", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [], "usage": {"prompt_tokens": 300, "completion_tokens": 80, "total_tokens": 380, "cost": 0.002}}
+
+data: [DONE]
+

@@ -1,0 +1,10 @@
+data: {"id": "gen-bad", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"role": "assistant", "content": null}, "finish_reason": null}]}
+
+data: {"id": "gen-bad", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_foo", "type": "function", "function": {"name": "foo", "arguments": "{}"}}, {"index": 1, "id": "call_bad", "type": "function", "function": {"name": "web_search", "arguments": "{\"query\": "}}]}, "finish_reason": null}]}
+
+data: {"id": "gen-bad", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}
+
+data: {"id": "gen-bad", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
+
+data: [DONE]
+

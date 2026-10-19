@@ -1,0 +1,20 @@
+: OPENROUTER PROCESSING
+
+data: {"id": "gen-search", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": null}]}
+
+data: {"id": "gen-search", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"reasoning_details": [{"type": "reasoning.encrypted", "data": "chiffre-fictif", "id": "tool_call_search", "format": "google-gemini-v1", "index": 0}]}, "finish_reason": null}]}
+
+data: {"id": "gen-search", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_search", "type": "function", "function": {"name": "web_search", "arguments": ""}}]}, "finish_reason": null}]}
+
+data: {"id": "gen-search", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "{\"query\": \"iPhone 18"}}]}, "finish_reason": null}]}
+
+data: {"id": "gen-search", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": " Pro prix\", \"aspect\""}}]}, "finish_reason": null}]}
+
+data: {"id": "gen-search", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": ": \"price\"}"}}]}, "finish_reason": null}]}
+
+data: {"id": "gen-search", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}
+
+data: {"id": "gen-search", "object": "chat.completion.chunk", "created": 1760000000, "model": "vendor/model", "choices": [], "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120, "cost": 0.001}}
+
+data: [DONE]
+

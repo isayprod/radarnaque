@@ -3,9 +3,12 @@
 //
 //   pnpm llm:stub [port]      (20199 par défaut, celui du fournisseur `stub` de providers.toml)
 //
-// `POST /v1/chat/completions` renvoie toujours la même analyse (score 42, une raison). Une ligne
-// de log par requête : modèle, nombre de messages, présence d'images. Jamais le contenu des
-// messages ni les en-têtes (Authorization peut porter une clé).
+// `POST /v1/chat/completions` renvoie toujours la même analyse (score 42, une raison), sans
+// jamais appeler d'outil. Avec `stream: true`, la réponse part en SSE : une ligne de réflexion
+// factice (`delta.reasoning`, comme OpenRouter), l'analyse en plusieurs morceaux, la fin du choix,
+// l'usage si `stream_options.include_usage`, puis `data: [DONE]`. Une ligne de log par requête :
+// modèle, nombre de messages, présence d'images, flux. Jamais le contenu des messages ni les
+// en-têtes (Authorization peut porter une clé).
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
@@ -53,6 +56,53 @@ const send = (res, status, body) => {
 	res.end(text);
 };
 
+const USAGE = Object.freeze({
+	prompt_tokens: 100,
+	completion_tokens: 50,
+	total_tokens: 150,
+});
+
+/** Morceaux `chat.completion.chunk` d'une réponse en flux (OpenAI, OpenRouter). */
+const streamChunks = ({ id, created, model, includeUsage }) => {
+	const content = JSON.stringify(STUB_ANALYSIS);
+	const third = Math.ceil(content.length / 3);
+	const chunk = (delta, finish_reason = null) => ({
+		id,
+		object: "chat.completion.chunk",
+		created,
+		model,
+		choices: [{ index: 0, delta, finish_reason }],
+	});
+	const chunks = [
+		chunk({ role: "assistant", content: "" }),
+		chunk({ reasoning: "Réflexion factice du faux fournisseur." }),
+		chunk({ content: content.slice(0, third) }),
+		chunk({ content: content.slice(third, 2 * third) }),
+		chunk({ content: content.slice(2 * third) }),
+		chunk({}, "stop"),
+	];
+	if (includeUsage) {
+		chunks.push({
+			id,
+			object: "chat.completion.chunk",
+			created,
+			model,
+			choices: [],
+			usage: USAGE,
+		});
+	}
+	return chunks;
+};
+
+const sendStream = (res, chunks) => {
+	res.writeHead(200, {
+		"content-type": "text/event-stream; charset=utf-8",
+		"cache-control": "no-cache",
+	});
+	for (const chunk of chunks) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+	res.end("data: [DONE]\n\n");
+};
+
 const error = (res, status, message) =>
 	send(res, status, { error: { message, type: "stub_error" } });
 
@@ -93,14 +143,23 @@ export function createStubServer({ log = console.log } = {}) {
 			return;
 		}
 		const messages = Array.isArray(payload.messages) ? payload.messages : [];
+		const stream = payload.stream === true;
 		log(
-			`llm-stub : model=${printable(payload.model)} messages=${messages.length} images=${hasImages(messages) ? "oui" : "non"}`,
+			`llm-stub : model=${printable(payload.model)} messages=${messages.length} images=${hasImages(messages) ? "oui" : "non"} flux=${stream ? "oui" : "non"}`,
 		);
+		const id = `chatcmpl-stub-${randomUUID()}`;
+		const created = Math.floor(Date.now() / 1000);
+		const model = typeof payload.model === "string" ? payload.model : "stub";
+		if (stream) {
+			const includeUsage = payload.stream_options?.include_usage === true;
+			sendStream(res, streamChunks({ id, created, model, includeUsage }));
+			return;
+		}
 		send(res, 200, {
-			id: `chatcmpl-stub-${randomUUID()}`,
+			id,
 			object: "chat.completion",
-			created: Math.floor(Date.now() / 1000),
-			model: typeof payload.model === "string" ? payload.model : "stub",
+			created,
+			model,
 			choices: [
 				{
 					index: 0,
@@ -111,7 +170,7 @@ export function createStubServer({ log = console.log } = {}) {
 					finish_reason: "stop",
 				},
 			],
-			usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 },
+			usage: USAGE,
 		});
 	});
 }

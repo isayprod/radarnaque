@@ -1,6 +1,7 @@
 import json
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import replace
+from pathlib import Path
 
 import httpx
 import pytest
@@ -16,8 +17,10 @@ from radarnaque_api.llm.client import (
     strict_analysis_schema,
     strict_json_schema,
 )
-from radarnaque_api.llm.providers import ProviderConfig, ProviderError
-from radarnaque_api.llm.tools import WebSearchTool
+from radarnaque_api.llm.events import LLMEvent, SearchDone, SearchStarted, Thinking, Writing
+from radarnaque_api.llm.providers import ProviderConfig, ProviderError, load_providers
+from radarnaque_api.llm.tools import SearchRecord, WebSearchTool
+from radarnaque_api.search import SearchHit
 
 BASE = "https://llm.test/v1"
 KEY = "sk-test-secret"
@@ -41,6 +44,7 @@ def _provider(
     max_images: int | None = None,
     omit_params: tuple[str, ...] = (),
     api: str = "chat",
+    reasoning_effort: str = "none",
 ) -> ProviderConfig:
     return ProviderConfig(
         code="testprov",
@@ -53,39 +57,50 @@ def _provider(
         max_images=max_images,
         omit_params=omit_params,  # type: ignore[arg-type]
         api=api,  # type: ignore[arg-type]
+        reasoning_effort=reasoning_effort,  # type: ignore[arg-type]
     )
 
 
 OPENROUTER_EXTRA = {
     "provider": {"data_collection": "deny"},
     "usage": {"include": True},
-    "reasoning": {"enabled": False},
 }
+USAGE = {"prompt_tokens": 120, "completion_tokens": 80, "total_tokens": 200}
 
 
-def _completion(content: str | None, usage: dict | None = None) -> dict:
-    return {
-        "id": "cmpl-1",
-        "object": "chat.completion",
-        "created": 1,
-        "model": "m",
-        "choices": [
-            {
-                "index": 0,
-                "finish_reason": "stop",
-                "message": {"role": "assistant", "content": content},
-            }
-        ],
-        "usage": usage
-        if usage is not None
-        else {"prompt_tokens": 120, "completion_tokens": 80, "total_tokens": 200},
-    }
-
-
-def _ok(analysis: dict | None = None, usage: dict | None = None, headers=None) -> httpx.Response:
-    return httpx.Response(
-        200, json=_completion(json.dumps(analysis or VALID), usage), headers=headers
+def _chunk(delta: dict | None = None, finish: str | None = None, usage: dict | None = None) -> str:
+    body: dict = {"id": "gen-1", "object": "chat.completion.chunk", "created": 1, "model": "m"}
+    body["choices"] = (
+        [] if usage is not None else [{"index": 0, "delta": delta or {}, "finish_reason": finish}]
     )
+    if usage is not None:
+        body["usage"] = usage
+    return f"data: {json.dumps(body)}\n\n"
+
+
+def _stream(*events: str, headers: dict | None = None) -> httpx.Response:
+    return httpx.Response(
+        200,
+        headers={"content-type": "text/event-stream", **(headers or {})},
+        content="".join(events).encode(),
+    )
+
+
+def _chat(content: str | None, usage: dict | None = USAGE, headers=None) -> httpx.Response:
+    """Réponse en flux de l'API Chat : le contenu en deux morceaux, la fin du choix, puis le
+    morceau d'usage (absent si `usage` vaut None) et `[DONE]`."""
+    events = [_chunk({"role": "assistant", "content": ""})]
+    if content is not None:
+        middle = len(content) // 2
+        events += [_chunk({"content": content[:middle]}), _chunk({"content": content[middle:]})]
+    events.append(_chunk(finish="stop"))
+    if usage is not None:
+        events.append(_chunk(usage=usage))
+    return _stream(*events, "data: [DONE]\n\n", headers=headers)
+
+
+def _ok(analysis: dict | None = None, usage: dict | None = USAGE, headers=None) -> httpx.Response:
+    return _chat(json.dumps(analysis or VALID), usage, headers)
 
 
 @pytest.fixture
@@ -122,6 +137,8 @@ async def test_json_schema_mode_sends_strict_format_and_extra_body(mock, http):
     assert body["model"] == "vendor/model"
     assert body["temperature"] == 0.2
     assert body["max_tokens"] == 4000
+    assert body["stream"] is True
+    assert body["stream_options"] == {"include_usage": True}
     assert body["response_format"] == {
         "type": "json_schema",
         "json_schema": {
@@ -132,7 +149,8 @@ async def test_json_schema_mode_sends_strict_format_and_extra_body(mock, http):
     }
     assert body["provider"]["data_collection"] == "deny"
     assert body["usage"]["include"] is True
-    assert body["reasoning"] == {"enabled": False}
+    for absent in ("reasoning", "tools", "tool_choice"):  # effort `none`, sans outil
+        assert absent not in body
     assert body["messages"][0] == {"role": "system", "content": "SYS"}
     assert body["messages"][1:] == MESSAGES
     assert result.analysis == LLMAnalysis.model_validate(VALID)
@@ -219,18 +237,14 @@ def test_strict_schema_keeps_fields_named_like_keywords():
 
 
 async def test_invalid_then_valid_response_succeeds_with_two_calls(mock, http):
-    route = mock.post("/chat/completions").mock(
-        side_effect=[httpx.Response(200, json=_completion("pas du json")), _ok()]
-    )
+    route = mock.post("/chat/completions").mock(side_effect=[_chat("pas du json"), _ok()])
     result = await _analyze(_provider(), http)
     assert route.call_count == 2
     assert result.analysis.score == 72
 
 
 async def test_two_invalid_responses_raise_invalid_response(mock, http):
-    route = mock.post("/chat/completions").mock(
-        return_value=httpx.Response(200, json=_completion("{cassé"))
-    )
+    route = mock.post("/chat/completions").mock(return_value=_chat("{cassé"))
     with pytest.raises(LLMError) as info:
         await _analyze(_provider(), http)
     assert info.value.code == "invalid_response"
@@ -267,17 +281,27 @@ async def test_out_of_contract_analysis_is_an_invalid_response(mock, http, analy
     assert route.call_count == 2
 
 
-async def test_empty_content_or_non_json_body_is_an_invalid_response(mock, http):
+async def test_empty_content_or_unreadable_chunk_is_an_invalid_response(mock, http):
     route = mock.post("/chat/completions").mock(
-        side_effect=[
-            httpx.Response(200, json=_completion(None)),
-            httpx.Response(200, text="<html>oops</html>"),
-        ]
+        side_effect=[_chat(None), _stream("data: {cassé\n\n")]
     )
     with pytest.raises(LLMError) as info:
         await _analyze(_provider(), http)
     assert info.value.code == "invalid_response"
     assert route.call_count == 2
+    _assert_not_chained(info.value)
+
+
+async def test_body_that_is_not_a_stream_is_transport(mock, http):
+    # Aucun morceau, donc aucune fin de choix : flux incomplet, repris une fois (rien d'émis).
+    route = mock.post("/chat/completions").mock(
+        return_value=httpx.Response(200, text="<html>oops</html>")
+    )
+    with pytest.raises(LLMError) as info:
+        await _analyze(_provider(), http)
+    assert info.value.code == "transport"
+    assert route.call_count == 2
+    _assert_not_chained(info.value)
 
 
 @pytest.mark.parametrize("status", [401, 403])
@@ -433,22 +457,17 @@ async def test_usage_cost_missing_or_unusable_is_zero(mock, http, cost):
 
 
 async def test_missing_usage_gives_zero_tokens(mock, http):
-    body = _completion(json.dumps(VALID))
-    del body["usage"]
-    mock.post("/chat/completions").mock(return_value=httpx.Response(200, json=body))
+    mock.post("/chat/completions").mock(return_value=_ok(usage=None))
     result = await _analyze(_provider(cost_source="usage_cost"), http)
     assert (result.tokens_in, result.tokens_out, result.cost_usd_micros) == (0, 0, 0)
 
 
-async def test_omniroute_cost_header_in_micro_dollars(mock, http):
-    headers = {"X-OmniRoute-Response-Cost": "0.0012345679"}
-    mock.post("/chat/completions").mock(return_value=_ok(headers=headers))
-    result = await _analyze(_provider(cost_source="omniroute_headers"), http)
-    assert result.cost_usd_micros == 1235
-
-
-@pytest.mark.parametrize("headers", [None, {"X-OmniRoute-Response-Cost": "n/a"}])
-async def test_omniroute_cost_header_absent_or_unreadable_is_zero(mock, http, headers):
+@pytest.mark.parametrize(
+    "headers",
+    [None, {"X-OmniRoute-Response-Cost": "0.0012345679"}, {"X-OmniRoute-Response-Cost": "n/a"}],
+)
+async def test_omniroute_cost_header_is_not_read_from_a_stream(mock, http, headers):
+    # OmniRoute ne donne son coût que sans flux (l'en-tête part avant la génération) : 0.
     mock.post("/chat/completions").mock(return_value=_ok(headers=headers))
     result = await _analyze(_provider(cost_source="omniroute_headers"), http)
     assert result.cost_usd_micros == 0
@@ -497,7 +516,7 @@ async def test_client_factory_caches_one_client_per_provider():
 
 async def test_result_carries_the_raw_text_and_the_sent_system_prompt(mock, http):
     raw = json.dumps(VALID, ensure_ascii=False)
-    mock.post("/chat/completions").mock(return_value=httpx.Response(200, json=_completion(raw)))
+    mock.post("/chat/completions").mock(return_value=_chat(raw))
     result = await _analyze(_provider(), http)
     assert result.raw_text == raw
     assert result.system_prompt == "SYS"
@@ -526,28 +545,324 @@ def test_llm_result_trace_fields_default_to_empty():
     assert result.rounds == 1
 
 
-async def test_chat_ignores_tools_and_events_for_now(mock, http):
-    # Voie Chat sans flux ni outil jusqu'à la tâche 6 : un seul appel, sans `tools`.
-    route = mock.post("/chat/completions").mock(return_value=_ok())
-    events: list = []
+# --- Boucle d'outils sur l'API Chat (OpenRouter, Groq, Ollama, stub) --------------------------
 
-    async def sink(event) -> None:
-        events.append(event)
+FIXTURES = Path(__file__).parent / "fixtures"
+REPO_PROVIDERS = Path(__file__).parent.parent / "providers.toml"
+HITS = [
+    SearchHit(title="iPhone 18 Pro", url="https://www.apple.com/be-fr/iphone", snippet="Prix"),
+    SearchHit(title="Comparatif", url="https://exemple.be/iphone-18-pro", snippet="1 329 €"),
+]
+SEARCH_ARGUMENTS = '{"query": "iPhone 18 Pro prix", "aspect": "price"}'
 
-    tool = WebSearchTool(_NoSearch(), max_searches=3, on_event=sink)
-    client = OpenAICompatibleClient(_provider(), ENV, http_client=http)
-    result = await client.analyze(
-        model="vendor/model", system_prompt="SYS", messages=MESSAGES, tools=tool, on_event=sink
+
+def _fixture(name: str) -> httpx.Response:
+    return httpx.Response(
+        200,
+        headers={"content-type": "text/event-stream"},
+        content=(FIXTURES / name).read_bytes(),
     )
-    body = json.loads(route.calls.last.request.content)
-    assert route.call_count == 1
-    assert "tools" not in body and "tool_choice" not in body and "stream" not in body
-    assert events == [] and result.searches == [] and result.rounds == 1
 
 
-class _NoSearch:
-    async def search(self, query: str) -> list:
-        raise AssertionError("aucune recherche attendue")
+class _Proxy:
+    """Faux fournisseur : une réponse par requête, dans l'ordre (la dernière se répète) ; garde
+    le corps JSON de chaque requête."""
+
+    def __init__(self, *replies: str | Callable[[], httpx.Response]) -> None:
+        self._replies = replies
+        self.bodies: list[dict] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.bodies.append(json.loads(request.content))
+        reply = self._replies[min(len(self.bodies), len(self._replies)) - 1]
+        return _fixture(reply) if isinstance(reply, str) else reply()
+
+
+class _Backend:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    async def search(self, query: str) -> list[SearchHit]:
+        self.queries.append(query)
+        return list(HITS)
+
+
+class _Recorder:
+    def __init__(self) -> None:
+        self.events: list[LLMEvent] = []
+
+    async def __call__(self, event: LLMEvent) -> None:
+        self.events.append(event)
+
+
+async def _chat_run(
+    proxy: _Proxy,
+    *,
+    provider: ProviderConfig | None = None,
+    tool: WebSearchTool | None = None,
+    sink: _Recorder | None = None,
+    env=ENV,
+) -> LLMResult:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(proxy)) as http:
+        client = OpenAICompatibleClient(provider or _provider(), env, http_client=http)
+        return await client.analyze(
+            model="vendor/model", system_prompt="SYS", messages=MESSAGES, tools=tool, on_event=sink
+        )
+
+
+def _tool_messages(body: dict) -> dict[str, str]:
+    return {m["tool_call_id"]: m["content"] for m in body["messages"] if m["role"] == "tool"}
+
+
+async def test_chat_tool_loop():
+    proxy = _Proxy("chat_search_price.sse", "chat_final.sse")
+    backend, sink = _Backend(), _Recorder()
+    tool = WebSearchTool(backend, max_searches=3, on_event=sink)
+    result = await _chat_run(proxy, tool=tool, sink=sink)
+
+    assert len(proxy.bodies) == 2
+    first, second = proxy.bodies
+    assert first["stream"] is True
+    assert first["stream_options"] == {"include_usage": True}
+    assert first["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "web_search",
+                "description": WebSearchTool.DESCRIPTION,
+                "parameters": tool.parameters(),
+            },
+        }
+    ]
+    assert "tool_choice" not in first  # tour 1 sur 5 : le modèle choisit
+    assert first["max_tokens"] == 4000
+    assert first["response_format"]["type"] == "json_schema"  # gardé avec les outils
+    assert second["messages"][:2] == first["messages"]
+    assistant, answer = second["messages"][2:]
+    # Arguments recollés depuis trois deltas ; détails de réflexion recopiés dans l'ordre.
+    assert assistant == {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_search",
+                "type": "function",
+                "function": {"name": "web_search", "arguments": SEARCH_ARGUMENTS},
+            }
+        ],
+        "reasoning_details": [
+            {
+                "type": "reasoning.encrypted",
+                "data": "chiffre-fictif",
+                "id": "tool_call_search",
+                "format": "google-gemini-v1",
+                "index": 0,
+            }
+        ],
+    }
+    assert answer["role"] == "tool" and answer["tool_call_id"] == "call_search"
+    assert answer["content"].startswith("<resultats_recherche>")
+    assert "apple.com" in answer["content"]
+
+    assert sink.events == [
+        SearchStarted(1, "iPhone 18 Pro prix", "price"),
+        SearchDone(1, True, 2, ("apple.com", "exemple.be")),
+        Writing(),
+    ]
+    assert result.searches == [SearchRecord("iPhone 18 Pro prix", "price")]
+    assert backend.queries == ["iPhone 18 Pro prix"]
+    assert result.analysis.score == 72 and result.rounds == 2
+    assert (result.tokens_in, result.tokens_out) == (100 + 300, 20 + 80)
+    # Contenu recollé depuis trois deltas coupés au milieu du JSON.
+    assert json.loads(result.raw_text)["summary"]["fr"] == "Prix cohérent avec le marché."
+
+
+async def test_chat_reasoning_delta_events():
+    sink = _Recorder()
+    result = await _chat_run(_Proxy("chat_reasoning_final.sse"), sink=sink)
+    # `delta.reasoning` (OpenRouter) : texte cumulé de la partie du tour.
+    assert sink.events == [Thinking(0, "Vérif"), Thinking(0, "Vérifie le prix"), Writing()]
+    assert result.reasoning_text == "Vérifie le prix"
+
+
+async def test_chat_reasoning_content_and_parts_across_rounds():
+    sink = _Recorder()
+    tool = WebSearchTool(_Backend(), max_searches=3, on_event=sink)
+    proxy = _Proxy("chat_search_thinking.sse", "chat_reasoning_final.sse")
+    result = await _chat_run(proxy, tool=tool, sink=sink)
+    # `delta.reasoning_content` (Groq, Ollama…) au tour 1, une nouvelle partie au tour 2.
+    assert [type(e) for e in sink.events] == [
+        Thinking,
+        SearchStarted,
+        SearchDone,
+        Thinking,
+        Thinking,
+        Writing,
+    ]
+    thinking = [e for e in sink.events if isinstance(e, Thinking)]
+    assert thinking == [
+        Thinking(0, "Je cherche le prix."),
+        Thinking(1, "Vérif"),
+        Thinking(1, "Vérifie le prix"),
+    ]
+    assert result.reasoning_text == "Je cherche le prix.\n\nVérifie le prix"
+    # Pas de `reasoning_details` reçu : aucun n'est recopié.
+    assert "reasoning_details" not in proxy.bodies[1]["messages"][2]
+
+
+async def test_chat_reasoning_of_a_retried_round_is_a_new_part():
+    bad = _stream(
+        _chunk({"reasoning": "Premier essai"}),
+        _chunk({"content": "{cassé"}),
+        _chunk(finish="stop"),
+    )
+    sink = _Recorder()
+    await _chat_run(_Proxy(lambda: bad, "chat_reasoning_final.sse"), sink=sink)
+    thinking = [e for e in sink.events if isinstance(e, Thinking)]
+    assert thinking[0] == Thinking(0, "Premier essai")
+    assert thinking[1:] == [Thinking(1, "Vérif"), Thinking(1, "Vérifie le prix")]
+
+
+@pytest.mark.parametrize("max_searches", [0, 2])
+async def test_chat_last_round_tool_choice_none(max_searches):
+    # Un modèle qui appelle l'outil à chaque tour, même quand on le lui interdit.
+    proxy = _Proxy("chat_search_price.sse")
+    backend = _Backend()
+    tool = WebSearchTool(backend, max_searches=max_searches, on_event=None)
+    with pytest.raises(LLMError) as info:
+        await _chat_run(proxy, tool=tool)
+    assert info.value.code == "invalid_response"
+    _assert_not_chained(info.value)
+    rounds = max_searches + 2
+    assert len(proxy.bodies) == rounds + 1  # tous les tours, plus une seule reprise du dernier
+    choices = [body.get("tool_choice") for body in proxy.bodies]
+    assert choices == [None] * (rounds - 1) + ["none", "none"]
+    assert all(body["tools"] for body in proxy.bodies)
+    assert len(backend.queries) == max_searches
+
+
+async def test_chat_search_limit_then_conclude():
+    proxy = _Proxy("chat_search_price.sse", "chat_search_price.sse", "chat_final.sse")
+    backend, sink = _Backend(), _Recorder()
+    tool = WebSearchTool(backend, max_searches=1, on_event=sink)
+    result = await _chat_run(proxy, tool=tool, sink=sink)
+
+    assert [body.get("tool_choice") for body in proxy.bodies] == [None, None, "none"]
+    outputs = [m["content"] for m in proxy.bodies[2]["messages"] if m["role"] == "tool"]
+    assert outputs[0].startswith("<resultats_recherche>")
+    assert outputs[1] == "Limite de recherches atteinte : conclus avec ce que tu sais."
+    assert [type(e) for e in sink.events] == [SearchStarted, SearchDone, Writing]
+    assert result.rounds == 3 and backend.queries == ["iPhone 18 Pro prix"]
+
+
+async def test_chat_unknown_tool_and_bad_arguments():
+    proxy = _Proxy("chat_bad_calls.sse", "chat_final.sse")
+    backend, sink = _Backend(), _Recorder()
+    tool = WebSearchTool(backend, max_searches=3, on_event=sink)
+    result = await _chat_run(proxy, tool=tool, sink=sink)
+
+    assistant = proxy.bodies[1]["messages"][2]
+    assert [call["id"] for call in assistant["tool_calls"]] == ["call_foo", "call_bad"]
+    assert _tool_messages(proxy.bodies[1]) == {
+        "call_foo": "Outil inconnu.",
+        "call_bad": "Arguments invalides.",
+    }
+    roles = [m["role"] for m in proxy.bodies[1]["messages"]]
+    assert roles == ["system", "user", "assistant", "tool", "tool"]
+    assert backend.queries == [] and sink.events == [Writing()]
+    assert result.analysis.score == 72 and result.searches == []
+
+
+async def test_chat_tool_call_without_id_is_an_invalid_response():
+    call = {"index": 0, "type": "function", "function": {"name": "web_search", "arguments": "{}"}}
+    reply = _stream(_chunk({"tool_calls": [call]}), _chunk(finish="tool_calls"))
+    proxy = _Proxy(lambda: reply)
+    tool = WebSearchTool(_Backend(), max_searches=3, on_event=None)
+    with pytest.raises(LLMError) as info:
+        await _chat_run(proxy, tool=tool)
+    assert info.value.code == "invalid_response"
+    assert len(proxy.bodies) == 2
+
+
+async def test_chat_tool_call_without_tools_is_an_invalid_response():
+    proxy = _Proxy("chat_search_price.sse")
+    with pytest.raises(LLMError) as info:
+        await _chat_run(proxy)
+    assert info.value.code == "invalid_response"
+    assert len(proxy.bodies) == 2
+    assert "tools" not in proxy.bodies[0]
+
+
+async def test_chat_truncated_answer_is_an_invalid_response():
+    truncated = _stream(_chunk({"content": '{"score": 7'}), _chunk(finish="length"))
+    proxy = _Proxy(lambda: truncated, "chat_final.sse")
+    result = await _chat_run(proxy)
+    assert len(proxy.bodies) == 2 and result.analysis.score == 72
+
+
+async def test_chat_stream_cut_after_an_event_is_transport_without_retry():
+    # Ni fin de choix ni `[DONE]` après un `Thinking` : pas de reprise, l'extension l'a affiché.
+    cut = _stream(_chunk({"reasoning": "Vérif"}))
+    proxy = _Proxy(lambda: cut, "chat_final.sse")
+    sink = _Recorder()
+    with pytest.raises(LLMError) as info:
+        await _chat_run(proxy, sink=sink)
+    assert info.value.code == "transport"
+    _assert_not_chained(info.value)
+    assert len(proxy.bodies) == 1
+    assert sink.events == [Thinking(0, "Vérif")]
+
+
+async def test_chat_error_chunk_is_transport_without_leak():
+    error = f'data: {{"error": {{"code": 502, "message": "{BODY_MARKER}"}}}}\n\n'
+    proxy = _Proxy(lambda: _stream(error))
+    with pytest.raises(LLMError) as info:
+        await _chat_run(proxy)
+    assert info.value.code == "transport"
+    assert BODY_MARKER not in str(info.value) and BODY_MARKER not in repr(info.value)
+    _assert_not_chained(info.value)
+    assert len(proxy.bodies) == 2  # rien d'émis : une nouvelle tentative
+
+
+async def test_chat_event_sink_error_propagates_without_retry():
+    class SinkBug(ValueError):
+        pass
+
+    async def failing_sink(event: LLMEvent) -> None:
+        raise SinkBug("récepteur cassé")
+
+    proxy = _Proxy("chat_reasoning_final.sse")
+    with pytest.raises(SinkBug):
+        await _chat_run(proxy, sink=failing_sink)  # type: ignore[arg-type]
+    assert len(proxy.bodies) == 1  # ni réponse invalide, ni nouvelle tentative
+
+
+async def test_chat_cost_summed():
+    proxy = _Proxy("chat_search_price.sse", "chat_final.sse")
+    tool = WebSearchTool(_Backend(), max_searches=3, on_event=None)
+    result = await _chat_run(proxy, provider=_provider(cost_source="usage_cost"), tool=tool)
+    # `usage.cost` du dernier morceau de chaque tour : 0,001 $ puis 0,002 $.
+    assert result.cost_usd_micros == 3000
+
+
+@pytest.mark.parametrize("effort", ["low", "high"])
+async def test_chat_reasoning_effort_goes_to_extra_body(effort):
+    proxy = _Proxy("chat_final.sse")
+    await _chat_run(proxy, provider=_provider(reasoning_effort=effort))
+    assert proxy.bodies[0]["reasoning"] == {"effort": effort}
+
+
+async def test_openrouter_reasoning_low():
+    config = load_providers(REPO_PROVIDERS)["openrouter"]
+    openrouter = replace(config, base_url=BASE, extra_body=config.extra_body_dict())
+    assert openrouter.reasoning_effort == "low"
+    proxy = _Proxy("chat_final.sse")
+    await _chat_run(proxy, provider=openrouter, env={"OPENROUTER_API_KEY": KEY})
+    [body] = proxy.bodies
+    assert body["reasoning"] == {"effort": "low"}  # remplace `reasoning: { enabled: false }`
+    assert body["provider"]["data_collection"] == "deny"
+    assert body["usage"] == {"include": True}
+    assert body["response_format"]["type"] == "json_schema"
 
 
 # --- API Responses (`api = "responses"`, proxy openai-oauth) -----------------------------------
