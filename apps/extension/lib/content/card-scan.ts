@@ -4,8 +4,9 @@ import type {
 	ExtractResult,
 	MarketplaceAdapter,
 } from "../adapters/types";
+import type { DebugLog } from "../debug-log";
 import type { Listing } from "../listing/types";
-import type { BgResponse } from "../messages";
+import type { BgResponse, ScanRequest } from "../messages";
 import { evaluate, type UnknownField } from "../rules/score";
 import type { AiClient } from "./ai-client";
 
@@ -32,6 +33,8 @@ export interface ScanCardDeps {
 	fetchPage(url: string): Promise<string>;
 	/** Annonce envoyée à l'IA (fiche récupérée ou carte), juste avant le scan. */
 	onListing?(listing: Listing): void;
+	/** Logs du superuser (fiche récupérée, scan demandé) ; aucun par défaut. */
+	debugLog?: DebugLog;
 }
 
 const fail = (code: string): BgResponse<never> => ({
@@ -95,6 +98,11 @@ export async function scanCard(
 	let unknown: ReadonlySet<UnknownField>;
 	let partial: boolean;
 	const extracted = await fetchListing(card, cardUrl, deps);
+	deps.debugLog?.group("fiche récupérée", {
+		url: card.url,
+		extracted: extracted !== null,
+		partial: extracted === null,
+	});
 	if (extracted) {
 		listing = extracted.listing;
 		unknown = new Set(
@@ -111,12 +119,14 @@ export async function scanCard(
 
 	const report = evaluate(listing, { unknown });
 	deps.onListing?.(listing);
-	return deps.ai.scan({
+	const request: ScanRequest = {
 		listing,
 		signals: report.signals,
 		rulesVersion: report.rulesVersion,
 		scanKind: "text",
 		trigger: "card",
 		partial,
-	});
+	};
+	deps.debugLog?.group("scan demandé", request);
+	return deps.ai.scan(request);
 }

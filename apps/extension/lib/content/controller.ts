@@ -1,5 +1,6 @@
 import type { Locale } from "@radarnaque/shared";
 import { adapterFor } from "../adapters/registry";
+import type { DebugLog } from "../debug-log";
 import type { Listing, Site } from "../listing/types";
 import { evaluate, type RiskReport, type UnknownField } from "../rules/score";
 
@@ -41,6 +42,8 @@ export interface ControllerDeps {
 	mounter: Mounter;
 	getLocale(site: Site): Promise<Locale>;
 	log?: (msg: string) => void;
+	/** Logs du superuser (annonce extraite, analyse locale) ; aucun par défaut. */
+	debugLog?: DebugLog;
 }
 
 interface Mounted {
@@ -92,6 +95,11 @@ export function createController(deps: ControllerDeps): {
 	let disposed = false;
 	/** URL dont l'échec d'extraction a déjà été journalisé. */
 	let loggedFailure: string | null = null;
+	/**
+	 * Clé (`mountedKey`) dont l'extraction a déjà été passée aux logs de debug :
+	 * un log par changement, pas un à chaque passage de 250 ms.
+	 */
+	let debugKey: string | null = null;
 	/** URL pour laquelle une pastille perdue a déjà été remontée (une fois au plus). */
 	let remountedUrl: string | null = null;
 	/** URL dont une erreur de `refresh` a déjà été journalisée. */
@@ -114,6 +122,7 @@ export function createController(deps: ControllerDeps): {
 		const adapter = adapterFor(url);
 		if (adapter?.pageType(url, doc) !== "listing") {
 			loggedFailure = null;
+			debugKey = null;
 			clear();
 			return;
 		}
@@ -144,6 +153,18 @@ export function createController(deps: ControllerDeps): {
 			return;
 		const view: BadgeView = { report, listing: result.listing };
 		const key = mountedKey(view, locale);
+		if (key !== debugKey) {
+			debugKey = key;
+			deps.debugLog?.group("annonce extraite", {
+				listing: result.listing,
+				missing: result.missing,
+			});
+			deps.debugLog?.group("analyse locale", {
+				score: report.score,
+				level: report.level,
+				signals: report.signals,
+			});
+		}
 
 		if (current?.anchor === anchor && current.externalId === externalId) {
 			if (mounter.isMounted()) {

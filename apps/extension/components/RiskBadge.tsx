@@ -7,17 +7,20 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { isDebug } from "../lib/access";
 import type { AccessCache } from "../lib/content/access-policy";
 import type { AiClient } from "../lib/content/ai-client";
 import type { AiResultStore } from "../lib/content/ai-results";
 import { shownResult } from "../lib/content/shown-result";
 import { useAiScan } from "../lib/content/use-ai-scan";
 import { contentText, signalText } from "../lib/content-i18n";
+import type { DebugLog } from "../lib/debug-log";
 import type { Listing } from "../lib/listing/types";
 import type { Severity, Signal } from "../lib/rules/rules";
 import type { RiskReport } from "../lib/rules/score";
 import { AiErrorBoundary } from "./AiErrorBoundary";
 import { AiSection } from "./AiSection";
+import { DebugSection } from "./DebugSection";
 import { LEVEL_KEY, LEVEL_STYLE, SEVERITY_STYLE } from "./risk-styles";
 
 const SEVERITY_ORDER: Record<Severity, number> = {
@@ -114,6 +117,7 @@ export function RiskBadge({
 	ai,
 	accessCache,
 	aiResults,
+	debugLog,
 }: {
 	report: RiskReport;
 	listing: Listing;
@@ -124,6 +128,8 @@ export function RiskBadge({
 	accessCache?: AccessCache;
 	/** Résultats IA gardés 24 h, partagés avec les icônes de cartes. */
 	aiResults?: AiResultStore;
+	/** Logs de debug du superuser (scan demandé, scan reçu). */
+	debugLog?: DebugLog;
 }) {
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -138,6 +144,7 @@ export function RiskBadge({
 		locale,
 		accessCache,
 		aiResults,
+		debugLog,
 	);
 	const { loadAccess } = scan;
 	// Accès lu à l'ouverture du panneau, jamais avant. Panneau ouvert, il est relu
@@ -166,6 +173,15 @@ export function RiskBadge({
 	const style = LEVEL_STYLE[level];
 	const title = contentText(locale, shown ? "panel.titleAi" : "panel.title");
 	// Vendeur déclaré professionnel par le site, ou détecté par l'IA.
+	// Section Debug : le serveur a renvoyé `debug` ET l'accès lu est celui du
+	// superuser. Un résultat repris du magasin n'a jamais de `debug`.
+	const debug =
+		shown?.result.debug &&
+		scan.access !== "loading" &&
+		!("error" in scan.access) &&
+		isDebug(scan.access)
+			? { kind: shown.kind, data: shown.result.debug }
+			: null;
 	const professional =
 		listing.seller.sellerKind === "professional" ||
 		shown?.result.professional === true;
@@ -225,6 +241,14 @@ export function RiskBadge({
 							loginUnavailable={scan.loginUnavailable}
 							pricingUrl={scan.pricingUrl}
 						/>
+						{debug && (
+							<DebugSection
+								locale={locale}
+								debug={debug.data}
+								rescanning={scan.rescanning[debug.kind] === true}
+								onRescan={() => scan.rescan(debug.kind)}
+							/>
+						)}
 					</AiErrorBoundary>
 					{!shown && (
 						<p className="m-0 mt-3 border-t border-slate-200 pt-2 text-[12px] text-slate-600">

@@ -233,6 +233,43 @@ describe("textes de la section IA", () => {
 	});
 });
 
+describe("textes de la section Debug (superuser)", () => {
+	const debugKeys = (locale: "fr" | "nl") =>
+		Object.keys(CONTENT_TEXTS[locale])
+			.filter((key) => key.startsWith("debug."))
+			.sort();
+
+	test("textes FR et NL imposés, parité exacte des clés debug.*", () => {
+		const fr: Record<string, string> = {
+			"debug.title": "Debug (superuser)",
+			"debug.copy": "Copier",
+			"debug.copied": "Copié",
+			"debug.rescan": "Relancer sans cache",
+			"debug.systemPrompt": "Prompt système",
+			"debug.messages": "Messages envoyés",
+			"debug.rawResponse": "Réponse brute",
+		};
+		const nl: Record<string, string> = {
+			"debug.title": "Debug (superuser)",
+			"debug.copy": "Kopiëren",
+			"debug.copied": "Gekopieerd",
+			"debug.rescan": "Opnieuw zonder cache",
+			"debug.systemPrompt": "Systeemprompt",
+			"debug.messages": "Verzonden berichten",
+			"debug.rawResponse": "Ruw antwoord",
+		};
+		for (const [locale, expected] of [
+			["fr", fr],
+			["nl", nl],
+		] as const) {
+			const texts = CONTENT_TEXTS[locale] as Record<string, string>;
+			for (const [key, text] of Object.entries(expected))
+				expect(texts[key], `${locale} ${key}`).toBe(text);
+			expect(debugKeys(locale)).toEqual(Object.keys(expected).sort());
+		}
+	});
+});
+
 describe("aiErrorText", () => {
 	test("un code connu renvoie son texte dans la langue active", () => {
 		expect(aiErrorText("fr", "quota_exhausted")).toBe(

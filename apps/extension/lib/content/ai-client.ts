@@ -23,6 +23,13 @@ export type ScanState =
 	| { status: "done"; result: AnalysisResult }
 	| { status: "error"; code: string };
 
+/** Ce que le log de debug « scan reçu » montre : le résultat (avec `debug`) ou le code d'erreur. */
+export function scanOutcome(state: ScanState): unknown {
+	if (state.status === "done") return state.result;
+	if (state.status === "error") return { error: state.code };
+	return state;
+}
+
 export function createAiClient(send = sendToBackground): AiClient {
 	return {
 		access: () => send<ContentAccess>({ type: "content/access" }),

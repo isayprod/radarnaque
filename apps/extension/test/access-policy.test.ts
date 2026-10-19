@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
 	ACTIVE_TTL_MS,
 	createAccessCache,
+	isDebugCached,
 	isStale,
 	RECHECK_MS,
 	RELOGIN_CODES,
@@ -111,4 +112,21 @@ test("RELOGIN_CODES : session expirée ou non authentifié", () => {
 		"session_expired",
 		"unauthenticated",
 	]);
+});
+
+describe("isDebugCached", () => {
+	test("vrai seulement pour un accès actif de superuser déjà en cache", () => {
+		const t = clocked();
+		// Jamais lu : faux, sans aucune lecture.
+		expect(isDebugCached(t.cache)).toBe(false);
+		t.read(active);
+		expect(isDebugCached(t.cache)).toBe(false);
+		t.read({ ...active, debug: true });
+		expect(isDebugCached(t.cache)).toBe(true);
+		t.read({ error: "network" });
+		expect(isDebugCached(t.cache)).toBe(false);
+		t.read({ ...active, debug: true });
+		t.cache.invalidate();
+		expect(isDebugCached(t.cache)).toBe(false);
+	});
 });

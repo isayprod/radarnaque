@@ -7,6 +7,11 @@ import {
 	type Mounter,
 } from "../lib/content/controller";
 import type { BadgeView } from "../lib/content/use-ai-scan";
+import {
+	createDebugLog,
+	type DebugLog,
+	type DebugSink,
+} from "../lib/debug-log";
 import type { Site } from "../lib/listing/types";
 import type { RiskReport } from "../lib/rules/score";
 import { loadFixture } from "./helpers";
@@ -78,6 +83,7 @@ function setup(
 	doc: Document,
 	initialUrl: string,
 	locale: (site: Site) => Promise<Locale> = async () => "fr",
+	debugLog?: DebugLog,
 ) {
 	let url = new URL(initialUrl);
 	const fake = fakeMounter();
@@ -90,6 +96,7 @@ function setup(
 		mounter: fake.mounter,
 		getLocale,
 		log,
+		debugLog,
 	});
 	disposers.push(controller.dispose);
 	return {
@@ -213,6 +220,82 @@ describe("createController — 2ememain", () => {
 		const t = setup(doc, FIXED_URL);
 		await t.controller.refresh();
 		expect(t.ops).toEqual([]);
+	});
+});
+
+/** Console simulée : les groupes écrits, titre et objet. */
+function fakeSink() {
+	const sink = {
+		groupCollapsed: vi.fn<DebugSink["groupCollapsed"]>(),
+		log: vi.fn<DebugSink["log"]>(),
+		groupEnd: vi.fn<DebugSink["groupEnd"]>(),
+	};
+	const groups = () =>
+		sink.groupCollapsed.mock.calls.map(([title], i) => ({
+			title,
+			data: sink.log.mock.calls[i]?.[0],
+		}));
+	return { sink, groups };
+}
+
+describe("createController — logs de debug (superuser)", () => {
+	test("superuser : annonce extraite et analyse locale, une fois par changement", async () => {
+		const doc = loadFixture("twh/listing-fixed.html");
+		const { sink, groups } = fakeSink();
+		const t = setup(
+			doc,
+			FIXED_URL,
+			undefined,
+			createDebugLog(() => true, sink),
+		);
+		await t.controller.refresh();
+		await t.controller.refresh();
+		await t.controller.refresh();
+
+		const mount = t.of("mount")[0];
+		expect(groups().map((g) => g.title)).toEqual([
+			"[Radarnaque debug] annonce extraite",
+			"[Radarnaque debug] analyse locale",
+		]);
+		const [extracted, local] = groups();
+		expect(extracted?.data).toEqual({
+			listing: mount?.view.listing,
+			missing: expect.any(Array),
+		});
+		expect(local?.data).toEqual({
+			score: mount?.report.score,
+			level: mount?.report.level,
+			signals: mount?.report.signals,
+		});
+
+		// Annonce modifiée par le site : un nouveau couple de logs.
+		const description = doc.querySelector('[data-collapsable="description"]');
+		const node = description?.querySelector("p, div") ?? description;
+		node?.append(doc.createTextNode(" Texte ajouté par le vendeur."));
+		await t.controller.refresh();
+		await t.controller.refresh();
+		expect(groups()).toHaveLength(4);
+		const changed = groups()[2]?.data as
+			| { listing: BadgeView["listing"] }
+			| undefined;
+		expect(changed?.listing.description).toContain(
+			"Texte ajouté par le vendeur.",
+		);
+	});
+
+	test("utilisateur standard : aucun log de debug", async () => {
+		const doc = loadFixture("twh/listing-fixed.html");
+		const { sink } = fakeSink();
+		const t = setup(
+			doc,
+			FIXED_URL,
+			undefined,
+			createDebugLog(() => false, sink),
+		);
+		await t.controller.refresh();
+		expect(t.of("mount")).toHaveLength(1);
+		expect(sink.groupCollapsed).not.toHaveBeenCalled();
+		expect(sink.log).not.toHaveBeenCalled();
 	});
 });
 

@@ -10,7 +10,7 @@ import {
 	type StoredAiResult,
 } from "../lib/content/ai-results";
 import type { Listing } from "../lib/listing/types";
-import { sampleAnalysis } from "./helpers";
+import { debugAnalysis, sampleAnalysis } from "./helpers";
 
 const ANALYZED_AT = Date.parse(sampleAnalysis.analyzedAt);
 
@@ -110,6 +110,37 @@ describe("createAiResultStore : lecture et écriture", () => {
 		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
 		const got = await store.get("2ememain.be", "m1");
 		expect(got?.text?.result.remaining).toEqual(NO_REMAINING);
+	});
+
+	test("le bloc debug (prompts, réponse brute) n'est jamais stocké ni rendu", async () => {
+		const mem = memoryArea();
+		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
+		await store.put(
+			"2ememain.be",
+			"m1",
+			entryOf(ANALYZED_AT, { result: debugAnalysis }),
+		);
+		const stored = mem.value()["2ememain.be|m1"]?.text?.result;
+		expect(stored).toBeDefined();
+		expect(stored).not.toHaveProperty("debug");
+		expect(JSON.stringify(mem.value())).not.toContain(
+			"Tu analyses une annonce.",
+		);
+		const got = await store.get("2ememain.be", "m1");
+		expect(got?.text?.result).not.toHaveProperty("debug");
+		expect(got?.text?.result.summary).toEqual(debugAnalysis.summary);
+	});
+
+	test("une ancienne entrée avec un bloc debug est rendue sans lui", async () => {
+		const mem = memoryArea({
+			"2ememain.be|m1": {
+				v: 1,
+				text: entryOf(ANALYZED_AT, { result: debugAnalysis }),
+			},
+		});
+		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
+		const got = await store.get("2ememain.be", "m1");
+		expect(got?.text?.result).not.toHaveProperty("debug");
 	});
 
 	test("R4 : une entrée par type ; texte et photos coexistent", async () => {
