@@ -140,6 +140,9 @@ async function* readSse(
 			if (done) break;
 		}
 	} finally {
+		// Lecture finie, ou abandonnée par l'appelant (sortie anticipée de sa boucle) :
+		// le flux est annulé, ce qui ferme la connexion, puis le verrou est rendu.
+		await reader.cancel().catch(() => {});
 		reader.releaseLock();
 	}
 }
