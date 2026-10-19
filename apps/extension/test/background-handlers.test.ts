@@ -56,6 +56,7 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}) {
 		api,
 		openPopup,
 		clearAiResults: clear,
+		devBuild: true,
 		...overrides,
 	};
 	return { deps, auth, jwt, api, openPopup, clearAiResults: clear };
@@ -536,6 +537,29 @@ describe("content/debug", () => {
 			ok: true,
 			data: false,
 		});
+	});
+});
+
+describe("build de production (devBuild: false, R5)", () => {
+	test("content/debug d'un compte connecté : faux, sans appel à getMe", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps, api } = makeDeps({ devBuild: false });
+		api.getMe.mockResolvedValue(superuserMe);
+		expect(await createHandlers(deps)({ type: "content/debug" })).toEqual({
+			ok: true,
+			data: false,
+		});
+		expect(api.getMe).not.toHaveBeenCalled();
+	});
+
+	test("scan/run d'un compte connecté : aucune lecture paresseuse de me", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps, api } = makeDeps({ devBuild: false });
+		expect(
+			await createHandlers(deps)({ type: "scan/run", scan: scanRequest() }),
+		).toEqual({ ok: true, data: sampleAnalysis });
+		expect(api.scan).toHaveBeenCalledTimes(1);
+		expect(api.getMe).not.toHaveBeenCalled();
 	});
 });
 

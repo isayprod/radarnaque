@@ -26,7 +26,7 @@ import {
 	createCardMounter,
 } from "../lib/content/card-mounter";
 import { createController } from "../lib/content/controller";
-import { createDebugFlag } from "../lib/content/debug-flag";
+import { createDebugFlag, disabledDebugFlag } from "../lib/content/debug-flag";
 import { createUiFactory } from "../lib/content/ui-context";
 import { resolveContentLocale } from "../lib/content-i18n";
 import { createDebugLog, type DebugLog } from "../lib/debug-log";
@@ -111,10 +111,13 @@ export default defineContentScript({
 		// drapeau du service worker (`content/debug`, sans appel réseau hors
 		// session). Le drapeau passé à vrai demande un passage du contrôleur de
 		// fiche, qui journalise alors l'annonce affichée (une fois par clé).
-		const debugFlag = createDebugFlag(
-			() => sendToBackground<boolean>({ type: "content/debug" }),
-			() => void controller.refresh(),
-		);
+		// R5 : en build de production, drapeau inerte et aucun `content/debug`.
+		const debugFlag = import.meta.env.DEV
+			? createDebugFlag(
+					() => sendToBackground<boolean>({ type: "content/debug" }),
+					() => void controller.refresh(),
+				)
+			: disabledDebugFlag;
 		const debugLog = createDebugLog(
 			() => isDebugCached(accessCache) || debugFlag.current(),
 		);

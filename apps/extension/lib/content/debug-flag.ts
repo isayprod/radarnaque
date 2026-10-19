@@ -45,3 +45,13 @@ export function createDebugFlag(
 		},
 	};
 }
+
+/**
+ * Drapeau inerte des builds de production (R5) : toujours faux, aucun message
+ * `content/debug` envoyé. La plomberie du superuser n'existe qu'en dev.
+ */
+export const disabledDebugFlag: DebugFlag = {
+	current: () => false,
+	read() {},
+	readIfOff() {},
+};
