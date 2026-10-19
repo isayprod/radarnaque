@@ -1,0 +1,39 @@
+# Configuration de SearXNG, le moteur de recherche web de l'API (outil web_search des analyses).
+# Montée en lecture seule dans /etc/searxng/settings.yml (voir docker-compose.dev.yml et
+# docker-compose.yml). Les réglages absents viennent des valeurs par défaut de l'image.
+use_default_settings:
+  engines:
+    # Seuls ces moteurs restent actifs ; tous les autres sont désactivés.
+    keep_only:
+      - brave
+      - duckduckgo
+      - bing
+      - qwant
+      - startpage
+      - wikipedia
+
+server:
+  # Le service n'est joignable que par l'API (réseau interne en production, 127.0.0.1 en dev).
+  limiter: false
+  # Variable d'environnement SEARXNG_SECRET (voir infra/.env.example).
+  secret_key: "${SEARXNG_SECRET}"
+
+search:
+  # `json` est requis par l'API (GET /search?q=…&format=json).
+  formats:
+    - html
+    - json
+  safe_search: 1
+  default_lang: "fr-BE"
+
+# keep_only conserve l'état par défaut de chaque moteur : bing et qwant sont désactivés par
+# défaut, et startpage inactif (défaut de cette version : son captcha à preuve de travail peut le
+# faire échouer, SearXNG l'ignore alors pour la requête). On les active ici.
+engines:
+  - name: bing
+    disabled: false
+  - name: qwant
+    disabled: false
+  - name: startpage
+    inactive: false
+    disabled: false

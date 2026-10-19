@@ -29,5 +29,23 @@ services:
       - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro
       - ../apps/site/dist:/srv/site:ro
 
+  # Moteur de recherche web de l'API (outil web_search), joint sur http://127.0.0.1:8888
+  # (SEARXNG_URL par défaut de l'API). Configuration : searxng/settings.yml. Le secret ne sert
+  # qu'à l'instance locale : `openssl rand -hex 32` dans infra/.env (SEARXNG_SECRET) pour en changer.
+  searxng:
+    image: searxng/searxng:2026.10.4-d48c4b555
+    ports:
+      - "127.0.0.1:8888:8080"
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-dev-only-searxng-secret-not-for-production}
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
 volumes:
   postgres-data:
