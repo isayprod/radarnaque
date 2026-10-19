@@ -80,6 +80,10 @@ Rien de ceci n'a pu être essayé : `infra/.env` n'a ni clé Groq ni clé OpenRo
   - le déroulé n'a pas de défilement automatique (voulu) ; la fin d'une analyse n'est pas annoncée aux lecteurs d'écran, et il n'y a pas d'`aria-busy`.
 - **Reprise d'un résultat 24 h après un changement de prompt :** comme en 3c, un résultat gardé dans le navigateur reste affiché même si le prompt a changé.
 - **Hors de la phase (spec §13) :** Brave Search et Tavily (l'interface `SearchBackend` est prête), recherche par image inversée, texte de réflexion gardé en base, analyse IA automatique.
+- **Texte `ai.error.analysis_failed` de l'extension :** dans `apps/extension/lib/content-i18n.ts` (FR et NL), il promet « Elle ne vous a pas été décomptée » même pour une erreur interne après le commit (`details.reason = "internal"`), alors que le serveur ne le promet plus. Piste : texte neutre pour `reason: internal`, ou code distinct.
+- **Panneau (`ScanBlock` d'`AiSection.tsx`) :** après un échec, « Relancer » ou « Analyser » reste proposé même si l'accès relu indique 0 analyse (la pastille, elle, n'affiche plus rien). Le serveur refuse proprement en 402.
+- **Tâches créées par `asyncio.shield` :** dans `routes/scans.py` et `services/scans.py`, elles n'ont pas de référence forte une fois l'appelant annulé. Piste : les ajouter à un ensemble fort comme `_TASKS`. Le test `test_analysis_task_is_strongly_referenced_until_done` dépend de l'ensemble global `_TASKS`.
+- **Fermeture du flux en ASGI 2.4 :** quand le client part en cours de flux, Starlette ne ferme pas explicitement `body_iterator`. L'annulation de l'analyse dépend alors du ramasse-miettes (le scan reste rendu une seule fois). Fermer la réponse au départ du client réglera ce point.
 
 ## Décisions prises pendant l'exécution
 
