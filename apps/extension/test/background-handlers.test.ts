@@ -91,6 +91,7 @@ function wire(deps: HandlerDeps, scanApi: Pick<ApiClient, "scanStream">) {
 		api: scanApi,
 		allowSender: () => true,
 		debug,
+		keepAlive: async () => {},
 	});
 	async function scan(request: unknown) {
 		const tab = fakePort();

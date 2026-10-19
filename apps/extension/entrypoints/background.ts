@@ -72,6 +72,8 @@ export default defineBackground(() => {
 			api,
 			allowSender: portSenderGuard(self, isSupportedPage),
 			debug,
+			// Tient le service worker en vie pendant un tour du modèle sans événement.
+			keepAlive: () => browser.runtime.getPlatformInfo(),
 		}),
 	);
 	browser.runtime.onMessageExternal.addListener(
