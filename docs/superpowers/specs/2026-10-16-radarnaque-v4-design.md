@@ -303,6 +303,14 @@ Les poids ci-dessus sont les poids initiaux du MVP ; ils pourront être ajustés
 - Le JWT ne sert **qu'à identifier** l'utilisateur (`sub`).
 - Le **rôle** (`auth.user.role`) et le **plan** (abonnement actif) sont relus en base à chaque requête qui dépend des droits. Un changement fait dans l'admin s'applique donc immédiatement.
 
+### 5.3 bis Superuser de développement
+
+- **Rôle `superuser`**, réservé au développement : il n'a d'effet que si l'API ne tourne pas en production (`ENV != production`) et le service auth refuse de l'attribuer quand `NODE_ENV=production`. En production, un compte qui porterait ce rôle est traité comme un compte ordinaire (et une alerte est journalisée).
+- **Attribution :** au démarrage en dev, le service auth donne ce rôle au compte dont l'email est dans `DEV_SUPERUSER_EMAIL` (`infra/.env`, jamais commité) et le crée s'il n'existe pas ; `pnpm dev:superuser <email>` le donne à un autre compte.
+- **Droits :** aucun quota, aucune limite de requêtes, toutes les fonctionnalités (photos, icônes des cartes).
+- **Debug :** pour un superuser, `POST /api/scans` renvoie un bloc `debug` (fournisseur, modèle, version et texte du prompt, messages envoyés au LLM avec les images résumées, réponse brute, cache, tokens, coût, durées, empreintes) et l'API l'écrit dans sa console (`[debug superuser]`). Jamais de clé d'API ni de jeton. Le champ `noCache` de la requête force un nouvel appel au LLM (ignoré pour les autres rôles).
+- **Extension :** pour un superuser, les content scripts et le service worker écrivent des groupes de logs `[Radarnaque debug]` (annonce extraite, règles locales, requête, réponse, bloc `debug`) ; le panneau a une section « Debug (superuser) » et un bouton « Relancer sans cache » ; la popup affiche « Superuser (dev) ».
+
 ### 5.4 Page d'administration
 
 L'admin se connecte par lien magique ou code, sur la même origine (session cookie), puis échange sa session contre un JWT via `/auth/token`.
