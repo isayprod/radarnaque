@@ -3,7 +3,6 @@ import { useId } from "react";
 // Erreurs qui demandent une reconnexion (RELOGIN_CODES) : on propose le bouton « Se connecter ».
 import { RELOGIN_CODES } from "../lib/content/access-policy";
 import type { ScanState } from "../lib/content/ai-client";
-import { type ShownResult, shownResult } from "../lib/content/shown-result";
 import { aiErrorText, contentText } from "../lib/content-i18n";
 import type { ContentAccess, ScanKind } from "../lib/messages";
 import { LEVEL_KEY, LEVEL_STYLE, SEVERITY_STYLE } from "./risk-styles";
@@ -25,6 +24,20 @@ const BUTTON_CLASS =
 function canScanPhotos(access: ContentAccess): boolean {
 	if (access.status !== "active") return false;
 	return access.unlimited || access.features.includes("image_scan");
+}
+
+/**
+ * Provisoire, jusqu'à la section IA à scan unique (tâche 12) : le résultat affiché
+ * parmi les deux anciennes places, celle des photos d'abord.
+ */
+interface ShownResult {
+	kind: ScanKind;
+	result: AnalysisResult;
+}
+function shownOf(text: ScanState, image: ScanState): ShownResult | null {
+	if (image.status === "done") return { kind: "image", result: image.result };
+	if (text.status === "done") return { kind: "text", result: text.result };
+	return null;
 }
 
 const LINK_CLASS =
@@ -63,7 +76,7 @@ export function AiSection(props: AiSectionProps) {
 }
 
 function SectionBody(props: AiSectionProps) {
-	const shown = shownResult(props.text, props.image);
+	const shown = shownOf(props.text, props.image);
 	return shown ? (
 		<ShownBody {...props} shown={shown} />
 	) : (

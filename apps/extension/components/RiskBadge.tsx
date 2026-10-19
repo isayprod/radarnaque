@@ -9,7 +9,7 @@ import {
 } from "react";
 import { isDebug } from "../lib/access";
 import type { AccessCache } from "../lib/content/access-policy";
-import type { AiClient } from "../lib/content/ai-client";
+import type { AiClient, ScanState } from "../lib/content/ai-client";
 import type { AiResultStore } from "../lib/content/ai-results";
 import { shownResult } from "../lib/content/shown-result";
 import { useAiScan } from "../lib/content/use-ai-scan";
@@ -22,6 +22,9 @@ import { AiErrorBoundary } from "./AiErrorBoundary";
 import { AiSection } from "./AiSection";
 import { DebugBoundary, DebugSection } from "./DebugSection";
 import { LEVEL_KEY, LEVEL_STYLE, SEVERITY_STYLE } from "./risk-styles";
+
+/** Provisoire (tâche 12) : l'ancienne place photos de la section IA, toujours vide. */
+const IDLE: ScanState = { status: "idle" };
 
 const SEVERITY_ORDER: Record<Severity, number> = {
 	danger: 0,
@@ -165,26 +168,26 @@ export function RiskBadge({
 		};
 	}, [open, loadAccess]);
 
-	// Dès qu'un résultat IA existe (photos d'abord, sinon texte), il remplace
-	// l'analyse locale dans la pastille et dans le panneau.
-	const shown = shownResult(scan.text, scan.image);
-	const level = shown ? shown.result.level : report.level;
-	const score = shown ? shown.result.score : report.score;
+	// Dès qu'un résultat IA existe, il remplace l'analyse locale dans la pastille
+	// et dans le panneau.
+	const shown = shownResult(scan.ai);
+	const level = shown ? shown.level : report.level;
+	const score = shown ? shown.score : report.score;
 	const style = LEVEL_STYLE[level];
 	const title = contentText(locale, shown ? "panel.titleAi" : "panel.title");
 	// Vendeur déclaré professionnel par le site, ou détecté par l'IA.
 	// Section Debug : le serveur a renvoyé `debug` ET l'accès lu est celui du
 	// superuser. Un résultat repris du magasin n'a jamais de `debug`.
 	const debug =
-		shown?.result.debug &&
+		shown?.debug &&
 		scan.access !== "loading" &&
 		!("error" in scan.access) &&
 		isDebug(scan.access)
-			? { kind: shown.kind, data: shown.result.debug }
+			? shown.debug
 			: null;
 	const professional =
 		listing.seller.sellerKind === "professional" ||
-		shown?.result.professional === true;
+		shown?.professional === true;
 
 	// Police en px et reset explicite : le site hôte ne doit ni agrandir ni styler la pastille.
 	return (
@@ -234,9 +237,11 @@ export function RiskBadge({
 							locale={locale}
 							access={scan.access}
 							hasPhotos={listing.images.length > 0}
-							text={scan.text}
-							image={scan.image}
-							onScan={scan.scan}
+							// Provisoire (tâche 12 : une seule action) : la place unique passe
+							// par l'ancienne place texte.
+							text={scan.ai}
+							image={IDLE}
+							onScan={() => scan.scan()}
 							onLogin={scan.login}
 							loginUnavailable={scan.loginUnavailable}
 							pricingUrl={scan.pricingUrl}
@@ -246,14 +251,14 @@ export function RiskBadge({
 							// totale distingue une relance sans cache, qui réécrit l'analyse en
 							// place (même analysisId, même inputHash).
 							<DebugBoundary
-								key={`${listing.site}|${listing.externalId}|${debug.kind}|${debug.data.analysisId}|${debug.data.inputHash}|${debug.data.timingsMs.total}`}
+								key={`${listing.site}|${listing.externalId}|${debug.analysisId}|${debug.inputHash}|${debug.timingsMs.total}`}
 							>
 								<DebugSection
 									locale={locale}
-									debug={debug.data}
-									rescanning={scan.rescanning[debug.kind] === true}
-									onRescan={() => scan.rescan(debug.kind)}
-									error={scan.rescanError[debug.kind]}
+									debug={debug}
+									rescanning={scan.rescanning}
+									onRescan={scan.rescan}
+									error={scan.rescanError ?? undefined}
 								/>
 							</DebugBoundary>
 						)}

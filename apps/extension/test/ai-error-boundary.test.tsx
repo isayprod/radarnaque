@@ -41,7 +41,10 @@ const report: RiskReport = {
 
 const ai: AiClient = {
 	access: async () => ({ ok: true, data: { status: "signedOut" } }),
-	scan: async () => ({ ok: false, error: { code: "analysis_failed" } }),
+	scan: () => ({
+		done: Promise.resolve({ ok: false, error: { code: "analysis_failed" } }),
+		cancel: () => {},
+	}),
 	openLogin: async () => ({ ok: true, data: null }),
 };
 

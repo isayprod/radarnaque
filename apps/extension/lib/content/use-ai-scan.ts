@@ -1,61 +1,72 @@
-import type { Locale } from "@radarnaque/shared";
+import type { Locale, ScanProgressEvent } from "@radarnaque/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiSectionProps } from "../../components/AiSection";
 import { PUBLIC_URL } from "../config";
 import type { DebugLog } from "../debug-log";
-import type { ScanKind, ScanRequest } from "../messages";
+import type { ScanRequest } from "../messages";
 import {
 	type AccessCache,
 	type AccessReading,
 	createAccessCache,
 	RELOGIN_CODES,
 } from "./access-policy";
-import { type AiClient, type ScanState, scanOutcome } from "./ai-client";
+import {
+	type AiClient,
+	CANCELLED,
+	type ScanHandle,
+	type ScanState,
+	scanOutcome,
+} from "./ai-client";
 import {
 	type AiResultStore,
 	listingFingerprint,
-	type StoredAiResults,
+	type StoredAiResult,
 	withoutRemaining,
 } from "./ai-results";
 import type { BadgeView } from "./controller";
+import { addEvent, startProgress } from "./scan-progress";
 
 export type { BadgeView } from "./controller";
 
 type AccessState = AiSectionProps["access"];
 
-/** États de la section IA, liés à une annonce par `key`. */
+/** État de la section IA, lié à une annonce par `key`. */
 interface Slots {
 	key: string;
 	/** `null` : accès pas encore chargé pour cette annonce. */
 	access: AccessState | null;
-	text: ScanState;
-	image: ScanState;
+	/** L'analyse IA de l'annonce : une seule place (`full`). */
+	ai: ScanState;
 	/**
-	 * Empreinte de l'annonce analysée (ou restaurée) pour chaque état `done`.
+	 * Empreinte de l'annonce analysée (ou restaurée) pour l'état `done`.
 	 * L'annonce affichée change sous la même clé (prix, description) : l'état
 	 * revient à `idle` et la pastille à l'analyse locale (I2).
 	 */
-	doneFingerprint: Partial<Record<ScanKind, string>>;
+	doneFingerprint: string | null;
 	/**
-	 * Relance sans cache en cours (superuser), par type : le résultat affiché
-	 * reste en place, seul le bouton de la section Debug l'indique.
+	 * Relance sans cache en cours (superuser) : le résultat affiché reste en
+	 * place, seul le bouton de la section Debug l'indique.
 	 */
-	rescanning: Partial<Record<ScanKind, true>>;
+	rescanning: boolean;
 	/**
-	 * Code d'erreur de la dernière relance sans cache, par type : le résultat
-	 * affiché reste en place et l'erreur s'affiche dans la section Debug.
+	 * Code d'erreur de la dernière relance sans cache : le résultat affiché
+	 * reste en place et l'erreur s'affiche dans la section Debug.
 	 */
-	rescanError: Partial<Record<ScanKind, string>>;
+	rescanError: string | null;
 	loginUnavailable: boolean;
 }
 
 /**
  * Portée des requêtes d'une annonce. Remplacée quand la clé change : toute
- * réponse arrivée pour une ancienne portée est ignorée.
+ * réponse ou tout événement arrivé pour une ancienne portée est ignoré.
  */
 interface Scope {
 	key: string;
-	inflight: Set<ScanKind>;
+	/**
+	 * Analyse en cours (une à la fois) : annulée au changement d'annonce et au
+	 * démontage, ce qui ferme son port et rend le scan côté serveur.
+	 */
+	inflight: ScanHandle | null;
 	/** Une lecture de l'accès est en cours. */
 	reading: boolean;
 	/** Numéro de la dernière lecture de l'accès : seules ses réponses comptent. */
@@ -66,37 +77,26 @@ interface Scope {
 
 const IDLE: ScanState = { status: "idle" };
 
-const KINDS: readonly ScanKind[] = ["text", "image"];
-
 const freshSlots = (key: string, access: AccessState | null): Slots => ({
 	key,
 	access,
-	text: IDLE,
-	image: IDLE,
-	doneFingerprint: {},
-	rescanning: {},
-	rescanError: {},
+	ai: IDLE,
+	doneFingerprint: null,
+	rescanning: false,
+	rescanError: null,
 	loginUnavailable: false,
 });
 
-/** Les états `done` d'une autre version de l'annonce reviennent à `idle` (I2). */
+/** Un état `done` d'une autre version de l'annonce revient à `idle` (I2). */
 function dropStale(slots: Slots, fingerprint: string): Slots {
-	let next = slots;
-	for (const kind of KINDS) {
-		if (
-			next[kind].status !== "done" ||
-			next.doneFingerprint[kind] === fingerprint
-		)
-			continue;
-		const { [kind]: _, ...others } = next.doneFingerprint;
-		next = { ...next, [kind]: IDLE, doneFingerprint: others };
-	}
-	return next;
+	if (slots.ai.status !== "done" || slots.doneFingerprint === fingerprint)
+		return slots;
+	return { ...slots, ai: IDLE, doneFingerprint: null };
 }
 
 const freshScope = (key: string): Scope => ({
 	key,
-	inflight: new Set(),
+	inflight: null,
 	reading: false,
 	accessSeq: 0,
 	storeRead: false,
@@ -107,8 +107,8 @@ const keyOf = (view: BadgeView) =>
 
 export interface AiScan {
 	access: AccessState;
-	text: ScanState;
-	image: ScanState;
+	/** L'analyse IA : `loading` porte la progression en direct, `done` la garde. */
+	ai: ScanState;
 	loginUnavailable: boolean;
 	pricingUrl: string;
 	/**
@@ -119,25 +119,29 @@ export interface AiScan {
 	 * panneau passe à `active` sans rechargement.
 	 */
 	loadAccess(): void;
-	scan(kind: ScanKind): void;
+	scan(): void;
 	/**
-	 * Superuser : relance le scan `kind` avec `noCache: true`. Le résultat
-	 * affiché reste en place pendant la relance (`rescanning`) ; il est remplacé
-	 * par un nouveau résultat, ou gardé en cas d'erreur (`rescanError`).
+	 * Superuser : relance l'analyse avec `noCache: true`. Le résultat affiché
+	 * reste en place pendant la relance (`rescanning`) ; il est remplacé par un
+	 * nouveau résultat, ou gardé en cas d'erreur (`rescanError`).
 	 */
-	rescan(kind: ScanKind): void;
-	/** Types dont une relance sans cache est en cours. */
-	rescanning: Partial<Record<ScanKind, true>>;
-	/** Code d'erreur de la dernière relance, par type ; effacé à la suivante. */
-	rescanError: Partial<Record<ScanKind, string>>;
+	rescan(): void;
+	/** Une relance sans cache est en cours. */
+	rescanning: boolean;
+	/** Code d'erreur de la dernière relance ; effacé à la suivante. */
+	rescanError: string | null;
 	login(): void;
 }
 
 /**
- * État des analyses IA de la pastille. Il vit dans le composant de la pastille :
+ * État de l'analyse IA de la pastille. Il vit dans le composant de la pastille :
  * fermer le panneau ne le perd pas. Aucun scan n'est lancé sans appel à `scan`.
  * L'accès vient de `accessCache`, partagé avec les icônes de cartes et gardé
  * d'une annonce à l'autre (R8) ; à défaut, un cache propre à la pastille.
+ *
+ * Pendant l'analyse, chaque événement du flux met à jour la progression. Une autre
+ * annonce (navigation sans rechargement) ou le démontage annule l'analyse en
+ * cours : son port est fermé, et ses derniers événements sont ignorés.
  *
  * `aiResults` garde les résultats 24 h : à l'arrivée sur une annonce, un
  * résultat complet dont l'empreinte est celle de l'annonce affichée est repris
@@ -162,6 +166,7 @@ export function useAiScan(
 	);
 	const scopeRef = useRef<Scope>(freshScope(key));
 	// Nouvelle annonce : nouvelle portée, les réponses de l'ancienne sont ignorées.
+	// Son analyse en cours est annulée par l'effet de portée, ci-dessous.
 	if (scopeRef.current.key !== key) scopeRef.current = freshScope(key);
 	// Et retour immédiat à l'état initial, sans un rendu avec l'ancien résultat.
 	// L'accès en cache reste affiché : il ne dépend pas de l'annonce.
@@ -194,70 +199,55 @@ export function useAiScan(
 		};
 	}, []);
 
-	/** Applique `patch` si le composant est monté et la portée toujours celle de l'annonce affichée. */
-	const patch = useCallback((scope: Scope, update: Partial<Slots>) => {
-		if (!mountedRef.current || scopeRef.current !== scope) return;
-		setSlots((prev) =>
-			prev.key === scope.key ? { ...prev, ...update } : prev,
-		);
-	}, []);
+	// Point 4 de Review Focus : l'analyse de l'annonce quittée (nouvelle clé) ou
+	// du composant démonté est annulée. Le port fermé, le service worker annule la
+	// requête et le serveur rend le scan.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `key` délimite la portée dont l'analyse est annulée
+	useEffect(() => {
+		const scope = scopeRef.current;
+		return () => {
+			scope.inflight?.cancel();
+			scope.inflight = null;
+		};
+	}, [key]);
 
-	/**
-	 * État d'un type. Un `done` retient l'empreinte de l'annonce analysée ;
-	 * `onlyIfIdle` : pas d'écrasement d'un scan en cours ou fini.
-	 */
-	const setKind = useCallback(
-		(
-			scope: Scope,
-			kind: ScanKind,
-			state: ScanState,
-			analysed?: string,
-			onlyIfIdle = false,
-		) => {
-			if (!mountedRef.current || scopeRef.current !== scope) return;
-			setSlots((prev) => {
-				if (prev.key !== scope.key) return prev;
-				if (onlyIfIdle && prev[kind].status !== "idle") return prev;
-				const { [kind]: _, ...others } = prev.doneFingerprint;
-				const doneFingerprint =
-					state.status === "done" && analysed !== undefined
-						? { ...others, [kind]: analysed }
-						: others;
-				// Un nouvel état pour ce type met fin à sa relance sans cache.
-				const { [kind]: __, ...rescanning } = prev.rescanning;
-				const { [kind]: ___, ...rescanError } = prev.rescanError;
-				return {
-					...prev,
-					[kind]: state,
-					doneFingerprint,
-					rescanning,
-					rescanError,
-				};
-			});
-		},
+	/** Vrai si le composant est monté et la portée toujours celle de l'annonce affichée. */
+	const current = useCallback(
+		(scope: Scope) => mountedRef.current && scopeRef.current === scope,
 		[],
 	);
 
-	/**
-	 * Relance sans cache de `kind` : `running` l'indique en cours ; `error` est
-	 * le code de son échec, ou null (relance commencée : erreur précédente effacée).
-	 */
-	const setRescan = useCallback(
-		(scope: Scope, kind: ScanKind, running: boolean, error: string | null) => {
-			if (!mountedRef.current || scopeRef.current !== scope) return;
-			setSlots((prev) => {
-				if (prev.key !== scope.key) return prev;
-				const { [kind]: _, ...rescanning } = prev.rescanning;
-				const { [kind]: __, ...rescanError } = prev.rescanError;
-				return {
-					...prev,
-					rescanning: running ? { ...rescanning, [kind]: true } : rescanning,
-					rescanError:
-						error === null ? rescanError : { ...rescanError, [kind]: error },
-				};
-			});
+	/** Applique `update` à l'état de la portée, si elle est toujours celle affichée. */
+	const patch = useCallback(
+		(scope: Scope, update: (prev: Slots) => Slots) => {
+			if (!current(scope)) return;
+			setSlots((prev) => (prev.key === scope.key ? update(prev) : prev));
 		},
-		[],
+		[current],
+	);
+
+	/**
+	 * État de l'analyse. Un `done` retient l'empreinte de l'annonce analysée ;
+	 * `onlyIfIdle` : pas d'écrasement d'un scan en cours ou fini. Un nouvel état
+	 * met fin à la relance sans cache.
+	 */
+	const setAi = useCallback(
+		(scope: Scope, state: ScanState, analysed?: string, onlyIfIdle = false) =>
+			patch(scope, (prev) =>
+				onlyIfIdle && prev.ai.status !== "idle"
+					? prev
+					: {
+							...prev,
+							ai: state,
+							doneFingerprint:
+								state.status === "done" && analysed !== undefined
+									? analysed
+									: null,
+							rescanning: false,
+							rescanError: null,
+						},
+			),
+		[patch],
 	);
 
 	// Une seule lecture du magasin par annonce (portée), jamais un scan.
@@ -267,28 +257,26 @@ export function useAiScan(
 		if (!aiResults || scope.storeRead) return;
 		scope.storeRead = true;
 		const { site, externalId } = viewRef.current.listing;
-		const adopt = (entries: StoredAiResults | null) => {
-			if (!entries) return;
+		const adopt = (entry: StoredAiResult | null) => {
 			const current = listingFingerprint(viewRef.current.listing);
-			// Chaque type est repris seul (R4).
-			for (const kind of KINDS) {
-				const entry = entries[kind];
-				// Résultat partiel (carte) ou annonce changée depuis l'analyse : pastille locale.
-				if (!entry || entry.result.partial || entry.fingerprint !== current)
-					continue;
-				// I1 : jamais le quota restant de l'époque. Un scan de ce type, en
-				// cours ou fini (pas `idle`), l'emporte sur l'entrée lue.
-				setKind(
-					scope,
-					kind,
-					{ status: "done", result: withoutRemaining(entry.result) },
-					entry.fingerprint,
-					true,
-				);
-			}
+			// Résultat partiel (carte) ou annonce changée depuis l'analyse : pastille locale.
+			if (!entry || entry.result.partial || entry.fingerprint !== current)
+				return;
+			// I1 : jamais le quota restant de l'époque. Un scan en cours ou fini
+			// (pas `idle`) l'emporte sur l'entrée lue. Aucun déroulé n'est gardé.
+			setAi(
+				scope,
+				{
+					status: "done",
+					result: withoutRemaining(entry.result),
+					progress: null,
+				},
+				entry.fingerprint,
+				true,
+			);
 		};
 		void aiResults.get(site, externalId).then(adopt, () => {});
-	}, [aiResults, key, setKind]);
+	}, [aiResults, key, setAi]);
 
 	const readAccess = useCallback(
 		(scope: Scope) => {
@@ -301,7 +289,7 @@ export function useAiScan(
 				cache.settle(ticket, access);
 				if (scope.accessSeq !== seq) return;
 				scope.reading = false;
-				patch(scope, { access });
+				patch(scope, (prev) => ({ ...prev, access }));
 			};
 			void client.access().then(
 				(response) =>
@@ -322,21 +310,19 @@ export function useAiScan(
 		}
 		// Accès encore valable, peut-être lu ailleurs (icônes de cartes).
 		const access = cache.current();
-		if (access) patch(scope, { access });
+		if (access) patch(scope, (prev) => ({ ...prev, access }));
 	}, [readAccess, patch, cache, key]);
 
 	const run = useCallback(
-		(kind: ScanKind, noCache: boolean) => {
+		(noCache: boolean) => {
 			const scope = scopeRef.current;
-			// Un scan en cours pour ce type : pas de second (double clic).
-			if (scope.inflight.has(kind)) return;
-			scope.inflight.add(kind);
+			// Une analyse en cours (scan ou relance) : pas de seconde (double clic).
+			if (scope.inflight || !current(scope)) return;
 			const { listing, report } = viewRef.current;
 			const request: ScanRequest = {
 				listing,
 				signals: report.signals,
 				rulesVersion: report.rulesVersion,
-				scanKind: kind,
 				trigger: "button",
 				// Fiche lue en entier : `partial` ne vaut vrai que pour un scan depuis une carte.
 				partial: false,
@@ -345,14 +331,35 @@ export function useAiScan(
 				...(noCache ? { noCache: true } : {}),
 			};
 			const analysed = listingFingerprint(listing);
+			// Suivie ici, hors de l'état React : le résultat final la garde (déroulé
+			// du panneau), y compris celui d'une relance.
+			let progress = startProgress(Date.now());
 			if (noCache) {
 				// Relance : le résultat affiché reste en place (pas de retour à
 				// l'analyse locale), seul le bouton de la section Debug change.
-				setRescan(scope, kind, true, null);
-			} else setKind(scope, kind, { status: "loading" });
+				patch(scope, (prev) => ({
+					...prev,
+					rescanning: true,
+					rescanError: null,
+				}));
+			} else setAi(scope, { status: "loading", progress });
 			debugLog?.group("scan demandé", request);
+
+			const onEvent = (e: ScanProgressEvent) => {
+				// Événement d'une annonce quittée, ou après le démontage : ignoré.
+				if (!current(scope)) return;
+				progress = addEvent(progress, e, Date.now());
+				if (noCache) return;
+				const loading: ScanState = { status: "loading", progress };
+				patch(scope, (prev) =>
+					prev.ai.status === "loading" ? { ...prev, ai: loading } : prev,
+				);
+			};
 			const finish = (state: ScanState) => {
-				scope.inflight.delete(kind);
+				if (scope.inflight === handle) scope.inflight = null;
+				// Annulée (autre annonce, démontage) : ni état, ni log, ni écriture,
+				// ni relecture de l'accès.
+				if (state.status === "error" && state.code === CANCELLED) return;
 				debugLog?.group("scan reçu", scanOutcome(state));
 				// Gardé 24 h, même si l'annonce affichée a changé entre-temps :
 				// l'entrée porte l'empreinte de l'annonce lue au clic.
@@ -360,7 +367,6 @@ export function useAiScan(
 					void aiResults
 						?.put(listing.site, listing.externalId, {
 							result: state.result,
-							scanKind: kind,
 							fingerprint: analysed,
 							storedAt: Date.now(),
 						})
@@ -368,47 +374,55 @@ export function useAiScan(
 				// Relance en échec : le résultat affiché reste, l'erreur va à la
 				// section Debug. Sinon (annonce modifiée depuis le clic), le rendu
 				// suivant remet l'état à `idle`.
-				if (noCache && state.status === "error")
-					setRescan(scope, kind, false, state.code);
-				else setKind(scope, kind, state, analysed);
+				if (noCache && state.status === "error") {
+					const code = state.code;
+					patch(scope, (prev) => ({
+						...prev,
+						rescanning: false,
+						rescanError: code,
+					}));
+				} else setAi(scope, state, analysed);
 				// R8 : session expirée, l'accès en cache ne vaut plus, pour les
 				// icônes de cartes aussi.
 				if (state.status === "error" && RELOGIN_CODES.has(state.code))
 					cache.invalidate();
 				// Quota consommé, session expirée (R3 : l'accès relu dit alors signedOut) :
 				// l'accès est relu après chaque scan, réussi ou non, même actif en cache.
-				if (mountedRef.current && scopeRef.current === scope) readAccess(scope);
+				if (current(scope)) readAccess(scope);
 			};
-			void client.scan(request).then(
+
+			const handle = client.scan(request, onEvent);
+			scope.inflight = handle;
+			void handle.done.then(
 				(response) =>
 					finish(
 						response.ok
-							? { status: "done", result: response.data }
+							? { status: "done", result: response.data, progress }
 							: { status: "error", code: response.error.code },
 					),
 				() => finish({ status: "error", code: "background_unavailable" }),
 			);
 		},
-		[client, setKind, setRescan, readAccess, cache, aiResults, debugLog],
+		[client, current, patch, setAi, readAccess, cache, aiResults, debugLog],
 	);
 
-	const scan = useCallback((kind: ScanKind) => run(kind, false), [run]);
-	const rescan = useCallback((kind: ScanKind) => run(kind, true), [run]);
+	const scan = useCallback(() => run(false), [run]);
+	const rescan = useCallback(() => run(true), [run]);
 
 	const login = useCallback(() => {
 		const scope = scopeRef.current;
 		void client.openLogin().then(
 			(response) => {
-				patch(scope, { loginUnavailable: !response.ok });
+				const loginUnavailable = !response.ok;
+				patch(scope, (prev) => ({ ...prev, loginUnavailable }));
 			},
-			() => patch(scope, { loginUnavailable: true }),
+			() => patch(scope, (prev) => ({ ...prev, loginUnavailable: true })),
 		);
 	}, [client, patch]);
 
 	return {
 		access: slots.access ?? "loading",
-		text: slots.text,
-		image: slots.image,
+		ai: slots.ai,
 		loginUnavailable: slots.loginUnavailable,
 		pricingUrl: `${PUBLIC_URL}/pricing/?lang=${locale}`,
 		loadAccess,

@@ -1,4 +1,8 @@
-import type { AnalysisResult, Locale } from "@radarnaque/shared";
+import type {
+	AnalysisResult,
+	Locale,
+	ScanProgressEvent,
+} from "@radarnaque/shared";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { facebookAdapter } from "../lib/adapters/facebook";
 import { twhAdapter } from "../lib/adapters/twh";
@@ -49,7 +53,8 @@ const withCards: ContentAccess = {
 	features: ["card_icons"],
 	unlimited: false,
 	debug: false,
-	remaining: { text: 3, image: null, total: null },
+	maxImages: 4,
+	remaining: { scans: 3 },
 };
 const standard: ContentAccess = { ...withCards, features: [] };
 const signedOut: ContentAccess = { status: "signedOut" };
@@ -106,6 +111,9 @@ function fakeMounts() {
 	return { mounts, mountCard, live, liveOf, lastView };
 }
 
+/** Progression gardée par une analyse terminée après un clic. */
+const SCANNED = expect.objectContaining({ steps: expect.any(Array) });
+
 /** Promesse résolue de l'extérieur. */
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -143,9 +151,9 @@ function setup(
 			ok: true,
 			data: (queue.length > 1 ? queue.shift() : queue[0]) as ContentAccess,
 		})),
-		scan: vi.fn<AiClient["scan"]>(async () => ({
-			ok: true,
-			data: sampleAnalysis,
+		scan: vi.fn<AiClient["scan"]>(() => ({
+			done: Promise.resolve({ ok: true, data: sampleAnalysis }),
+			cancel: vi.fn(),
 		})),
 		openLogin: vi.fn<AiClient["openLogin"]>(),
 	};
@@ -484,6 +492,7 @@ describe("createCardController — remontage (R4)", () => {
 		expect(t.lastView(id).state).toEqual({
 			status: "done",
 			result: sampleAnalysis,
+			progress: SCANNED,
 		});
 
 		first.host.remove();
@@ -495,6 +504,7 @@ describe("createCardController — remontage (R4)", () => {
 		expect(second.views[0]?.state).toEqual({
 			status: "done",
 			result: sampleAnalysis,
+			progress: SCANNED,
 		});
 		expect(t.mountCard).toHaveBeenCalledTimes(7);
 	});
@@ -664,7 +674,10 @@ describe("createCardController — clic et scan", () => {
 		const id = FB_IDS[1] as string;
 		t.lastView(id).onActivate();
 
-		expect(t.lastView(id).state).toEqual({ status: "loading" });
+		expect(t.lastView(id).state).toEqual({
+			status: "loading",
+			progress: expect.objectContaining({ steps: [] }),
+		});
 		expect(t.scan).toHaveBeenCalledTimes(1);
 		const [card, deps] = t.scan.mock.calls[0] ?? [];
 		expect(card?.externalId).toBe(id);
@@ -683,6 +696,7 @@ describe("createCardController — clic et scan", () => {
 			expect(t.lastView(id).state).toEqual({
 				status: "done",
 				result: sampleAnalysis,
+				progress: SCANNED,
 			}),
 		);
 		// Clic après done : rien.
@@ -690,6 +704,72 @@ describe("createCardController — clic et scan", () => {
 		expect(t.scan).toHaveBeenCalledTimes(1);
 		// Les autres cartes restent inactives.
 		expect(t.lastView(FB_IDS[0] as string).state).toEqual({ status: "idle" });
+	});
+
+	test("card shows live progress while scanning", async () => {
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH, [withCards], { realScan: true });
+		let emit!: (e: ScanProgressEvent) => void;
+		const outcome = deferred<BgResponse<AnalysisResult>>();
+		t.ai.scan.mockImplementationOnce((_req, onEvent) => {
+			emit = onEvent;
+			return { done: outcome.promise, cancel: vi.fn() };
+		});
+		await t.controller.refresh();
+		const id = FB_IDS[0] as string;
+		t.lastView(id).onActivate();
+		await vi.waitFor(() => expect(t.ai.scan).toHaveBeenCalledTimes(1));
+
+		const photos = { type: "stage", stage: "photos", count: 1 } as const;
+		const search = {
+			type: "search",
+			id: 1,
+			query: "vélo prix",
+			aspect: "price",
+		} as const;
+		emit(photos);
+		emit(search);
+		const state = t.lastView(id).state;
+		expect(state.status).toBe("loading");
+		if (state.status !== "loading") return;
+		expect(state.progress.steps.map((s) => s.event)).toEqual([photos, search]);
+		expect(state.progress.last).toEqual(search);
+		// Les autres cartes ne reçoivent rien.
+		expect(t.lastView(FB_IDS[1] as string).state).toEqual({ status: "idle" });
+
+		outcome.resolve({ ok: true, data: sampleAnalysis });
+		await vi.waitFor(() => expect(t.lastView(id).state.status).toBe("done"));
+		const done = t.lastView(id).state;
+		// Le résultat garde le déroulé de l'analyse.
+		expect(done.status === "done" && done.progress?.steps).toHaveLength(2);
+	});
+
+	test("dispose : l'analyse en cours est annulée, son issue ignorée", async () => {
+		const doc = loadFixture("facebook/grid.html");
+		const debugSink = fakeSink();
+		const mem = memoryStore();
+		const t = setup(doc, FB_SEARCH, [withCards], {
+			realScan: true,
+			aiResults: mem.store,
+			debugLog: createDebugLog(() => true, debugSink.sink),
+		});
+		const outcome = deferred<BgResponse<AnalysisResult>>();
+		const cancel = vi.fn(() =>
+			outcome.resolve({ ok: false, error: { code: "cancelled" } }),
+		);
+		t.ai.scan.mockReturnValueOnce({ done: outcome.promise, cancel });
+		await t.controller.refresh();
+		t.lastView(FB_IDS[0] as string).onActivate();
+		await vi.waitFor(() => expect(t.ai.scan).toHaveBeenCalledTimes(1));
+
+		t.controller.dispose();
+		expect(cancel).toHaveBeenCalledTimes(1);
+		await outcome.promise;
+		await t.controller.refresh();
+		expect(mem.store.put).not.toHaveBeenCalled();
+		expect(debugSink.groups().map((g) => g.title)).not.toContain(
+			"[Radarnaque debug] scan reçu",
+		);
 	});
 
 	test("clic après une erreur : nouvelle tentative", async () => {
@@ -920,6 +1000,34 @@ const partialEntry = (
 const adopted = { ...sampleAnalysis, remaining: NO_REMAINING };
 
 describe("createCardController — résultats gardés 24 h", () => {
+	test("stored entry reused for card", async () => {
+		// Analysée sur la fiche (pastille), entrée complète : l'icône la reprend telle quelle.
+		const id = FB_IDS[4] as string;
+		const mem = memoryStore({
+			[`facebook.com|${id}`]: {
+				v: 2,
+				...partialEntry({
+					result: { ...sampleAnalysis, remaining: { scans: 3 } },
+				}),
+			},
+		});
+		const doc = loadFixture("facebook/grid.html");
+		const t = setup(doc, FB_SEARCH, [withCards], {
+			realScan: true,
+			aiResults: mem.store,
+		});
+		await t.controller.refresh();
+		await vi.waitFor(() =>
+			expect(t.lastView(id).state).toEqual({
+				status: "done",
+				result: adopted,
+				progress: null,
+			}),
+		);
+		t.lastView(id).onActivate();
+		expect(t.ai.scan).not.toHaveBeenCalled();
+	});
+
 	test("entrée stockée : icône montée puis done sans clic, ai.scan jamais appelé", async () => {
 		const id = FB_IDS[2] as string;
 		const mem = memoryStore({
@@ -935,6 +1043,7 @@ describe("createCardController — résultats gardés 24 h", () => {
 			expect(t.lastView(id).state).toEqual({
 				status: "done",
 				result: { ...adopted, partial: true },
+				progress: null,
 			}),
 		);
 		expect(mem.store.get).toHaveBeenCalledWith("facebook.com", id);
@@ -960,7 +1069,7 @@ describe("createCardController — résultats gardés 24 h", () => {
 		expect(t.lastView(id).state).toEqual({ status: "idle" });
 	});
 
-	test("après un scan de carte réussi : entrée écrite, type text, empreinte de l'annonce analysée", async () => {
+	test("après un scan de carte réussi : entrée écrite (une seule place), empreinte de l'annonce analysée", async () => {
 		const mem = memoryStore();
 		const doc = loadFixture("facebook/grid.html");
 		const t = setup(doc, FB_SEARCH, [withCards], {
@@ -974,7 +1083,6 @@ describe("createCardController — résultats gardés 24 h", () => {
 		const scanned = t.ai.scan.mock.calls[0]?.[0];
 		expect(mem.store.put).toHaveBeenCalledWith("facebook.com", id, {
 			result: sampleAnalysis,
-			scanKind: "text",
 			fingerprint: listingFingerprint(scanned?.listing as never),
 			storedAt: expect.any(Number),
 		});
@@ -987,9 +1095,9 @@ describe("createCardController — résultats gardés 24 h", () => {
 			realScan: true,
 			aiResults: mem.store,
 		});
-		t.ai.scan.mockResolvedValueOnce({
-			ok: false,
-			error: { code: "rate_limited" },
+		t.ai.scan.mockReturnValueOnce({
+			done: Promise.resolve({ ok: false, error: { code: "rate_limited" } }),
+			cancel: vi.fn(),
 		});
 		await t.controller.refresh();
 		const id = FB_IDS[0] as string;
@@ -1021,6 +1129,7 @@ describe("createCardController — résultats gardés 24 h", () => {
 			expect(t.lastView(id).state).toEqual({
 				status: "done",
 				result: adopted,
+				progress: null,
 			}),
 		);
 		expect(t.ai.scan).not.toHaveBeenCalled();
@@ -1040,7 +1149,11 @@ describe("createCardController — résultats gardés 24 h", () => {
 		const t = setup(doc, FB_SEARCH, [withCards], { aiResults: store });
 		await t.controller.refresh();
 		await vi.waitFor(() =>
-			expect(t.lastView(id).state).toEqual({ status: "done", result: adopted }),
+			expect(t.lastView(id).state).toEqual({
+				status: "done",
+				result: adopted,
+				progress: null,
+			}),
 		);
 	});
 
@@ -1069,7 +1182,10 @@ describe("createCardController — résultats gardés 24 h", () => {
 		t.lastView(id).onActivate();
 		pending.resolve(partialEntry());
 		await t.controller.refresh();
-		expect(t.lastView(id).state).toEqual({ status: "loading" });
+		expect(t.lastView(id).state).toEqual({
+			status: "loading",
+			progress: expect.objectContaining({ steps: [] }),
+		});
 	});
 
 	test("magasin indisponible : icônes idle, le clic fonctionne", async () => {
@@ -1092,6 +1208,7 @@ describe("createCardController — résultats gardés 24 h", () => {
 			expect(t.lastView(id).state).toEqual({
 				status: "done",
 				result: sampleAnalysis,
+				progress: SCANNED,
 			}),
 		);
 	});

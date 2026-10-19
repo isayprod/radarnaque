@@ -23,7 +23,7 @@ import {
 } from "../lib/content/ai-results";
 import { aiErrorText, contentText } from "../lib/content-i18n";
 import type { Listing } from "../lib/listing/types";
-import type { ContentAccess } from "../lib/messages";
+import type { BgResponse, ContentAccess, ScanRequest } from "../lib/messages";
 import type { RiskReport } from "../lib/rules/score";
 import { debugAnalysis, sampleAnalysis, sampleDebug } from "./helpers";
 
@@ -47,8 +47,12 @@ const active: ContentAccess = {
 	features: [],
 	unlimited: false,
 	debug: false,
-	remaining: { text: 3, image: null, total: null },
+	maxImages: 4,
+	remaining: { scans: 3 },
 };
+
+/** Issue d'une analyse simulée, réglée par chaque test. */
+type ScanReply = (req: ScanRequest) => Promise<BgResponse<AnalysisResult>>;
 
 /** Client IA simulé : accès actif, scans réussis. Recréé avant chaque test. */
 let ai: AiClient & {
@@ -56,12 +60,18 @@ let ai: AiClient & {
 	scan: ReturnType<typeof vi.fn<AiClient["scan"]>>;
 	openLogin: ReturnType<typeof vi.fn<AiClient["openLogin"]>>;
 };
+/** L'issue de chaque analyse (`done`), sans événement de progression. */
+let scanReply: ReturnType<typeof vi.fn<ScanReply>>;
 beforeEach(() => {
+	scanReply = vi.fn<ScanReply>(async () => ({
+		ok: true,
+		data: sampleAnalysis,
+	}));
 	ai = {
 		access: vi.fn<AiClient["access"]>(async () => ({ ok: true, data: active })),
-		scan: vi.fn<AiClient["scan"]>(async () => ({
-			ok: true,
-			data: sampleAnalysis,
+		scan: vi.fn<AiClient["scan"]>((req) => ({
+			done: scanReply(req),
+			cancel: () => {},
 		})),
 		openLogin: vi.fn<AiClient["openLogin"]>(async () => ({
 			ok: true,
@@ -293,19 +303,21 @@ describe("RiskBadge : analyse IA", () => {
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
 		await user.click(toggle());
 		await user.click(await findRun());
-		expect(ai.scan).toHaveBeenCalledWith({
-			listing,
-			signals: high.signals,
-			rulesVersion: high.rulesVersion,
-			scanKind: "text",
-			trigger: "button",
-			partial: false,
-		});
+		expect(ai.scan).toHaveBeenCalledWith(
+			{
+				listing,
+				signals: high.signals,
+				rulesVersion: high.rulesVersion,
+				trigger: "button",
+				partial: false,
+			},
+			expect.any(Function),
+		);
 	});
 
 	test("double clic sur le bouton : une seule requête", async () => {
 		const user = userEvent.setup();
-		ai.scan.mockImplementation(() => new Promise(() => {}));
+		scanReply.mockImplementation(() => new Promise(() => {}));
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
 		await user.click(toggle());
 		await user.dblClick(await findRun());
@@ -317,7 +329,7 @@ describe("RiskBadge : analyse IA", () => {
 		ai.access
 			.mockResolvedValueOnce({ ok: true, data: active })
 			.mockResolvedValueOnce({ ok: true, data: { status: "signedOut" } });
-		ai.scan.mockResolvedValueOnce({
+		scanReply.mockResolvedValueOnce({
 			ok: false,
 			error: { code: "session_expired" },
 		});
@@ -550,14 +562,11 @@ describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
 			.split(" ")
 			.map((id) => document.getElementById(id)?.textContent);
 
-	/** Magasin simulé : une entrée par `site|externalId`, rangée sous son type. */
+	/** Magasin simulé : une entrée par `site|externalId`. */
 	const storeWith = (
 		entries: Record<string, StoredAiResult>,
 	): AiResultStore => ({
-		get: async (site, id) => {
-			const entry = entries[`${site}|${id}`];
-			return entry ? { [entry.scanKind]: entry } : null;
-		},
+		get: async (site, id) => entries[`${site}|${id}`] ?? null,
 		put: async () => {},
 		prune: async () => {},
 	});
@@ -581,7 +590,7 @@ describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
 
 	test("après un scan texte done (82, high) : pastille IA, panneau sans analyse locale", async () => {
 		const user = userEvent.setup();
-		ai.scan.mockResolvedValue({ ok: true, data: aiHigh });
+		scanReply.mockResolvedValue({ ok: true, data: aiHigh });
 		render(<RiskBadge report={medium} listing={listing} locale="fr" ai={ai} />);
 		await user.click(toggle());
 		await user.click(await findRun());
@@ -610,7 +619,7 @@ describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
 
 	test("en NL : mention « AI », libellé et titre NL", async () => {
 		const user = userEvent.setup();
-		ai.scan.mockResolvedValue({ ok: true, data: aiHigh });
+		scanReply.mockResolvedValue({ ok: true, data: aiHigh });
 		render(<RiskBadge report={medium} listing={listing} locale="nl" ai={ai} />);
 		await user.click(toggle());
 		await user.click(
@@ -635,7 +644,6 @@ describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
 		const aiResults = storeWith({
 			"2ememain.be|m123": {
 				result: aiHigh,
-				scanKind: "text",
 				fingerprint: listingFingerprint(listing),
 				storedAt: 1,
 			},
@@ -666,7 +674,6 @@ describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
 		const aiResults = storeWith({
 			"2ememain.be|m123": {
 				result: aiHigh,
-				scanKind: "text",
 				fingerprint: listingFingerprint(listing),
 				storedAt: 1,
 			},
@@ -700,7 +707,7 @@ describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
 
 	test("scan en cours sans résultat précédent : l'analyse locale reste affichée", async () => {
 		const user = userEvent.setup();
-		ai.scan.mockImplementation(() => new Promise(() => {}));
+		scanReply.mockImplementation(() => new Promise(() => {}));
 		render(<RiskBadge report={medium} listing={listing} locale="fr" ai={ai} />);
 		await user.click(toggle());
 		await user.click(await findRun());
@@ -711,41 +718,6 @@ describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
 		});
 		expect(dialog.textContent).toContain("Compte vendeur très récent");
 		expect(dialog.textContent).toContain(contentText("fr", "ai.loading"));
-	});
-
-	test("résultat texte, photos possibles : « Analyse avec photos », puis le résultat photos remplace le texte", async () => {
-		const user = userEvent.setup();
-		ai.access.mockResolvedValue({
-			ok: true,
-			data: { ...active, features: ["image_scan"] },
-		});
-		const imageResult: AnalysisResult = {
-			...aiHigh,
-			score: 91,
-			summary: { fr: "Photos volées.", nl: "Gestolen foto's." },
-		};
-		ai.scan
-			.mockResolvedValueOnce({ ok: true, data: aiHigh })
-			.mockResolvedValueOnce({ ok: true, data: imageResult });
-		const withPhotos = { ...listing, images: ["https://images.example/1.jpg"] };
-		render(
-			<RiskBadge report={medium} listing={withPhotos} locale="fr" ai={ai} />,
-		);
-		await user.click(toggle());
-		await user.click(await findRun());
-		await screen.findByText(aiHigh.summary.fr);
-		expect(
-			screen.queryByRole("button", { name: contentText("fr", "ai.run") }),
-		).toBeNull();
-		await user.click(
-			screen.getByRole("button", { name: contentText("fr", "ai.runPhotos") }),
-		);
-		await screen.findByText(imageResult.summary.fr);
-		expect(toggle().textContent).toContain("91/100");
-		expect(screen.queryByText(aiHigh.summary.fr)).toBeNull();
-		expect(
-			screen.queryByRole("button", { name: contentText("fr", "ai.runPhotos") }),
-		).toBeNull();
 	});
 });
 
@@ -767,7 +739,7 @@ describe("RiskBadge : section Debug (superuser)", () => {
 
 	test("debug reçu mais accès sans debug (compte ordinaire) : aucune section", async () => {
 		const user = userEvent.setup();
-		ai.scan.mockResolvedValue({ ok: true, data: debugAnalysis });
+		scanReply.mockResolvedValue({ ok: true, data: debugAnalysis });
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
 		await user.click(toggle());
 		await user.click(await findRun());
@@ -778,7 +750,7 @@ describe("RiskBadge : section Debug (superuser)", () => {
 	test("superuser, résultat avec debug : section en bas du panneau, modèle et prompt", async () => {
 		const user = userEvent.setup();
 		ai.access.mockResolvedValue({ ok: true, data: superuser });
-		ai.scan.mockResolvedValue({ ok: true, data: debugAnalysis });
+		scanReply.mockResolvedValue({ ok: true, data: debugAnalysis });
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
 		await user.click(toggle());
 		await user.click(await findRun());
@@ -794,14 +766,14 @@ describe("RiskBadge : section Debug (superuser)", () => {
 	test("« Relancer sans cache » : noCache: true, résultat gardé pendant la relance, puis remplacé", async () => {
 		const user = userEvent.setup();
 		ai.access.mockResolvedValue({ ok: true, data: superuser });
-		ai.scan.mockResolvedValueOnce({ ok: true, data: debugAnalysis });
+		scanReply.mockResolvedValueOnce({ ok: true, data: debugAnalysis });
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
 		await user.click(toggle());
 		await user.click(await findRun());
 		await screen.findByText(debugTitle);
 
-		let answer!: (value: Awaited<ReturnType<AiClient["scan"]>>) => void;
-		ai.scan.mockReturnValueOnce(
+		let answer!: (value: BgResponse<AnalysisResult>) => void;
+		scanReply.mockReturnValueOnce(
 			new Promise((resolve) => {
 				answer = resolve;
 			}),
@@ -839,7 +811,7 @@ describe("RiskBadge : section Debug (superuser)", () => {
 	test("relance en erreur : le verdict reste, l'erreur s'affiche dans la section Debug", async () => {
 		const user = userEvent.setup();
 		ai.access.mockResolvedValue({ ok: true, data: superuser });
-		ai.scan
+		scanReply
 			.mockResolvedValueOnce({ ok: true, data: debugAnalysis })
 			.mockResolvedValueOnce({ ok: false, error: { code: "rate_limited" } });
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
@@ -864,7 +836,7 @@ describe("RiskBadge : section Debug (superuser)", () => {
 			...debugAnalysis,
 			debug: { ...sampleDebug, messages: null },
 		} as unknown as AnalysisResult;
-		ai.scan.mockResolvedValue({ ok: true, data: broken });
+		scanReply.mockResolvedValue({ ok: true, data: broken });
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
 		await user.click(toggle());
 		await user.click(await findRun());
@@ -878,7 +850,7 @@ describe("RiskBadge : section Debug (superuser)", () => {
 	test("« Copier » écrit le JSON du debug dans le presse-papiers", async () => {
 		const user = userEvent.setup();
 		ai.access.mockResolvedValue({ ok: true, data: superuser });
-		ai.scan.mockResolvedValue({ ok: true, data: debugAnalysis });
+		scanReply.mockResolvedValue({ ok: true, data: debugAnalysis });
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
 		await user.click(toggle());
 		await user.click(await findRun());
@@ -945,7 +917,7 @@ describe("RiskBadge : bandeau des annonces professionnelles", () => {
 
 	test("IA professional: true, score 75 : le bandeau et « 75/100 » sont tous deux présents", async () => {
 		const user = userEvent.setup();
-		ai.scan.mockResolvedValue({
+		scanReply.mockResolvedValue({
 			ok: true,
 			data: { ...sampleAnalysis, professional: true, level: "high", score: 75 },
 		});
