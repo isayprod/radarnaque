@@ -94,6 +94,13 @@ describe("thinkingTitle", () => {
 		expect(thinkingTitle("Intro **Un** puis **Deux**")).toBe("Un");
 	});
 
+	test("titre en cours d'arrivée (** sans fermant) : le texte après le marqueur", () => {
+		expect(thinkingTitle("**Vérifie le pr")).toBe("Vérifie le pr");
+		expect(thinkingTitle("**  ** puis **Compare")).toBe("Compare");
+		// Marqueur ouvrant seul : pas encore de titre, la phrase d'avant.
+		expect(thinkingTitle("Je regarde. **")).toBe("Je regarde.");
+	});
+
 	test("sans titre : la dernière phrase non vide", () => {
 		expect(thinkingTitle("Je regarde le prix. Il est bas.\n\n")).toBe(
 			"Il est bas.",
@@ -101,8 +108,9 @@ describe("thinkingTitle", () => {
 		expect(thinkingTitle("Première ligne\nJe compare avec")).toBe(
 			"Je compare avec",
 		);
-		// Segment **…** vide : pas un titre ; espaces resserrés.
-		expect(thinkingTitle("**  **Seule   phrase.")).toBe("** **Seule phrase.");
+		// Segment **…** vide : pas un titre ; marqueurs retirés, espaces resserrés.
+		expect(thinkingTitle("**  **Seule   phrase.")).toBe("Seule phrase.");
+		expect(thinkingTitle("****")).toBe("");
 	});
 
 	test("texte vide : chaîne vide", () => {
@@ -183,7 +191,7 @@ describe("statusLine", () => {
 			"search, autre",
 			[{ type: "search", id: 1, query: "vélo", aspect: "other" }],
 			"Recherche web (autre) : “vélo”",
-			"Webzoekopdracht (andere): “vélo”",
+			"Webzoekopdracht (overig): “vélo”",
 		],
 		[
 			"search_done ok",
@@ -216,7 +224,7 @@ describe("statusLine", () => {
 		[
 			"search_done ok, sans domaine",
 			[{ type: "search_done", id: 1, ok: true, count: 0, domains: [] }],
-			"0 résultats",
+			"0 résultat",
 			"0 resultaten",
 		],
 		[
@@ -236,6 +244,47 @@ describe("statusLine", () => {
 	test.each(rows)("%s : FR et NL", (_name, events, fr, nl) => {
 		expect(lineOf("fr", ...events)).toBe(fr);
 		expect(lineOf("nl", ...events)).toBe(nl);
+	});
+
+	test("espaces de la requête resserrés, sauts de ligne compris", () => {
+		expect(
+			lineOf("fr", {
+				type: "search",
+				id: 1,
+				query: "  vélo\n\n  cargo \t prix ",
+				aspect: "price",
+			}),
+		).toBe("Recherche web (prix du marché) : “vélo cargo prix”");
+	});
+
+	test("une requête qui contient {count} ou {domains} reste telle quelle", () => {
+		expect(
+			lineOf("fr", {
+				type: "search",
+				id: 1,
+				query: "{count} {domains} {query}",
+				aspect: "other",
+			}),
+		).toBe("Recherche web (autre) : “{count} {domains} {query}”");
+		expect(
+			lineOf("nl", {
+				type: "search_done",
+				id: 1,
+				ok: true,
+				count: 2,
+				domains: ["{results}.be", "{count}.nl"],
+			}),
+		).toBe("2 resultaten: {results}.be, {count}.nl");
+	});
+
+	test("un thinking vidé par le nettoyage ne remplace pas la ligne précédente", () => {
+		expect(
+			lineOf(
+				"fr",
+				{ type: "stage", stage: "writing" },
+				{ type: "thinking", part: 1, text: "** **" },
+			),
+		).toBe("Rédige le verdict");
 	});
 
 	test("suit le dernier événement", () => {

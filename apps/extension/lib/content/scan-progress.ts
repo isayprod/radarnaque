@@ -54,17 +54,25 @@ export function addEvent(
 	return { ...p, steps, last: e, lastAt: now };
 }
 
+/** Espaces resserrés, sauts de ligne compris. */
+const squeeze = (s: string) => s.replace(/\s+/g, " ").trim();
+
 /**
  * Titre d'un résumé de réflexion : le premier segment `**…**` non vide, sinon la
- * dernière phrase non vide. Le texte reste celui du modèle, espaces resserrés.
+ * dernière phrase non vide, sans les `**` restants. Le résumé arrive cumulé : un `**`
+ * ouvrant sans fermant est un titre en cours, rendu tel qu'il est déjà arrivé. Le
+ * texte reste celui du modèle, espaces resserrés.
  */
 export function thinkingTitle(text: string): string {
-	const squeeze = (s: string) => s.replace(/\s+/g, " ").trim();
-	for (const match of text.matchAll(/\*\*([\s\S]+?)\*\*/g)) {
-		const title = squeeze(match[1] ?? "");
+	// Entre deux `**` : les morceaux d'indice impair. Le dernier, s'il est impair,
+	// n'a pas encore de marqueur fermant.
+	const parts = text.split("**");
+	for (let i = 1; i < parts.length; i += 2) {
+		const title = squeeze(parts[i] ?? "");
 		if (title) return title;
 	}
-	const sentences = text
+	const sentences = parts
+		.join("")
 		.split(/\n|(?<=[.!?…])\s+/)
 		.map(squeeze)
 		.filter(Boolean);
@@ -109,14 +117,16 @@ function eventLine(e: ScanProgressEvent, locale: Locale): string {
 		case "search":
 			return fill(t("progress.search"), {
 				aspect: t(`progress.aspect.${e.aspect}`),
-				query: e.query,
+				query: squeeze(e.query),
 			});
 		case "search_done": {
 			if (!e.ok) return t("progress.searchFailed");
-			const results =
-				e.count === 1
-					? t("progress.resultsOne")
-					: fill(t("progress.results"), { count: e.count });
+			// Règles de chaque langue : « 0 résultat » en FR, « 0 resultaten » en NL.
+			const one = new Intl.PluralRules(locale).select(e.count) === "one";
+			const results = fill(
+				t(one ? "progress.resultsOne" : "progress.results"),
+				{ count: e.count },
+			);
 			if (e.domains.length === 0) return results;
 			return fill(t("progress.searchDone"), {
 				results,

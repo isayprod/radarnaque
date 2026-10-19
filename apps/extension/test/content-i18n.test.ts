@@ -332,7 +332,7 @@ describe("textes de la progression d'une analyse", () => {
 		const nl = ["model", "price", "scam", "other"].map((a) =>
 			contentText("nl", `progress.aspect.${a}` as ContentKey),
 		);
-		expect(nl).toEqual(["model", "marktprijs", "bekende oplichting", "andere"]);
+		expect(nl).toEqual(["model", "marktprijs", "bekende oplichting", "overig"]);
 	});
 
 	test("les textes à compléter ont leurs paramètres dans les deux langues", () => {
@@ -341,6 +341,7 @@ describe("textes de la progression d'une analyse", () => {
 			"progress.analyzing": ["{count}"],
 			"progress.search": ["{aspect}", "{query}"],
 			"progress.results": ["{count}"],
+			"progress.resultsOne": ["{count}"],
 			"progress.searchDone": ["{results}", "{domains}"],
 		};
 		for (const locale of ["fr", "nl"] as const)
