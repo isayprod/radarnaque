@@ -81,7 +81,7 @@ Les prix ci-dessous ont été relevés sur OpenRouter le 2026-10-15.
 - **Modèle de départ :** `google/gemini-3.1-flash-lite` (0,25 / 1,50 $ par million de tokens) pour le type `full`, soit environ **1,1 ¢ par analyse au pire** et environ 0,4 ¢ sans recherche.
 - **Garde-fous :** au plus 3 recherches par analyse (`settings.max_web_searches`), un cache des recherches de 24 h et le cache partagé des analyses (24 h).
 - **Coût d'un Premium** qui utiliserait ses 300 analyses au pire : environ 3,30 $ par mois. Un usage réaliste coûte une fraction de ce montant.
-- **Marge par abonné** après TVA belge (21 %) et frais Stripe : elle reste positive même au pire coût (environ 1,65 $ pour 150 analyses en Standard, environ 3,30 $ pour 300 en Premium, avant conversion en euros). Le banc d'essai de la phase 4 la confirmera.
+- **Marge par abonné** après TVA belge (21 %) et frais Stripe : elle reste positive même au pire coût (environ 1,65 € pour 150 analyses en Standard, environ 3,30 € pour 300 en Premium). Le banc d'essai de la phase 4 la confirmera.
 - Le choix définitif des modèles se fera avec le banc d'essai (voir §12, ligne « Qualité IA »).
 
 ## 3. Architecture globale

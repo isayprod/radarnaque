@@ -411,7 +411,7 @@ Facebook Marketplace.
   `pnpm llm:stub` lancé pour `stub`, clé valide et quota non atteint pour Groq, proxy
   `npx openai-oauth` lancé pour `openai-oauth`. Les logs `[api]` donnent la raison.
 - **« Vous avez utilisé toutes vos analyses… »** : le quota est épuisé. Un essai n'a que 3
-  scans au total ; se connecter depuis la popup avec une
+  analyses au total ; se connecter depuis la popup avec une
   nouvelle adresse email crée un compte neuf, donc un nouvel essai de 3 analyses.
 - **Pas d'icône « R » sur une recherche** : le compte est-il en essai, premium ou admin ? la
   page est-elle bien une recherche (`/q/…`, `/l/…`) et non une fiche ? Une annonce
