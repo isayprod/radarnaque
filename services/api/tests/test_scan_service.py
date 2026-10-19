@@ -1116,6 +1116,38 @@ async def test_cached_debug_system_prompt_uses_the_client_helper(engine, http, c
     assert cached.debug.system_prompt == f"{llm.calls[0]['system_prompt']}\n<schéma>"
 
 
+async def test_cached_debug_survives_an_unknown_provider(engine, http, mock, clock, llm):
+    """Fournisseur retiré de providers.toml après l'analyse : un succès du cache reste un
+    succès (limite globale des photos, prompt système brut), jamais un 502."""
+    for url in IMAGE_URLS:
+        mock.get(url).respond(200, content=_png(), headers={"content-type": "image/png"})
+    superuser = await _user(engine, role="superuser", plan=None)
+    scan = _scan(images=IMAGE_URLS, scanKind="image")
+    await _scan_once(engine, superuser, scan, llm, http, clock)
+    clock.advance(seconds=1)
+
+    def unknown(provider: str):
+        raise ProviderError(f"fournisseur inconnu : {provider}")
+
+    cached = await run_scan(
+        engine=engine,
+        user=superuser,
+        privileges=privileges_of(superuser, TEST_SETTINGS),
+        scan=scan,
+        llm_for=unknown,
+        http=http,
+        now=clock,
+        resolve=FakeResolver(),
+    )
+
+    assert cached.from_cache is True
+    assert cached.debug.llm_called is False
+    assert cached.debug.system_prompt == llm.calls[0]["system_prompt"]
+    assert cached.debug.messages[0].content.endswith(
+        "[image 1 : non téléchargée (cache)]\n[image 2 : non téléchargée (cache)]"
+    )
+
+
 async def test_superuser_no_cache_calls_the_llm_again_and_refreshes_in_place(
     engine, http, clock, llm
 ):

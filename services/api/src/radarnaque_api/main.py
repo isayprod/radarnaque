@@ -29,18 +29,25 @@ def _quiet_http_loggers() -> None:
 
 
 # Logs détaillés des scans du superuser (services/scans.py), affichés sur la console hors
-# production seulement : en production, ce logger n'a aucun gestionnaire.
+# production seulement : en production, ce logger est réduit au silence.
 DEBUG_LOGGER = "radarnaque.debug"
 _DEBUG_HANDLER_MARK = "radarnaque_debug"
+_DEBUG_NULL_MARK = "radarnaque_debug_null"
 
 
 def _debug_console(settings: Settings) -> None:
     """Hors production, un seul gestionnaire console sur `radarnaque.debug`, au niveau INFO et
-    sans propagation (pas de doublon dans les logs d'uvicorn). Idempotent : créer plusieurs
-    applications (tests) n'ajoute pas de gestionnaire."""
-    if settings.env == "production":
-        return
+    sans propagation (pas de doublon dans les logs d'uvicorn). En production, un seul
+    `NullHandler` et aucune propagation : rien ne remonte à la racine, quelle que soit sa
+    configuration. Idempotent : créer plusieurs applications (tests) n'ajoute rien."""
     logger = logging.getLogger(DEBUG_LOGGER)
+    if settings.env == "production":
+        logger.propagate = False
+        if not any(getattr(h, _DEBUG_NULL_MARK, False) for h in logger.handlers):
+            null = logging.NullHandler()
+            setattr(null, _DEBUG_NULL_MARK, True)
+            logger.addHandler(null)
+        return
     logger.setLevel(logging.INFO)
     logger.propagate = False
     if any(getattr(h, _DEBUG_HANDLER_MARK, False) for h in logger.handlers):

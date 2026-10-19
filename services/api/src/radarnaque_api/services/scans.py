@@ -407,14 +407,22 @@ def _cached_trace(
     setup: ActiveSetup, key: CacheKey, scan: ScanIn, llm_for: Callable[[str], LLMClient]
 ) -> _Trace:
     """Trace d'un scan servi par le cache : les messages qui auraient été envoyés, construits
-    sans appel au LLM ni téléchargement des photos (résumées comme non téléchargées)."""
-    llm = llm_for(setup.provider)
-    pending = min(len(scan.listing.images), _image_limit(llm)) if scan.scan_kind == "image" else 0
+    sans appel au LLM ni téléchargement des photos (résumées comme non téléchargées). Un
+    fournisseur devenu inconnu (`ProviderError`) ne fait pas échouer ce succès du cache : la
+    limite globale des photos et le prompt système brut sont repris."""
+    try:
+        llm: LLMClient | None = llm_for(setup.provider)
+    except ProviderError:
+        llm = None
+    image_limit = MAX_IMAGES if llm is None else _image_limit(llm)
+    pending = min(len(scan.listing.images), image_limit) if scan.scan_kind == "image" else 0
     messages = build_messages(scan.listing, scan.rules, [])
     return _Trace(
         setup=setup,
         key=key,
-        system_prompt=_final_system_prompt(llm, setup.system_prompt),
+        system_prompt=(
+            setup.system_prompt if llm is None else _final_system_prompt(llm, setup.system_prompt)
+        ),
         messages=summarize_messages(messages, cached_images=pending),
         raw_response=None,
         llm_called=False,
