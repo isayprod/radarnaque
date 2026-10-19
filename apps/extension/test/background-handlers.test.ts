@@ -154,7 +154,6 @@ describe("background handlers", () => {
 		const results = createAiResultStore();
 		await results.put("2ememain.be", "m1", {
 			result: { ...sampleAnalysis, analyzedAt: new Date().toISOString() },
-			scanKind: "text",
 			fingerprint: "fp",
 			storedAt: Date.now(),
 		});

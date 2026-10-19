@@ -203,13 +203,12 @@ export function createCardController(deps: CardControllerDeps): {
 
 	/**
 	 * Icône montée ou remontée sans résultat : reprend celui du magasin s'il
-	 * existe, l'analyse photos de préférence, sinon le texte (R4).
+	 * existe (une seule place par annonce).
 	 */
 	function restore(site: Site, id: string) {
 		if (!deps.aiResults || stateOf(id).status !== "idle") return;
 		void deps.aiResults.get(site, id).then(
-			(stored) => {
-				const entry = stored?.image ?? stored?.text;
+			(entry) => {
 				// Un clic entre-temps (chargement, résultat, erreur) l'emporte.
 				if (disposed || !entry || stateOf(id).status !== "idle") return;
 				// I1 : jamais le quota restant de l'époque.

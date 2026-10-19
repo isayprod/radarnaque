@@ -18,7 +18,6 @@ import {
 	NO_REMAINING,
 	type StoredAiEntry,
 	type StoredAiResult,
-	type StoredAiResults,
 } from "../lib/content/ai-results";
 import {
 	CARD_HOST_TAG,
@@ -912,7 +911,6 @@ const partialEntry = (
 	overrides: Partial<StoredAiResult> = {},
 ): StoredAiResult => ({
 	result: { ...sampleAnalysis, partial: true },
-	scanKind: "text",
 	fingerprint: "autre empreinte",
 	storedAt: Date.parse(sampleAnalysis.analyzedAt),
 	...overrides,
@@ -925,7 +923,7 @@ describe("createCardController — résultats gardés 24 h", () => {
 	test("entrée stockée : icône montée puis done sans clic, ai.scan jamais appelé", async () => {
 		const id = FB_IDS[2] as string;
 		const mem = memoryStore({
-			[`facebook.com|${id}`]: { v: 1, text: partialEntry() },
+			[`facebook.com|${id}`]: { v: 2, ...partialEntry() },
 		});
 		const doc = loadFixture("facebook/grid.html");
 		const t = setup(doc, FB_SEARCH, [withCards], {
@@ -951,7 +949,7 @@ describe("createCardController — résultats gardés 24 h", () => {
 	test("entrée expirée : l'icône reste idle", async () => {
 		const id = FB_IDS[2] as string;
 		const mem = memoryStore({
-			[`facebook.com|${id}`]: { v: 1, text: partialEntry() },
+			[`facebook.com|${id}`]: { v: 2, ...partialEntry() },
 		});
 		mem.advance(AI_RESULT_TTL_MS + 1_000);
 		const doc = loadFixture("facebook/grid.html");
@@ -1028,56 +1026,11 @@ describe("createCardController — résultats gardés 24 h", () => {
 		expect(t.ai.scan).not.toHaveBeenCalled();
 	});
 
-	test("R4 : photos et texte stockés : l'icône montre l'analyse photos", async () => {
-		const id = FB_IDS[1] as string;
-		const image = partialEntry({
-			scanKind: "image",
-			result: { ...sampleAnalysis, analysisId: 77 },
-		});
-		const mem = memoryStore({
-			[`facebook.com|${id}`]: { v: 1, text: partialEntry(), image },
-		});
-		const doc = loadFixture("facebook/grid.html");
-		const t = setup(doc, FB_SEARCH, [withCards], { aiResults: mem.store });
-		await t.controller.refresh();
-		await vi.waitFor(() =>
-			expect(t.lastView(id).state).toEqual({
-				status: "done",
-				result: { ...adopted, analysisId: 77 },
-			}),
-		);
-	});
-
-	test("R4 : photos expirées, texte valable : l'icône montre le texte", async () => {
-		const id = FB_IDS[1] as string;
-		const mem = memoryStore({
-			[`facebook.com|${id}`]: {
-				v: 1,
-				text: partialEntry({ result: sampleAnalysis }),
-				image: partialEntry({
-					scanKind: "image",
-					result: { ...sampleAnalysis, analyzedAt: "2026-10-01T00:00:00Z" },
-				}),
-			},
-		});
-		const doc = loadFixture("facebook/grid.html");
-		const t = setup(doc, FB_SEARCH, [withCards], { aiResults: mem.store });
-		await t.controller.refresh();
-		await vi.waitFor(() =>
-			expect(t.lastView(id).state).toEqual({ status: "done", result: adopted }),
-		);
-	});
-
 	test("I1 : quota restant d'une ancienne entrée jamais repris", async () => {
 		const id = FB_IDS[1] as string;
-		const stored: StoredAiResults = {
-			text: partialEntry({
-				result: {
-					...sampleAnalysis,
-					remaining: { text: 3, image: 3, total: 3 },
-				},
-			}),
-		};
+		const stored = partialEntry({
+			result: { ...sampleAnalysis, remaining: { scans: 3 } },
+		});
 		const store: AiResultStore = {
 			get: vi.fn(async (_site, cardId) => (cardId === id ? stored : null)),
 			put: vi.fn(async () => {}),
@@ -1103,7 +1056,7 @@ describe("createCardController — résultats gardés 24 h", () => {
 
 	test("clic pendant la lecture du magasin : la lecture tardive n'écrase pas le scan", async () => {
 		const id = FB_IDS[0] as string;
-		const pending = deferred<StoredAiResults | null>();
+		const pending = deferred<StoredAiResult | null>();
 		const mem = memoryStore();
 		mem.store.get.mockImplementation(async (_site, cardId) =>
 			cardId === id ? pending.promise : null,
@@ -1114,7 +1067,7 @@ describe("createCardController — résultats gardés 24 h", () => {
 		t.scan.mockReturnValueOnce(scanning.promise);
 		await t.controller.refresh();
 		t.lastView(id).onActivate();
-		pending.resolve({ text: partialEntry() });
+		pending.resolve(partialEntry());
 		await t.controller.refresh();
 		expect(t.lastView(id).state).toEqual({ status: "loading" });
 	});

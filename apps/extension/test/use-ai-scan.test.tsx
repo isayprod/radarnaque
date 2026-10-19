@@ -539,12 +539,12 @@ describe("useAiScan : résultats gardés 24 h", () => {
 		expect(t.result.current.text).toEqual({ status: "idle" });
 	});
 
-	test("I1 : entrée stockée avec un quota (total = 3) : aucun compteur repris", async () => {
+	test("I1 : entrée stockée avec un quota (scans = 3) : aucun compteur repris", async () => {
 		const store = fakeStore({
 			"2ememain.be|m1": storedFor(listingOf("m1"), {
 				result: {
 					...sampleAnalysis,
-					remaining: { text: 3, image: 3, total: 3 },
+					remaining: { scans: 3 },
 				},
 			}),
 		});
@@ -553,9 +553,7 @@ describe("useAiScan : résultats gardés 24 h", () => {
 		const text = t.result.current.text;
 		expect(text.status).toBe("done");
 		expect(text.status === "done" && text.result.remaining).toEqual({
-			text: null,
-			image: null,
-			total: null,
+			scans: null,
 		});
 	});
 
