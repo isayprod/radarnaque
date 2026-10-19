@@ -296,7 +296,7 @@ modèle peut chercher sur le web (SearXNG, démarré par `pnpm dev`).
 
 1. `pnpm dev` est lancé (stack et extension : voir « 2. Lancer la stack »).
 2. Le compte est connecté depuis la popup de l'extension (email, puis code à 6 chiffres, lu
-   dans les logs `[auth]` en dev). Un compte neuf a un essai de 3 scans au total.
+   dans les logs `[auth]` en dev). Un compte neuf a un essai de 3 analyses au total.
 3. Un fournisseur LLM est actif pour le type `full`, le seul utilisé (les analyses joignent des
    photos : il faut un modèle vision) : le faux fournisseur `stub` (sans réseau), `Groq` ou
    `openai-oauth`. Voir les sections « Faux fournisseur (`stub`) », « Groq » et « Abonnement
@@ -412,7 +412,7 @@ Facebook Marketplace.
   `npx openai-oauth` lancé pour `openai-oauth`. Les logs `[api]` donnent la raison.
 - **« Vous avez utilisé toutes vos analyses… »** : le quota est épuisé. Un essai n'a que 3
   scans au total ; se connecter depuis la popup avec une
-  nouvelle adresse email crée un compte neuf, donc un nouvel essai de 3 scans.
+  nouvelle adresse email crée un compte neuf, donc un nouvel essai de 3 analyses.
 - **Pas d'icône « R » sur une recherche** : le compte est-il en essai, premium ou admin ? la
   page est-elle bien une recherche (`/q/…`, `/l/…`) et non une fiche ? Une annonce
   professionnelle (`a…`), dont la fiche n'est pas encore prise en charge, n'en a jamais.

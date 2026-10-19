@@ -40,7 +40,7 @@ Les versions 1 à 3 souffraient de deux problèmes :
 - **La base de prix des objets connus.** Elle sera alimentée petit à petit, en partie à partir des `listing_snapshots`. La règle « prix anormal » existe déjà, mais reste désactivée.
 - **L'IA locale**, pour une éventuelle future offre gratuite.
 - **Le branchement réel de Stripe** (phase 5).
-- **L'analyse IA automatique à l'ouverture d'une annonce**, qui deviendra une option Premium. Pour l'ajouter, il suffira d'insérer la fonctionnalité `auto_scan` et le déclencheur `auto` dans les référentiels, d'ajouter la vérification correspondante à l'étape 2 de §7.2 et de lancer le scan dans le content script. Aucun changement de schéma n'est nécessaire. Un scan automatique comptera comme un scan texte.
+- **L'analyse IA automatique à l'ouverture d'une annonce**, qui deviendra une option Premium. Pour l'ajouter, il suffira d'insérer la fonctionnalité `auto_scan` et le déclencheur `auto` dans les référentiels, d'ajouter la vérification correspondante à l'étape 2 de §7.2 et de lancer le scan dans le content script. Aucun changement de schéma n'est nécessaire. Une analyse automatique comptera dans le quota des analyses IA, comme une analyse lancée au clic.
 - **Firefox.** WXT génère déjà le manifeste Firefox, mais la cible du MVP est Chromium : Chrome, Edge et Brave.
 
 ## 2. Offre et droits
@@ -80,8 +80,8 @@ Les prix ci-dessous ont été relevés sur OpenRouter le 2026-10-15.
 - **Taille d'une analyse** (phase 3d) : la recherche web se fait en plusieurs tours, et chaque tour renvoie tout le contexte, photos comprises (l'API est sans état). La réflexion ajoute des tokens de sortie. Avec 4 photos et 3 recherches : environ 4 tours d'environ 8 000 tokens en entrée, et environ 2 000 tokens de réflexion et de réponse.
 - **Modèle de départ :** `google/gemini-3.1-flash-lite` (0,25 / 1,50 $ par million de tokens) pour le type `full`, soit environ **1,1 ¢ par analyse au pire** et environ 0,4 ¢ sans recherche.
 - **Garde-fous :** au plus 3 recherches par analyse (`settings.max_web_searches`), un cache des recherches de 24 h et le cache partagé des analyses (24 h).
-- **Coût d'un Premium** qui utiliserait ses 300 analyses au pire : environ 3,30 € par mois. Un usage réaliste coûte une fraction de ce montant.
-- **Marge par abonné** après TVA belge (21 %) et frais Stripe : elle reste positive même au pire coût (environ 1,65 € pour 150 analyses en Standard, environ 3,30 € pour 300 en Premium). Le banc d'essai de la phase 4 la confirmera.
+- **Coût d'un Premium** qui utiliserait ses 300 analyses au pire : environ 3,30 $ par mois. Un usage réaliste coûte une fraction de ce montant.
+- **Marge par abonné** après TVA belge (21 %) et frais Stripe : elle reste positive même au pire coût (environ 1,65 $ pour 150 analyses en Standard, environ 3,30 $ pour 300 en Premium, avant conversion en euros). Le banc d'essai de la phase 4 la confirmera.
 - Le choix définitif des modèles se fera avec le banc d'essai (voir §12, ligne « Qualité IA »).
 
 ## 3. Architecture globale
