@@ -66,7 +66,7 @@ Une analyse coûte plus cher qu'avant :
 - un cache des recherches de 24 h ;
 - le cache partagé des analyses (24 h).
 
-Un Premium qui utiliserait ses 300 analyses au pire coûterait environ 3,30 € par mois. Un usage réaliste coûte une fraction de ce montant. Le banc d'essai de la phase 4 confirmera le choix du modèle.
+Un Premium qui utiliserait ses 300 analyses au pire coûterait environ 3,30 $ par mois. Un usage réaliste coûte une fraction de ce montant. Le banc d'essai de la phase 4 confirmera le choix du modèle.
 
 ## 4. Recherche web
 

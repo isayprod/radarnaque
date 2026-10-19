@@ -17,7 +17,8 @@ Ces points ont été relevés en relecture de tâche et laissés pour une vague 
 ## Déjà vérifié en direct (19 octobre 2026)
 
 - **`openai-oauth` et `gpt-6-luna`, SearXNG réel, API et base de dev :** `pnpm e2e:scan` en flux donne `E2E SCAN OK` (score 62). Premier scan : 7 événements (un `analyzing`, une recherche `price` avec 5 résultats, deux titres de réflexion, `writing`, `result`) en 8,9 s ; second scan servi du cache : 2 événements (`cache`, `result`).
-- **Pas encore fait :** l'annonce du script est un vélo de course, pas l'iPhone 18 Pro du spec §12. Le contrôle « le modèle reconnaît l'iPhone 18 Pro » reste à faire à la main (le script n'accepte pas d'annonce). Les titres de réflexion sont de nouveau arrivés en anglais (« Assessing bike listing »).
+- **iPhone 18 Pro, via le client LLM de la branche** (contrôleur, `openai-oauth` et `gpt-6-luna`, prompt `full` v1, **faux moteur de recherche** renvoyant apple.com et tweakers.net) : l'annonce « iPhone 18 Pro 256 Go neuf scellé » à 450 € donne une recherche `price`, 2 tours, 8 à 10 s, score 85 puis 90 et un résumé « iPhone récent… très inférieur au prix neuf » : le modèle est reconnu.
+- **Reste à faire :** la même annonce sur la vraie pile (SearXNG réel, pastille dans le navigateur). L'annonce du script `e2e:scan` est un vélo de course (le script n'accepte pas d'annonce). Les titres de réflexion sont de nouveau arrivés en anglais (« Assessing bike listing »).
 
 ## À vérifier en direct avant la mise en ligne
 
@@ -53,20 +54,25 @@ Rien de ceci n'a pu être essayé : `infra/.env` n'a ni clé Groq ni clé OpenRo
   - le retour arrière remet les valeurs de la 0001 (non documenté dans la docstring).
 - **Tests de l'API :**
   - pas de test direct de `plan_max_images` (superuser avec un abonnement réel, plan absent, admin avec Standard) ;
-  - `me.py` répète deux fois la requête des fonctionnalités d'un plan : à factoriser ;
   - pas de test de libération du verrou après déconnexion ou délai, ni de 403 et 429 sur le flux ;
-  - `search=None` par défaut est silencieux, et `_scan_args` est un `dict[str, Any]`.
+  - `search=None` par défaut est silencieux, et `_scan_args` est un `dict[str, Any]` ;
+  - la tâche d'analyse n'a pas de référence forte (`asyncio.ensure_future` dans `services/scan_stream.py`) : passer à `create_task` avec un ensemble `_background` ;
+  - le message « ce scan n'est pas décompté » est faux une fois le commit fait ;
+  - finitions de la tâche 3 : docstring de `LLMResult`, assertion dupliquée, comparaison de `input_hash` (1 et 0), introspection par `co_varnames` dans `test_hashing.py`, docstring de `Privileges.all_features` (« photos ») ;
+  - `test_prompt_v2.py` : virgules finales disgracieuses.
 - **Flux et boucle d'outils :**
   - la clé d'une partie de réflexion est `(item_id, summary_index)`, sans numéro de tour ;
   - un `Writing` peut partir sur un préambule avant un `function_call` ;
   - appels d'outils sans `index` : appels parallèles fusionnés (pas le cas d'OpenRouter) ; pas de test d'appels entrelacés ;
   - le coût OmniRoute vaut 0 en flux ;
   - `asyncio.timeout` d'un tour englobe les `await` du récepteur : il doit rester non bloquant (`put_nowait`) ;
-  - `client.py` compte plus de 700 lignes avant le découpage de la lecture des flux (`streams.py`) : à surveiller.
+  - le `__all__` de `llm/client.py` ne sert qu'à taire F401 (réexport de `SearchRecord`), et `tools.py` garde un `type: ignore[arg-type]` sur `aspect` ;
+  - pour un appel d'outil, `id` et `name` gardent la dernière valeur non vide reçue (voie Chat).
 - **SearXNG et Docker :**
   - le `SEARXNG_SECRET` d'exemple est accepté en production ;
   - le port 8888 n'est pas vérifié par `check-ports`, et `up -d` n'attend pas la santé (`--wait`) ;
   - durcissement du conteneur : `cap_drop`, `read_only`, `mem_limit` ;
+  - `scripts/e2e-scan.ts` n'appelle pas `reader.cancel()` à la fin d'un flux ;
   - délai de 8 s par phase `httpx`, pas total, et corps non borné (SearXNG est interne) ; le délai total de l'analyse couvre le reste ;
   - éviction FIFO du cache de recherches (conforme au spec) ; tests manquants pour une entité coupée et pour « & » dans un titre.
 - **Extension :**
@@ -74,8 +80,8 @@ Rien de ceci n'a pu être essayé : `infra/.env` n'a ni clé Groq ni clé OpenRo
   - les codes de refus avant le flux n'ont pas de regex `ERROR_CODE` ; une `error` du flux au code invalide donne `stream_interrupted` ;
   - tests manquants : popup acceptée, déconnexion avant le départ, port sans message qui finit en `timeout`, `defaultConnect` ;
   - `lastError` n'est pas lu dans `onDisconnect` ;
+  - un `data:` vide est rendu comme un événement ; `scan-port.ts` écrit `void debug.group(…)` dans la minuterie, et le commentaire du délai est séparé de son `setTimeout` ;
   - un `*` isolé (italique) n'est pas traité dans `thinkingTitle`, et `Intl.PluralRules` est recréé à chaque appel ;
-  - la fixture `superuserMe` (`apps/extension/test/helpers.ts`) garde `plan null` ;
   - le lien « noSubscription » s'appelle « Analyser avec l'IA » sans mention des formules ;
   - `useLaunch` repose sur l'identité d'objet (`loadAccess` en promesse serait plus sûr) et une course clic et adoption du magasin reste possible ;
   - le déroulé n'a pas de défilement automatique (voulu) ; la fin d'une analyse n'est pas annoncée aux lecteurs d'écran, et il n'y a pas d'`aria-busy`.
