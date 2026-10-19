@@ -10,10 +10,13 @@ async def test_seeded_offer(db):
         text("select plan, scan_kind, quota from app.plan_quotas order by plan, scan_kind")
     )
     assert q.all() == [
+        ("premium", "full", 300),
         ("premium", "image", 100),
         ("premium", "text", 1000),
+        ("standard", "full", 150),
         ("standard", "image", 0),
         ("standard", "text", 150),
+        ("trial", "full", 3),
         ("trial", "image", 3),
         ("trial", "text", 3),
     ]
@@ -67,6 +70,7 @@ async def test_seeded_reference_data(db):
         )
     ).all()
     assert kinds == [
+        ("full", "openrouter", "google/gemini-3.1-flash-lite"),
         ("image", "openrouter", "google/gemini-3.1-flash-lite"),
         ("text", "openrouter", "google/gemini-2.5-flash-lite"),
     ]

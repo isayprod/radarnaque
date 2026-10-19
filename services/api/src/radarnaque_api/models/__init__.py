@@ -3,6 +3,7 @@ from radarnaque_api.models.analyses import (
     AnalysisReason,
     AnalysisReasonText,
     AnalysisText,
+    AnalysisWebSearch,
 )
 from radarnaque_api.models.auth_user import AuthUser
 from radarnaque_api.models.base import Base
@@ -34,6 +35,7 @@ __all__ = [
     "AnalysisReason",
     "AnalysisReasonText",
     "AnalysisText",
+    "AnalysisWebSearch",
     "AppSettings",
     "AuthUser",
     "Base",

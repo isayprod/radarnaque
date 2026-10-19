@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey
+from sqlalchemy import CheckConstraint, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from radarnaque_api.models.base import Base
@@ -6,10 +6,13 @@ from radarnaque_api.models.base import Base
 
 class Plan(Base):
     __tablename__ = "plans"
+    __table_args__ = (CheckConstraint("max_images between 0 and 4", name="ck_plans_max_images"),)
 
     code: Mapped[str] = mapped_column(primary_key=True)
     quota_period: Mapped[str] = mapped_column(ForeignKey("app.quota_periods.code"))
     total_scan_cap: Mapped[int | None]
+    # Photos envoyées au modèle pour une analyse `full` (essai 4, Standard 1, Premium 4).
+    max_images: Mapped[int]
 
 
 class PlanPrice(Base):

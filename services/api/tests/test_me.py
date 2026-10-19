@@ -14,7 +14,11 @@ async def test_me_new_user_gets_trial(client, make_user, bearer):
     assert body["userId"] == uid and body["email"] == "new@b.test" and body["role"] == "user"
     assert body["plan"] == "trial" and body["unlimited"] is False
     assert sorted(body["features"]) == ["card_icons", "image_scan"]
-    assert {q["scanKind"]: q["remaining"] for q in body["quotas"]} == {"text": 3, "image": 3}
+    assert {q["scanKind"]: q["remaining"] for q in body["quotas"]} == {
+        "text": 3,
+        "image": 3,
+        "full": 3,
+    }
     assert body["totalCap"] == {"scanKind": None, "limit": 3, "used": 0, "remaining": 3}
     assert body["periodStart"] is not None
 
@@ -54,7 +58,11 @@ async def test_me_superuser_is_a_user_in_production(client, make_user, bearer, p
         body = (await client.get("/api/me", headers=bearer(uid))).json()
     assert body["role"] == "user" and body["unlimited"] is False
     assert body["plan"] == "trial"
-    assert {q["scanKind"]: q["remaining"] for q in body["quotas"]} == {"text": 3, "image": 3}
+    assert {q["scanKind"]: q["remaining"] for q in body["quotas"]} == {
+        "text": 3,
+        "image": 3,
+        "full": 3,
+    }
     assert "rôle superuser ignoré en production" in caplog.text
     assert "superuser@radarnaque.test" not in caplog.text and uid not in caplog.text
 

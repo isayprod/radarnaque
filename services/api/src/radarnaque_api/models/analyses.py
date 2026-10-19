@@ -37,6 +37,8 @@ class Analysis(Base):
     partial: Mapped[bool] = mapped_column(server_default=false())
     # L'IA juge que l'annonce vient d'un professionnel (vitrine) ; ce n'est pas un signal.
     professional: Mapped[bool] = mapped_column(server_default=false())
+    # Nombre de photos réellement envoyées au modèle.
+    images_analyzed: Mapped[int] = mapped_column(server_default="0")
     tokens_in: Mapped[int] = mapped_column(server_default="0")
     tokens_out: Mapped[int] = mapped_column(server_default="0")
     cost_usd_micros: Mapped[int] = mapped_column(BigInteger, server_default="0")
@@ -72,3 +74,16 @@ class AnalysisReasonText(Base):
     )
     locale: Mapped[str] = mapped_column(ForeignKey("app.locales.code"), primary_key=True)
     text: Mapped[str]
+
+
+class AnalysisWebSearch(Base):
+    """Une recherche web faite pour une analyse (affichée aussi quand l'analyse vient du cache)."""
+
+    __tablename__ = "analysis_web_searches"
+
+    analysis_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("app.analyses.id", ondelete="CASCADE"), primary_key=True
+    )
+    position: Mapped[int] = mapped_column(primary_key=True)
+    query: Mapped[str]
+    aspect: Mapped[str]
