@@ -109,4 +109,26 @@ describe("loadEnv", () => {
 		);
 		expect(loadEnv({ ...valid, DATABASE_URL: url }).DATABASE_URL).toBe(url);
 	});
+
+	test("DEV_SUPERUSER_EMAIL is optional, trimmed and lowercased; empty means absent", () => {
+		expect(loadEnv(valid).DEV_SUPERUSER_EMAIL).toBeUndefined();
+		for (const empty of ["", "   "]) {
+			expect(
+				loadEnv({ ...valid, DEV_SUPERUSER_EMAIL: empty }).DEV_SUPERUSER_EMAIL,
+			).toBeUndefined();
+		}
+		expect(
+			loadEnv({ ...valid, DEV_SUPERUSER_EMAIL: "  SuperUser@Radarnaque.TEST " })
+				.DEV_SUPERUSER_EMAIL,
+		).toBe("superuser@radarnaque.test");
+	});
+
+	test("rejects an invalid DEV_SUPERUSER_EMAIL without echoing it", () => {
+		expect(() =>
+			loadEnv({ ...valid, DEV_SUPERUSER_EMAIL: "pas-un-email" }),
+		).toThrow(/DEV_SUPERUSER_EMAIL/);
+		expect(() =>
+			loadEnv({ ...valid, DEV_SUPERUSER_EMAIL: "pas-un-email" }),
+		).not.toThrow(/pas-un-email/);
+	});
 });

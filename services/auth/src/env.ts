@@ -12,9 +12,26 @@ export interface Env {
 	MAIL_FROM: string;
 	/** Obligatoire uniquement quand NODE_ENV=production. */
 	RESEND_API_KEY: string | undefined;
+	/**
+	 * Compte de développement qui reçoit le rôle `superuser` (§5.3 bis), normalisé en
+	 * minuscules. Absent si vide. Ignoré quand NODE_ENV=production.
+	 */
+	DEV_SUPERUSER_EMAIL?: string;
 }
 
 type Source = Record<string, string | undefined>;
+
+/** Forme minimale d'un email (une seule `@`, un point dans le domaine, aucun espace). */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Email normalisé (espaces retirés, minuscules) ; `undefined` si vide ou absent. */
+export function normalizeEmail(value: string | undefined): string | undefined {
+	return value?.trim().toLowerCase() || undefined;
+}
+
+export function isEmail(value: string): boolean {
+	return EMAIL_PATTERN.test(value);
+}
 
 function required(source: Source, name: string): string {
 	const value = source[name]?.trim();
@@ -120,6 +137,12 @@ export function loadEnv(source: Source = process.env): Env {
 		);
 	}
 
+	const devSuperuserEmail = normalizeEmail(source.DEV_SUPERUSER_EMAIL);
+	// La valeur n'est jamais reprise dans le message : le dépôt et les logs sont publics.
+	if (devSuperuserEmail && !isEmail(devSuperuserEmail)) {
+		throw invalid("DEV_SUPERUSER_EMAIL", "email attendu");
+	}
+
 	return {
 		NODE_ENV: nodeEnv as NodeEnv,
 		PUBLIC_URL: origin(source, "PUBLIC_URL"),
@@ -130,5 +153,6 @@ export function loadEnv(source: Source = process.env): Env {
 		INTERNAL_API_SECRET: internalSecret,
 		MAIL_FROM: required(source, "MAIL_FROM"),
 		RESEND_API_KEY: resendApiKey,
+		DEV_SUPERUSER_EMAIL: devSuperuserEmail,
 	};
 }
