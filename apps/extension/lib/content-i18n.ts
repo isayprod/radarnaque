@@ -1,4 +1,4 @@
-import type { Locale } from "@radarnaque/shared";
+import type { Locale, SearchAspect } from "@radarnaque/shared";
 import type { Site } from "./listing/types";
 import type { RuleId, Signal } from "./rules/rules";
 
@@ -22,6 +22,7 @@ type TextKey =
 	| "severity.warning"
 	| "severity.info"
 	| AiKey
+	| ProgressKey
 	| DebugKey
 	| Exclude<RuleId, "price_anomaly">;
 
@@ -37,6 +38,8 @@ const AI_ERROR_CODES = [
 	"analysis_failed",
 	"network",
 	"background_unavailable",
+	"stream_interrupted",
+	"timeout",
 	"default",
 ] as const;
 
@@ -60,6 +63,24 @@ type AiKey =
 	| "ai.advice"
 	| "ai.reasons"
 	| AiErrorKey;
+
+// Ligne d'état d'une analyse en cours (`statusLine`). `{count}`, `{aspect}`,
+// `{query}`, `{results}` et `{domains}` sont remplis par `scan-progress.ts`.
+type ProgressKey =
+	| "progress.start"
+	| "progress.cache"
+	| "progress.photos"
+	| "progress.photosOne"
+	| "progress.analyzing"
+	| "progress.analyzingOne"
+	| "progress.analyzingNone"
+	| "progress.search"
+	| `progress.aspect.${SearchAspect}`
+	| "progress.results"
+	| "progress.resultsOne"
+	| "progress.searchDone"
+	| "progress.searchFailed"
+	| "progress.writing";
 
 // Section « Debug (superuser) » du panneau, réservée au superuser de développement.
 type DebugKey =
@@ -138,7 +159,26 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"ai.error.network": "Connexion impossible. Vérifiez votre réseau.",
 		"ai.error.background_unavailable":
 			"Connexion impossible. Vérifiez votre réseau.",
+		"ai.error.stream_interrupted": "Analyse interrompue",
+		"ai.error.timeout": "L'analyse a pris trop de temps",
 		"ai.error.default": "Une erreur est survenue. Réessayez plus tard.",
+		"progress.start": "Démarrage de l'analyse",
+		"progress.cache": "Analyse déjà disponible",
+		"progress.photos": "Téléchargement de {count} photos",
+		"progress.photosOne": "Téléchargement d'1 photo",
+		"progress.analyzing": "Examine l'annonce et {count} photos",
+		"progress.analyzingOne": "Examine l'annonce et 1 photo",
+		"progress.analyzingNone": "Examine l'annonce sans photo",
+		"progress.search": "Recherche web ({aspect}) : “{query}”",
+		"progress.aspect.model": "modèle",
+		"progress.aspect.price": "prix du marché",
+		"progress.aspect.scam": "arnaque connue",
+		"progress.aspect.other": "autre",
+		"progress.results": "{count} résultats",
+		"progress.resultsOne": "1 résultat",
+		"progress.searchDone": "{results} : {domains}",
+		"progress.searchFailed": "Recherche indisponible, l'analyse continue",
+		"progress.writing": "Rédige le verdict",
 		"debug.title": "Debug (superuser)",
 		"debug.copy": "Copier",
 		"debug.copied": "Copié",
@@ -211,7 +251,27 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"ai.error.network": "Geen verbinding mogelijk. Controleer je netwerk.",
 		"ai.error.background_unavailable":
 			"Geen verbinding mogelijk. Controleer je netwerk.",
+		"ai.error.stream_interrupted": "Analyse onderbroken",
+		"ai.error.timeout": "De analyse duurde te lang",
 		"ai.error.default": "Er is een fout opgetreden. Probeer het later opnieuw.",
+		"progress.start": "Analyse wordt gestart",
+		"progress.cache": "Analyse al beschikbaar",
+		"progress.photos": "{count} foto's downloaden",
+		"progress.photosOne": "1 foto downloaden",
+		"progress.analyzing": "Bekijkt de advertentie en {count} foto's",
+		"progress.analyzingOne": "Bekijkt de advertentie en 1 foto",
+		"progress.analyzingNone": "Bekijkt de advertentie zonder foto",
+		"progress.search": "Webzoekopdracht ({aspect}): “{query}”",
+		"progress.aspect.model": "model",
+		"progress.aspect.price": "marktprijs",
+		"progress.aspect.scam": "bekende oplichting",
+		"progress.aspect.other": "andere",
+		"progress.results": "{count} resultaten",
+		"progress.resultsOne": "1 resultaat",
+		"progress.searchDone": "{results}: {domains}",
+		"progress.searchFailed":
+			"Zoekopdracht niet beschikbaar, de analyse gaat door",
+		"progress.writing": "Schrijft het oordeel",
 		"debug.title": "Debug (superuser)",
 		"debug.copy": "Kopiëren",
 		"debug.copied": "Gekopieerd",

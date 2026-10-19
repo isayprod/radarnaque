@@ -4,10 +4,10 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { AiSection } from "../components/AiSection";
-import { createAiClient, type ScanState } from "../lib/content/ai-client";
+import type { ScanState } from "../lib/content/ai-client";
 import { shownResult } from "../lib/content/shown-result";
 import { contentText } from "../lib/content-i18n";
-import type { ContentAccess, ScanRequest } from "../lib/messages";
+import type { ContentAccess } from "../lib/messages";
 
 afterEach(cleanup);
 
@@ -414,30 +414,6 @@ describe("AiSection : erreurs", () => {
 		expect(
 			screen.queryByText(contentText("fr", "ai.error.network")),
 		).toBeNull();
-	});
-});
-
-describe("createAiClient", () => {
-	test("envoie content/access, scan/run et ui/open-popup", async () => {
-		const send = vi.fn(async () => ({ ok: true as const, data: null }));
-		const client = createAiClient(send as never);
-		const scan = { scanKind: "text" } as ScanRequest;
-
-		await client.access();
-		await client.scan(scan);
-		await client.openLogin();
-
-		expect(send.mock.calls).toEqual([
-			[{ type: "content/access" }],
-			[{ type: "scan/run", scan }],
-			[{ type: "ui/open-popup" }],
-		]);
-	});
-
-	test("renvoie la réponse du service worker telle quelle", async () => {
-		const response = { ok: false as const, error: { code: "quota_exhausted" } };
-		const client = createAiClient((async () => response) as never);
-		await expect(client.scan({} as ScanRequest)).resolves.toBe(response);
 	});
 });
 

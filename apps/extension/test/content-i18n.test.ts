@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
 	aiErrorText,
 	CONTENT_TEXTS,
+	type ContentKey,
 	contentText,
 	resolveContentLocale,
 	signalText,
@@ -218,6 +219,8 @@ describe("textes de la section IA", () => {
 			"ai.error.network": "Connexion impossible. Vérifiez votre réseau.",
 			"ai.error.background_unavailable":
 				"Connexion impossible. Vérifiez votre réseau.",
+			"ai.error.stream_interrupted": "Analyse interrompue",
+			"ai.error.timeout": "L'analyse a pris trop de temps",
 			"ai.error.default": "Une erreur est survenue. Réessayez plus tard.",
 		};
 		const fr = CONTENT_TEXTS.fr as Record<string, string>;
@@ -280,6 +283,13 @@ describe("aiErrorText", () => {
 		);
 	});
 
+	test("analyse en flux : interrompue et trop longue, FR et NL", () => {
+		expect(aiErrorText("fr", "stream_interrupted")).toBe("Analyse interrompue");
+		expect(aiErrorText("nl", "stream_interrupted")).toBe("Analyse onderbroken");
+		expect(aiErrorText("fr", "timeout")).toBe("L'analyse a pris trop de temps");
+		expect(aiErrorText("nl", "timeout")).toBe("De analyse duurde te lang");
+	});
+
 	test("un code inconnu renvoie ai.error.default", () => {
 		expect(aiErrorText("fr", "teapot")).toBe(
 			"Une erreur est survenue. Réessayez plus tard.",
@@ -297,5 +307,45 @@ describe("aiErrorText", () => {
 		expect(aiErrorText("fr", "toString")).toBe(
 			contentText("fr", "ai.error.default"),
 		);
+	});
+});
+
+describe("textes de la progression d'une analyse", () => {
+	test("ligne d'état : textes imposés, FR et NL", () => {
+		expect(contentText("fr", "progress.start")).toBe("Démarrage de l'analyse");
+		expect(contentText("nl", "progress.start")).toBe("Analyse wordt gestart");
+		expect(contentText("fr", "progress.writing")).toBe("Rédige le verdict");
+		expect(contentText("nl", "progress.writing")).toBe("Schrijft het oordeel");
+		expect(contentText("fr", "progress.searchFailed")).toBe(
+			"Recherche indisponible, l'analyse continue",
+		);
+		expect(contentText("nl", "progress.searchFailed")).toBe(
+			"Zoekopdracht niet beschikbaar, de analyse gaat door",
+		);
+	});
+
+	test("chaque aspect d'une recherche est traduit", () => {
+		const fr = ["model", "price", "scam", "other"].map((a) =>
+			contentText("fr", `progress.aspect.${a}` as ContentKey),
+		);
+		expect(fr).toEqual(["modèle", "prix du marché", "arnaque connue", "autre"]);
+		const nl = ["model", "price", "scam", "other"].map((a) =>
+			contentText("nl", `progress.aspect.${a}` as ContentKey),
+		);
+		expect(nl).toEqual(["model", "marktprijs", "bekende oplichting", "andere"]);
+	});
+
+	test("les textes à compléter ont leurs paramètres dans les deux langues", () => {
+		const params: Partial<Record<ContentKey, string[]>> = {
+			"progress.photos": ["{count}"],
+			"progress.analyzing": ["{count}"],
+			"progress.search": ["{aspect}", "{query}"],
+			"progress.results": ["{count}"],
+			"progress.searchDone": ["{results}", "{domains}"],
+		};
+		for (const locale of ["fr", "nl"] as const)
+			for (const [key, names] of Object.entries(params))
+				for (const name of names ?? [])
+					expect(contentText(locale, key as ContentKey)).toContain(name);
 	});
 });

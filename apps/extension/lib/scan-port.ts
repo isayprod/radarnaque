@@ -25,11 +25,14 @@ export type PortMessage =
 	| { type: "event"; event: ScanProgressEvent }
 	| StreamOutcome;
 
-/** Partie de `runtime.Port` utilisée ; un faux dans les tests. */
-export interface PortLike {
+/**
+ * Partie de `runtime.Port` utilisée ; un faux dans les tests. `Out` : ce que ce côté
+ * poste (`PortMessage` pour le service worker, `ScanRequest` pour l'onglet).
+ */
+export interface PortLike<Out = PortMessage> {
 	name: string;
 	sender?: InternalSender;
-	postMessage(message: PortMessage): void;
+	postMessage(message: Out): void;
 	disconnect(): void;
 	onMessage: { addListener(fn: (message: unknown) => void): void };
 	onDisconnect: { addListener(fn: () => void): void };
