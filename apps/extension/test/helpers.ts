@@ -75,6 +75,19 @@ export const trialMe: Me = {
 	totalCap: { scanKind: null, limit: 3, used: 0, remaining: 3 },
 };
 
+/** Forme renvoyée par `/api/me` pour le superuser de développement (hors production). */
+export const superuserMe: Me = {
+	userId: "user-su",
+	email: "superuser@radarnaque.test",
+	role: "superuser",
+	plan: null,
+	features: ["card_icons", "image_scan"],
+	unlimited: true,
+	periodStart: null,
+	quotas: [],
+	totalCap: null,
+};
+
 export const sampleAnalysis: AnalysisResult = {
 	analysisId: 42,
 	analyzedAt: "2026-10-18T10:00:00Z",

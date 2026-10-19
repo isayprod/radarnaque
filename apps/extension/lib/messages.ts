@@ -15,11 +15,15 @@ export interface ScanRequest {
 	scanKind: ScanKind;
 	trigger: ScanTrigger;
 	partial: boolean;
+	/** Superuser hors production : relance sans cache. Ignoré par le serveur pour les autres. */
+	noCache?: boolean;
 }
 
 /**
  * Droits de la page pour le content script. `remaining.*` vaut `null` sans plafond
- * (admin, ou quota absent du plan) : on n'affiche jamais « 0 » dans ce cas.
+ * (admin, ou quota absent du plan) : on n'affiche jamais « 0 » dans ce cas. `debug`
+ * n'est vrai que pour le superuser de développement (rôle renvoyé par `/api/me`) ;
+ * les autres états n'en ont pas et valent `false` (voir `isDebug`).
  */
 export type ContentAccess =
 	| { status: "signedOut" }
@@ -28,6 +32,7 @@ export type ContentAccess =
 			status: "active";
 			features: string[];
 			unlimited: boolean;
+			debug: boolean;
 			remaining: {
 				text: number | null;
 				image: number | null;

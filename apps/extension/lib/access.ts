@@ -17,15 +17,20 @@ function remainingOf(me: Me, kind: ScanKind): number | null {
 /**
  * Droits de la page déduits de `GET /api/me`. Sans plan actif : `noSubscription`, sauf
  * pour un admin (`unlimited`), que le serveur laisse scanner même sans abonnement.
+ * Le superuser de développement est illimité comme un admin et a en plus `debug` ;
+ * l'API ne renvoie ce rôle que hors production (sinon `user`).
  */
 export function accessOf(me: Me): ContentAccess {
-	if (me.plan === null && !me.unlimited) return { status: "noSubscription" };
+	const superuser = me.role === "superuser";
+	const unlimited = me.unlimited || superuser;
+	if (me.plan === null && !unlimited) return { status: "noSubscription" };
 	return {
 		status: "active",
 		features: me.features,
-		unlimited: me.unlimited,
-		// Admin : aucun quota affiché, même si l'API en renvoie.
-		remaining: me.unlimited
+		unlimited,
+		debug: superuser,
+		// Admin ou superuser : aucun quota affiché, même si l'API en renvoie.
+		remaining: unlimited
 			? { text: null, image: null, total: null }
 			: {
 					text: remainingOf(me, "text"),
@@ -44,4 +49,9 @@ export function canUse(access: ContentAccess, feature: AccessFeature): boolean {
 	if (access.unlimited) return true;
 	const required = REQUIRED_FEATURE[feature];
 	return required === null || access.features.includes(required);
+}
+
+/** Logs et affichage de debug : uniquement pour un accès actif de superuser. */
+export function isDebug(access: ContentAccess): boolean {
+	return access.status === "active" && access.debug;
 }

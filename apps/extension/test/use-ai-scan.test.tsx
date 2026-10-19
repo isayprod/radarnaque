@@ -40,6 +40,7 @@ const active: ContentAccess = {
 	status: "active",
 	features: ["image_scan"],
 	unlimited: false,
+	debug: false,
 	remaining: { text: 3, image: 3, total: null },
 };
 

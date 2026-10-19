@@ -18,12 +18,14 @@ const standard: ContentAccess = {
 	status: "active",
 	features: [],
 	unlimited: false,
+	debug: false,
 	remaining: { text: 12, image: null, total: null },
 };
 const trial: ContentAccess = {
 	status: "active",
 	features: ["image_scan", "card_icons"],
 	unlimited: false,
+	debug: false,
 	remaining: { text: null, image: null, total: 5 },
 };
 
@@ -159,6 +161,7 @@ describe("AiSection : accès", () => {
 				status: "active",
 				features: [],
 				unlimited: true,
+				debug: false,
 				remaining: { text: null, image: null, total: null },
 			},
 		});

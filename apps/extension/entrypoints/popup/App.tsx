@@ -373,6 +373,8 @@ export default function App() {
 }
 
 function planName(me: Me, locale: Locale): string {
+	// Rôle renvoyé par l'API hors production seulement (sinon `user`).
+	if (me.role === "superuser") return t(locale, "plan.superuser");
 	if (me.unlimited) return t(locale, "plan.unlimited");
 	switch (me.plan) {
 		case "trial":

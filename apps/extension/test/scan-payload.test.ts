@@ -303,4 +303,10 @@ describe("toScanIn", () => {
 			priceType: "fixed",
 		});
 	});
+
+	test("noCache n'est transmis que s'il vaut true", () => {
+		expect(toScanIn(request({ noCache: true })).noCache).toBe(true);
+		expect(toScanIn(request({ noCache: false }))).not.toHaveProperty("noCache");
+		expect(toScanIn(request())).not.toHaveProperty("noCache");
+	});
 });

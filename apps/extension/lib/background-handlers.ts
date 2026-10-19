@@ -1,5 +1,5 @@
 import type { AnalysisResult, Locale, Me, ScanIn } from "@radarnaque/shared";
-import { accessOf } from "./access";
+import { accessOf, isDebug } from "./access";
 import { ApiRequestError } from "./api-client";
 import {
 	AuthError,
@@ -7,6 +7,7 @@ import {
 	type startSignIn,
 	type verifyOtp,
 } from "./auth-client";
+import { createDebugLog, type DebugSink } from "./debug-log";
 import { isValidEmail, normalizeEmail } from "./email";
 import type { JwtProvider } from "./jwt-provider";
 import {
@@ -38,6 +39,11 @@ export interface HandlerDeps {
 	openPopup: () => Promise<void>;
 	/** R5 : vide les résultats IA gardés à la déconnexion (`clearAiResults`). */
 	clearAiResults: () => Promise<void>;
+	/**
+	 * Sortie des logs de debug du superuser (`console` par défaut ; un faux dans les
+	 * tests). Rien n'y est écrit si le dernier `me` lu n'est pas superuser.
+	 */
+	debugLog?: DebugSink;
 }
 
 export interface ExternalDeps {
@@ -57,10 +63,17 @@ function fail(code: string): BgResponse<never> {
 	return { ok: false, error: { code } };
 }
 
-function errorCode(error: unknown): string {
+/** Code d'une erreur connue, ou `null` pour une erreur inattendue. */
+function knownCode(error: unknown): string | null {
 	if (error instanceof AuthError) return error.code;
 	if (error instanceof ApiRequestError) return error.body.error.code;
 	if (error instanceof ScanPayloadError) return error.code;
+	return null;
+}
+
+function errorCode(error: unknown): string {
+	const code = knownCode(error);
+	if (code !== null) return code;
 	console.error("[radarnaque] erreur inattendue du service worker", error);
 	return "internal_error";
 }
@@ -77,7 +90,17 @@ export function createHandlers(
 ): (req: BgRequest) => Promise<BgResponse<unknown>> {
 	const { sessionToken, auth, jwt, api, openPopup } = deps;
 
+	/**
+	 * Debug du dernier `me` lu (`auth/state` ou `content/access`). Faux au démarrage du
+	 * service worker, sans session, après une erreur et à chaque changement de session.
+	 */
+	let lastAccessDebug = false;
+	// Seuls le corps `ScanIn`, le résultat et le code d'erreur y passent : jamais
+	// d'en-tête, de JWT, de jeton de session ni de cookie.
+	const debugLog = createDebugLog(() => lastAccessDebug, deps.debugLog);
+
 	async function storeSession(token: string | null): Promise<void> {
+		lastAccessDebug = false;
 		await sessionToken.setValue(token);
 		jwt.invalidate();
 	}
@@ -99,13 +122,21 @@ export function createHandlers(
 		}
 	}
 
-	async function state(): Promise<BgResponse<AuthState>> {
+	/** `currentMe` qui met aussi à jour `lastAccessDebug` (faux en cas d'erreur). */
+	async function trackedMe(): Promise<Me | null> {
+		lastAccessDebug = false;
 		const me = await currentMe();
+		lastAccessDebug = me !== null && isDebug(accessOf(me));
+		return me;
+	}
+
+	async function state(): Promise<BgResponse<AuthState>> {
+		const me = await trackedMe();
 		return ok(me ? { status: "signedIn", me } : { status: "signedOut" });
 	}
 
 	async function contentAccess(): Promise<BgResponse<ContentAccess>> {
-		const me = await currentMe();
+		const me = await trackedMe();
 		return ok(me ? accessOf(me) : { status: "signedOut" });
 	}
 
@@ -116,9 +147,22 @@ export function createHandlers(
 	async function runScan(scan: unknown): Promise<BgResponse<AnalysisResult>> {
 		const listing = (scan as { listing?: unknown } | null)?.listing;
 		if (typeof scan !== "object" || typeof listing !== "object" || !listing) {
+			debugLog.group("scan en erreur", { code: "invalid_listing" });
 			return fail("invalid_listing");
 		}
-		return ok(await api.scan(toScanIn(scan as ScanRequest)));
+		try {
+			const body = toScanIn(scan as ScanRequest);
+			debugLog.group("scan envoyé", body);
+			const result = await api.scan(body);
+			debugLog.group("scan reçu", { status: "ok", result });
+			return ok(result);
+		} catch (error) {
+			// Le code seul : jamais le message ni les détails de l'erreur.
+			debugLog.group("scan en erreur", {
+				code: knownCode(error) ?? "internal_error",
+			});
+			throw error;
+		}
 	}
 
 	async function openPopupPage(): Promise<BgResponse<null>> {

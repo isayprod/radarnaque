@@ -44,6 +44,7 @@ const withCards: ContentAccess = {
 	status: "active",
 	features: ["card_icons"],
 	unlimited: false,
+	debug: false,
 	remaining: { text: 3, image: null, total: null },
 };
 const standard: ContentAccess = { ...withCards, features: [] };
