@@ -215,6 +215,28 @@ async def test_scan_llm_failure_is_502_without_provider_text(client, bearer, use
 # --- GET /api/scans/history --------------------------------------------------------------
 
 
+async def test_superuser_scans_without_subscription_outside_production(
+    client, bearer, make_user, llm
+):
+    uid = await make_user("superuser@radarnaque.test", role="superuser")
+    for i in range(31):  # au-delà de la limite de requêtes (30 par minute)
+        r = await client.post("/api/scans", json=_body(f"m{i}"), headers=bearer(uid))
+        assert r.status_code == 200, r.text
+    assert r.json()["remaining"] == {"text": None, "image": None, "total": None}
+
+
+async def test_superuser_without_subscription_gets_402_in_production(
+    client, bearer, make_user, llm, production, caplog
+):
+    uid = await make_user("superuser@radarnaque.test", role="superuser")
+    with caplog.at_level(logging.WARNING, logger="radarnaque.privileges"):
+        r = await client.post("/api/scans", json=_body(), headers=bearer(uid))
+    assert r.status_code == 402
+    assert r.json()["error"]["code"] == "no_active_subscription"
+    assert "rôle superuser ignoré en production" in caplog.text
+    assert llm.calls == 0
+
+
 async def _three_scans(client, bearer, uid: str, llm: FakeLLM) -> list[dict]:
     """Deux scans réussis de la même annonce (le second depuis le cache), puis un échec."""
     first = await client.post("/api/scans", json=_body("m1"), headers=bearer(uid))

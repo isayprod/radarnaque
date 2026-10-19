@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from sqlalchemy import select
 
@@ -34,6 +35,34 @@ async def test_me_admin_unlimited(client, make_user, bearer):
     assert body["role"] == "admin" and body["unlimited"] is True
     assert sorted(body["features"]) == ["card_icons", "image_scan"]
     assert body["quotas"] == [] and body["totalCap"] is None
+
+
+async def test_me_superuser_unlimited_outside_production(client, db, make_user, bearer):
+    uid = await make_user("superuser@radarnaque.test", role="superuser")
+    body = (await client.get("/api/me", headers=bearer(uid))).json()
+    assert body["role"] == "superuser" and body["unlimited"] is True
+    assert sorted(body["features"]) == ["card_icons", "image_scan"]
+    assert body["quotas"] == [] and body["totalCap"] is None and body["plan"] is None
+    # Comme l'admin : aucun essai créé.
+    rows = (await db.execute(select(Subscription).where(Subscription.user_id == uid))).all()
+    assert rows == []
+
+
+async def test_me_superuser_is_a_user_in_production(client, make_user, bearer, production, caplog):
+    uid = await make_user("superuser@radarnaque.test", role="superuser")
+    with caplog.at_level(logging.WARNING, logger="radarnaque.privileges"):
+        body = (await client.get("/api/me", headers=bearer(uid))).json()
+    assert body["role"] == "user" and body["unlimited"] is False
+    assert body["plan"] == "trial"
+    assert {q["scanKind"]: q["remaining"] for q in body["quotas"]} == {"text": 3, "image": 3}
+    assert "rôle superuser ignoré en production" in caplog.text
+    assert "superuser@radarnaque.test" not in caplog.text and uid not in caplog.text
+
+
+async def test_me_admin_stays_admin_in_production(client, make_user, bearer, production):
+    uid = await make_user("admin@b.test", role="admin")
+    body = (await client.get("/api/me", headers=bearer(uid))).json()
+    assert body["role"] == "admin" and body["unlimited"] is True
 
 
 async def test_me_admin_reports_active_plan(client, db, make_user, bearer):

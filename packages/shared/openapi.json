@@ -394,7 +394,8 @@
           "role": {
             "enum": [
               "user",
-              "admin"
+              "admin",
+              "superuser"
             ],
             "title": "Role",
             "type": "string"
