@@ -9,6 +9,7 @@ from jwt_helpers import make_jwks
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from radarnaque_api.config import Settings
 from radarnaque_api.llm.client import (
     Bilingual,
     LLMAnalysis,
@@ -525,3 +526,85 @@ async def test_image_scan_without_images_is_invalid_listing_before_reserving(
         text("select count(*) from app.scan_events where user_id = :uid"), {"uid": uid}
     )
     assert events == 0
+
+
+# --- Bloc debug du superuser et logger de debug -------------------------------------------------
+
+
+async def test_scan_response_has_debug_only_for_a_superuser(client, bearer, make_user, user, llm):
+    superuser = await make_user("superuser@radarnaque.test", role="superuser")
+    admin = await make_user(f"{uuid4().hex}@b.test", role="admin")
+    ordinary = await user()
+
+    r = await client.post("/api/scans", json=_body("s1"), headers=bearer(superuser))
+    assert r.status_code == 200, r.text
+    debug = r.json()["debug"]
+    assert debug["llmCalled"] is True and debug["fromCache"] is False
+    assert debug["promptVersion"] == {"scanKind": "text", "version": 2}
+    assert debug["analysisId"] == r.json()["analysisId"]
+    assert "Bearer" not in r.text  # le JWT reçu n'est jamais renvoyé
+
+    for uid in (admin, ordinary):
+        r = await client.post("/api/scans", json=_body(f"o-{uid}"), headers=bearer(uid))
+        assert r.status_code == 200, r.text
+        assert r.json()["debug"] is None
+
+
+async def test_no_cache_is_accepted_and_honoured_only_for_a_superuser(
+    client, bearer, make_user, user, llm
+):
+    superuser = await make_user("superuser@radarnaque.test", role="superuser")
+    ordinary = await user()
+    body = {**_body(), "noCache": True}
+
+    responses = [
+        await client.post("/api/scans", json=body, headers=bearer(ordinary)) for _ in range(2)
+    ]
+    assert [r.status_code for r in responses] == [200, 200]
+    assert llm.calls == 1  # ignoré pour un compte ordinaire
+    assert responses[1].json()["fromCache"] is True
+    assert responses[1].json()["remaining"]["total"] == 1
+
+    again = await client.post("/api/scans", json=body, headers=bearer(superuser))
+    assert again.status_code == 200, again.text
+    assert llm.calls == 2  # relance sans cache
+    assert again.json()["analysisId"] == responses[0].json()["analysisId"]
+    assert again.json()["debug"]["llmCalled"] is True
+
+
+def _debug_handlers() -> list[logging.Handler]:
+    return [
+        h
+        for h in logging.getLogger("radarnaque.debug").handlers
+        if getattr(h, "radarnaque_debug", False)
+    ]
+
+
+@pytest.fixture
+def bare_debug_logger():
+    """Logger de debug sans son gestionnaire console, rétabli après le test."""
+    logger = logging.getLogger("radarnaque.debug")
+    saved = (list(logger.handlers), logger.level, logger.propagate)
+    for handler in _debug_handlers():
+        logger.removeHandler(handler)
+    logger.propagate = True
+    yield logger
+    logger.handlers[:] = saved[0]
+    logger.setLevel(saved[1])
+    logger.propagate = saved[2]
+
+
+def test_debug_logger_has_one_console_handler_outside_production(settings, bare_debug_logger):
+    create_app(settings)
+    create_app(settings)  # plusieurs applications (tests) : pas de doublon
+    [handler] = _debug_handlers()
+    assert isinstance(handler, logging.StreamHandler)
+    assert bare_debug_logger.level == logging.INFO
+    assert bare_debug_logger.propagate is False
+
+
+def test_debug_logger_has_no_handler_in_production(settings, bare_debug_logger):
+    prod = Settings.model_validate({**settings.model_dump(), "env": "production"})
+    create_app(prod)
+    assert _debug_handlers() == []
+    assert bare_debug_logger.handlers == []

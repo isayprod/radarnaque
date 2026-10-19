@@ -11,6 +11,7 @@ from radarnaque_api.llm.client import (
     LLMAnalysis,
     LLMClientFactory,
     LLMError,
+    LLMResult,
     OpenAICompatibleClient,
     strict_analysis_schema,
     strict_json_schema,
@@ -486,3 +487,35 @@ async def test_client_factory_caches_one_client_per_provider():
     with pytest.raises(ProviderError, match="inconnu"):
         factory("missing")
     await factory.aclose()
+
+
+# --- Trace pour le bloc debug du superuser -----------------------------------------------------
+
+
+async def test_result_carries_the_raw_text_and_the_sent_system_prompt(mock, http):
+    raw = json.dumps(VALID, ensure_ascii=False)
+    mock.post("/chat/completions").mock(return_value=httpx.Response(200, json=_completion(raw)))
+    result = await _analyze(_provider(), http)
+    assert result.raw_text == raw
+    assert result.system_prompt == "SYS"
+
+
+async def test_json_object_result_system_prompt_is_the_one_sent_with_the_schema(mock, http):
+    route = mock.post("/chat/completions").mock(return_value=_ok())
+    provider = _provider(structured_output="json_object", cost_source="none")
+    result = await _analyze(provider, http)
+
+    sent = json.loads(route.calls.last.request.content)["messages"][0]["content"]
+    assert result.system_prompt == sent
+    assert sent.endswith(json.dumps(strict_analysis_schema(), ensure_ascii=False))
+    # Le même texte est disponible sans appel (scan servi par le cache).
+    client = OpenAICompatibleClient(provider, ENV, http_client=http)
+    assert client.final_system_prompt("SYS") == sent
+    assert OpenAICompatibleClient(_provider(), ENV).final_system_prompt("SYS") == "SYS"
+
+
+def test_llm_result_trace_fields_default_to_empty():
+    result = LLMResult(
+        analysis=LLMAnalysis.model_validate(VALID), tokens_in=0, tokens_out=0, cost_usd_micros=0
+    )
+    assert (result.raw_text, result.system_prompt) == ("", "")

@@ -28,6 +28,30 @@ def _quiet_http_loggers() -> None:
             logger.setLevel(logging.WARNING)
 
 
+# Logs détaillés des scans du superuser (services/scans.py), affichés sur la console hors
+# production seulement : en production, ce logger n'a aucun gestionnaire.
+DEBUG_LOGGER = "radarnaque.debug"
+_DEBUG_HANDLER_MARK = "radarnaque_debug"
+
+
+def _debug_console(settings: Settings) -> None:
+    """Hors production, un seul gestionnaire console sur `radarnaque.debug`, au niveau INFO et
+    sans propagation (pas de doublon dans les logs d'uvicorn). Idempotent : créer plusieurs
+    applications (tests) n'ajoute pas de gestionnaire."""
+    if settings.env == "production":
+        return
+    logger = logging.getLogger(DEBUG_LOGGER)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    if any(getattr(h, _DEBUG_HANDLER_MARK, False) for h in logger.handlers):
+        return
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    setattr(handler, _DEBUG_HANDLER_MARK, True)
+    logger.addHandler(handler)
+
+
 def create_app(
     settings: Settings | None = None, *, jwks_fetcher: JwksFetcher | None = None
 ) -> FastAPI:
@@ -36,6 +60,7 @@ def create_app(
     (tests)."""
     settings = settings or Settings()  # type: ignore[call-arg]
     _quiet_http_loggers()
+    _debug_console(settings)
     providers = load_providers(settings.providers_file)
 
     @asynccontextmanager
