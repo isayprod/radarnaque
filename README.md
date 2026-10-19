@@ -69,7 +69,7 @@ Alternative : lancer les services séparément, chacun dans son terminal.
 
 ```sh
 pnpm db:up                                                   # Postgres, schémas auth et app
-docker compose -f infra/docker-compose.dev.yml up -d caddy searxng   # http://localhost:8080 et :8888
+docker compose -f infra/docker-compose.dev.yml up -d caddy searxng   # :8080 (Caddy) et :8888 (SearXNG)
 pnpm dev:auth    # terminal 1 : migrations Better Auth, puis service auth (port 3000)
 pnpm dev:api     # terminal 2 : alembic upgrade head, puis API (port 8000)
 pnpm dev:site    # terminal 3 : vite build --watch vers apps/site/dist
@@ -143,13 +143,14 @@ Si une fiche n'est pas reconnue, rien ne s'affiche et la console de la page (niv
 
 Les fournisseurs LLM sont décrits dans `services/api/providers.toml` : URL, format de sortie
 structurée, source du coût et **nom** de la variable d'environnement de la clé (jamais la
-clé elle-même). Le modèle utilisé pour chaque type de scan (`text`, `image`) est choisi en
-base avec `radarnaque-llm`, depuis `services/api` :
+clé elle-même). Le modèle utilisé pour les analyses (type de scan `full`, le seul utilisé ;
+`text` et `image` ne restent que dans l'historique) est choisi en base avec `radarnaque-llm`,
+depuis `services/api` :
 
 ```sh
 cd services/api
 uv run --env-file ../../infra/.env radarnaque-llm list                     # fournisseurs (clé: oui/non), modèles, modèle actif par type
-uv run --env-file ../../infra/.env radarnaque-llm use <fournisseur> <modèle> --kind text
+uv run --env-file ../../infra/.env radarnaque-llm use <fournisseur> <modèle> --kind full
 ```
 
 `use` crée le modèle en base s'il n'existe pas encore. Le modèle actif est relu à chaque
@@ -160,7 +161,7 @@ pour pouvoir revenir ensuite au modèle d'origine.
 
 ```sh
 pnpm llm:stub                # terminal à part : http://127.0.0.1:20199/v1
-cd services/api && uv run --env-file ../../infra/.env radarnaque-llm use stub stub-model --kind text
+cd services/api && uv run --env-file ../../infra/.env radarnaque-llm use stub stub-model --kind full
 pnpm e2e:scan                # contre la stack lancée (pnpm dev)
 ```
 
@@ -198,15 +199,14 @@ qu'elle existe, l'API refuse de démarrer si `stub` est retiré de `providers.to
 
 1. Créer une clé gratuite sur [console.groq.com](https://console.groq.com) → **API Keys**.
 2. Dans `infra/.env` : `GROQ_API_KEY=<clé>`, puis redémarrer `pnpm dev:api`.
-3. Activer Groq pour les deux types de scan :
+3. Activer Groq pour les analyses (modèle vision : elles joignent des photos) :
 
    ```sh
    cd services/api
-   uv run --env-file ../../infra/.env radarnaque-llm use groq llama-3.3-70b-versatile --kind text
-   uv run --env-file ../../infra/.env radarnaque-llm use groq qwen/qwen3.8-27b --kind image
+   uv run --env-file ../../infra/.env radarnaque-llm use groq qwen/qwen3.8-27b --kind full
    ```
 
-4. `pnpm e2e:scan` doit afficher `E2E SCAN OK (provider=groq, model=llama-3.3-70b-versatile, …)`.
+4. `pnpm e2e:scan` doit afficher `E2E SCAN OK (provider=groq, model=qwen/qwen3.8-27b, …)`.
 
 L'offre gratuite limite les requêtes et les tokens par minute et par jour (une réponse 429 de
 Groq donne un scan en échec `502`, rendu à l'utilisateur). Groq reçoit une sortie
@@ -232,8 +232,7 @@ session de Codex (`~/.codex/auth.json`).
 
    ```sh
    cd services/api
-   uv run --env-file ../../infra/.env radarnaque-llm use openai-oauth gpt-6-luna --kind text
-   uv run --env-file ../../infra/.env radarnaque-llm use openai-oauth gpt-6-luna --kind image
+   uv run --env-file ../../infra/.env radarnaque-llm use openai-oauth gpt-6-luna --kind full
    ```
 
 3. `pnpm e2e:scan` doit afficher `E2E SCAN OK (provider=openai-oauth, model=gpt-6-luna, …)`.
@@ -262,12 +261,11 @@ la composition de production. Le coût enregistré est nul.
 3. Dans `infra/.env` : `OMNIROUTE_API_KEY=<clé>` (et `OMNIROUTE_BASE_URL` seulement si
    OmniRoute n'écoute pas sur `http://localhost:20128/v1`). Redémarrer `pnpm dev:api` pour
    que l'API lise la clé.
-4. Activer OmniRoute pour les deux types de scan, avec son routage automatique :
+4. Activer OmniRoute pour les analyses, avec son routage automatique :
 
    ```sh
    cd services/api
-   uv run --env-file ../../infra/.env radarnaque-llm use omniroute auto --kind text
-   uv run --env-file ../../infra/.env radarnaque-llm use omniroute auto --kind image
+   uv run --env-file ../../infra/.env radarnaque-llm use omniroute auto --kind full
    ```
 
 5. `pnpm e2e:scan` doit afficher `E2E SCAN OK (provider=omniroute, model=auto, …)`.
@@ -279,8 +277,8 @@ le coût de chaque analyse est lu dans l'en-tête `X-OmniRoute-Response-Cost`.
 
 ```sh
 ollama serve                         # http://localhost:11434 ; sinon OLLAMA_BASE_URL dans infra/.env
-ollama pull <modèle>                 # par exemple qwen2.5:7b ; un modèle « vision » pour --kind image
-cd services/api && uv run --env-file ../../infra/.env radarnaque-llm use ollama <modèle> --kind text
+ollama pull <modèle>                 # par exemple qwen2.5:7b ; un modèle « vision » (les analyses joignent des photos)
+cd services/api && uv run --env-file ../../infra/.env radarnaque-llm use ollama <modèle> --kind full
 ```
 
 Ollama n'a pas de clé ; le coût enregistré est nul.
@@ -489,9 +487,7 @@ En production, les modèles sont ceux d'OpenRouter (clé `OPENROUTER_API_KEY` da
 
 ```sh
 docker compose -f infra/docker-compose.yml --env-file infra/.env exec api \
-  radarnaque-llm use openrouter google/gemini-2.5-flash-lite --kind text
-docker compose -f infra/docker-compose.yml --env-file infra/.env exec api \
-  radarnaque-llm use openrouter google/gemini-3.1-flash-lite --kind image
+  radarnaque-llm use openrouter google/gemini-3.1-flash-lite --kind full
 ```
 
 En dev, mêmes commandes avec `cd services/api && uv run --env-file ../../infra/.env
@@ -530,7 +526,7 @@ Ajouter un fournisseur compatible OpenAI (`POST <base_url>/chat/completions`) :
 3. Redémarrer l'API : `providers.toml` est lu au démarrage, et l'API refuse de démarrer si un
    modèle en base référence un fournisseur absent du fichier.
 4. `radarnaque-llm list` doit afficher le fournisseur avec `clé: oui` ; puis
-   `radarnaque-llm use monfournisseur <modèle> --kind text` et `pnpm e2e:scan`.
+   `radarnaque-llm use monfournisseur <modèle> --kind full` et `pnpm e2e:scan`.
 
 ## Déployer
 
@@ -538,8 +534,9 @@ Production : un serveur (Allemagne) avec Docker et Docker Compose, un enregistre
 `radarnaque.mostconsult.be` qui pointe vers lui, et les ports 80 et 443 ouverts (Let's
 Encrypt valide le certificat par le port 80). Caddy est le seul service qui publie des
 ports ; postgres, auth (3000), api (8000) et searxng (8080) restent sur le réseau interne de
-la composition (`SEARXNG_SECRET` est obligatoire dans `infra/.env`). Les routes sont celles du dev : `/auth/*` → auth, `/api/*` → api, le reste →
-le site compilé (`apps/site`), construit dans l'image Caddy.
+la composition (`SEARXNG_SECRET` est obligatoire dans `infra/.env`). Les routes sont celles du
+dev : `/auth/*` → auth, `/api/*` → api, le reste → le site compilé (`apps/site`), construit dans
+l'image Caddy.
 
 ### 1. Configuration
 
