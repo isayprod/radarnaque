@@ -112,7 +112,16 @@ describe("maskEmail", () => {
 			"su***@radarnaque.test",
 		);
 		expect(maskEmail("ab@x.test")).toBe("a***@x.test");
-		expect(maskEmail("a@x.test")).toBe("a***@x.test");
+	});
+
+	test("partie locale d'un caractère ou vide : rien n'en est montré", () => {
+		expect(maskEmail("a@x.test")).toBe("*@x.test");
+		expect(maskEmail("@x.test")).toBe("*@x.test");
+	});
+
+	test("sans @ : la chaîne est masquée comme une partie locale", () => {
+		expect(maskEmail("superuser")).toBe("su***");
+		expect(maskEmail("a")).toBe("*");
 	});
 });
 
@@ -204,6 +213,25 @@ describe("ensureDevSuperuser", () => {
 			ensureDevSuperuser({ auth, pool }, SUPERUSER, "production"),
 		);
 		expect(await countUsers(SUPERUSER)).toBe(0);
+	});
+
+	test("un compte admin n'est pas rétrogradé ; une ligne masquée le signale", async () => {
+		const auth = makeAuth();
+		await signUp(auth, SUPERUSER);
+		await pool.query(`UPDATE "user" SET role = 'admin' WHERE email = $1`, [
+			SUPERUSER,
+		]);
+
+		const { result, logs } = await quietly(() =>
+			ensureDevSuperuser({ auth, pool }, SUPERUSER, "development"),
+		);
+
+		expect(result).toBe("admin");
+		expect(await roleOf(SUPERUSER)).toBe("admin");
+		expect(await countUsers(SUPERUSER)).toBe(1);
+		expect(logs).toContain("su***@radarnaque.test");
+		expect(logs).toMatch(/admin/);
+		expect(logs).not.toContain(SUPERUSER);
 	});
 
 	test("sans email (absent ou vide), ne fait rien et ne journalise rien", async () => {
@@ -311,6 +339,20 @@ describe("pnpm dev:superuser", () => {
 		});
 		expect(result).toBe(1);
 		expect(await countUsers(SUPERUSER)).toBe(0);
+	});
+
+	test("laisse un compte admin inchangé (code 3)", async () => {
+		await signUp(makeAuth(), SUPERUSER);
+		await pool.query(`UPDATE "user" SET role = 'admin' WHERE email = $1`, [
+			SUPERUSER,
+		]);
+		const { result, logs } = await run([SUPERUSER], {
+			NODE_ENV: "development",
+			DATABASE_URL: db.connectionString,
+		});
+		expect(result).toBe(3);
+		expect(await roleOf(SUPERUSER)).toBe("admin");
+		expect(logs).not.toContain(SUPERUSER);
 	});
 
 	test("refuse en production (code 2), sans toucher la base", async () => {

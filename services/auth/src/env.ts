@@ -14,7 +14,8 @@ export interface Env {
 	RESEND_API_KEY: string | undefined;
 	/**
 	 * Compte de développement qui reçoit le rôle `superuser` (§5.3 bis), normalisé en
-	 * minuscules. Absent si vide. Ignoré quand NODE_ENV=production.
+	 * minuscules. Absent si vide, et toujours absent quand NODE_ENV=production (validé
+	 * hors production seulement).
 	 */
 	DEV_SUPERUSER_EMAIL?: string;
 }
@@ -137,9 +138,18 @@ export function loadEnv(source: Source = process.env): Env {
 		);
 	}
 
-	const devSuperuserEmail = normalizeEmail(source.DEV_SUPERUSER_EMAIL);
-	// La valeur n'est jamais reprise dans le message : le dépôt et les logs sont publics.
-	if (devSuperuserEmail && !isEmail(devSuperuserEmail)) {
+	let devSuperuserEmail = normalizeEmail(source.DEV_SUPERUSER_EMAIL);
+	if (nodeEnv === "production") {
+		// Ignorée en production, même invalide : elle ne doit jamais empêcher le
+		// démarrage. Pas de valeur dans le message, même masquée.
+		if (devSuperuserEmail) {
+			console.warn(
+				"[auth] DEV_SUPERUSER_EMAIL est ignoré en production : aucun rôle superuser attribué",
+			);
+		}
+		devSuperuserEmail = undefined;
+	} else if (devSuperuserEmail && !isEmail(devSuperuserEmail)) {
+		// La valeur n'est jamais reprise dans le message : le dépôt et les logs sont publics.
 		throw invalid("DEV_SUPERUSER_EMAIL", "email attendu");
 	}
 
