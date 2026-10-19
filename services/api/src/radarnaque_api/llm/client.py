@@ -1,8 +1,15 @@
 """Client LLM compatible OpenAI, paramétré par un fournisseur de `providers.toml`.
 
 Aucun secret ne sort d'ici : ni la clé, ni l'URL résolue, ni les corps de requête ou de réponse
-n'apparaissent dans un message d'erreur, et rien n'est journalisé."""
+n'apparaissent dans un message d'erreur, et rien n'est journalisé.
 
+L'analyse est une boucle de tours, commune aux deux API : un tour qui appelle l'outil
+`web_search` reçoit ses sorties au tour suivant ; le premier tour sans appel d'outil donne la
+réponse finale, validée par `LLMAnalysis`. Seules la construction des requêtes et la lecture
+des réponses dépendent de l'API (Responses en flux ; Chat sans flux ni outil jusqu'à la
+tâche 6)."""
+
+import asyncio
 import json
 import math
 from collections.abc import Mapping
@@ -16,13 +23,18 @@ import openai
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, StringConstraints
 
+from radarnaque_api.llm.events import EventSink, LLMEvent, Thinking, Writing
 from radarnaque_api.llm.providers import ProviderConfig, ProviderError
+from radarnaque_api.llm.tools import UNKNOWN_TOOL, SearchRecord, SearchTrace, WebSearchTool
+
+__all__ = ["SearchRecord"]  # réexporté : défini avec l'outil, utilisé avec LLMResult
 
 TEMPERATURE = 0.2
-MAX_TOKENS = 800
-TIMEOUT_S = 30
-ATTEMPTS = 2  # une seule nouvelle tentative
+MAX_TOKENS = 4000  # place laissée à la réflexion
+TIMEOUT_S = 90  # par tour de modèle : délai du SDK et durée totale du tour
+ATTEMPTS = 2  # une seule nouvelle tentative par analyse
 SCHEMA_NAME = "radarnaque_analysis"
+THINKING_MAX = 600  # caractères d'une partie de réflexion relayés à l'extension
 
 # OmniRoute (https://github.com/diegosouzapw/OmniRoute, docs/reference/API_REFERENCE.md,
 # « Cost telemetry headers ») : les réponses non diffusées en flux portent
@@ -54,21 +66,15 @@ class LLMAnalysis(BaseModel):
     reasons: list[LLMReason] = Field(max_length=5)
 
 
-@dataclass(frozen=True)
-class SearchRecord:
-    """Une recherche web faite par le modèle : la requête (déjà masquée) et son aspect
-    (`model`, `price`, `scam` ou `other`)."""
-
-    query: str
-    aspect: str
-
-
 @dataclass
 class LLMResult:
     """`raw_text` : contenu de la réponse du modèle, tel que reçu ; `system_prompt` : prompt
-        système réellement envoyé (schéma compris en mode `json_object`). Les deux ne servent qu'au
-        bloc debug du superuser ; les faux clients des tests peuvent les laisser vides. `searches` :
-    recherches web faites, dans l'ordre ; vide pour un client sans l'outil."""
+    système réellement envoyé (schéma compris en mode `json_object`). Les deux ne servent qu'au
+    bloc debug du superuser ; les faux clients des tests peuvent les laisser vides. `searches` :
+    recherches web réussies, dans l'ordre ; vide pour un client sans l'outil. `search_traces`,
+    `reasoning_text` (résumés de réflexion complets) et `rounds` (tours du modèle, nouvelle
+    tentative non comptée) servent au bloc debug. Les tokens et le coût couvrent tous les
+    appels faits, réponse refusée comprise."""
 
     analysis: LLMAnalysis
     tokens_in: int
@@ -77,6 +83,9 @@ class LLMResult:
     raw_text: str = ""
     system_prompt: str = ""
     searches: list[SearchRecord] = field(default_factory=list)
+    search_traces: list[SearchTrace] = field(default_factory=list)
+    reasoning_text: str = ""
+    rounds: int = 1
 
 
 LLMErrorCode = Literal["transport", "invalid_response", "configuration"]
@@ -102,7 +111,13 @@ class LLMError(Exception):
 
 class LLMClient(Protocol):
     async def analyze(
-        self, *, model: str, system_prompt: str, messages: list[dict]
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        messages: list[dict],
+        tools: WebSearchTool | None = None,
+        on_event: EventSink | None = None,
     ) -> LLMResult: ...
 
 
@@ -182,6 +197,104 @@ class _Invalid(Exception):
     pass
 
 
+class _StreamFailed(Exception):
+    """Flux coupé avant `response.completed`, ou erreur annoncée dans le flux."""
+
+
+@dataclass(frozen=True)
+class _ToolCall:
+    call_id: str
+    name: str
+    arguments: str
+
+
+@dataclass(frozen=True)
+class _Round:
+    """Un tour du modèle, quelle que soit l'API : appels d'outils, ou texte de la réponse finale.
+    `replay` : éléments de la réponse à recopier dans l'historique du tour suivant."""
+
+    text: str
+    calls: list[_ToolCall]
+    tokens_in: int
+    tokens_out: int
+    cost_usd_micros: int
+    replay: list[dict[str, Any]] = field(default_factory=list)
+
+
+class _Reasoning:
+    """Résumés de réflexion de toute l'analyse. Une partie (élément de réflexion, index de
+    résumé) reçoit un numéro à sa première apparition, à partir de 0, sans repartir à zéro d'un
+    tour à l'autre."""
+
+    def __init__(self) -> None:
+        self._parts: dict[tuple[object, object], int] = {}
+        self._texts: list[str] = []
+
+    def add(self, key: tuple[object, object], delta: str) -> Thinking | None:
+        """`Thinking` à relayer, ou None si le texte affiché (600 caractères) ne change pas."""
+        part = self._parts.get(key)
+        if part is None:
+            part = self._parts[key] = len(self._texts)
+            self._texts.append("")
+        shown = self._texts[part][:THINKING_MAX]
+        self._texts[part] += delta
+        text = self._texts[part][:THINKING_MAX]
+        return Thinking(part, text) if text != shown else None
+
+    @property
+    def text(self) -> str:
+        """Texte complet, parties séparées par une ligne vide (bloc debug)."""
+        return "\n\n".join(text for text in self._texts if text)
+
+
+class _RoundSink:
+    """Récepteur des événements d'un tour : note si l'un d'eux est parti. Une coupure ne se
+    reprend alors plus, l'extension ayant déjà affiché une partie du tour."""
+
+    def __init__(self, on_event: EventSink | None) -> None:
+        self._on_event = on_event
+        self.emitted = False
+
+    async def __call__(self, event: LLMEvent) -> None:
+        self.emitted = True
+        if self._on_event is not None:
+            await self._on_event(event)
+
+
+def _validated(text: str) -> LLMAnalysis | None:
+    if not text:
+        return None
+    try:
+        return LLMAnalysis.model_validate_json(text)
+    except ValueError:  # inclut ValidationError et les JSON illisibles
+        return None
+
+
+def _str(value: Any) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _is_call(item: Any) -> bool:
+    return getattr(item, "type", None) == "function_call"
+
+
+def _tool_call(item: Any) -> _ToolCall:
+    """Appel de fonction d'un élément `output` ; identifiant ou nom absent : réponse invalide."""
+    call_id, name = getattr(item, "call_id", None), getattr(item, "name", None)
+    if not isinstance(call_id, str) or not call_id or not isinstance(name, str):
+        raise _Invalid
+    return _ToolCall(call_id=call_id, name=name, arguments=_str(getattr(item, "arguments", None)))
+
+
+def _dump(item: Any) -> dict[str, Any]:
+    """Élément `output` recopié tel quel dans l'`input` du tour suivant."""
+    if isinstance(item, BaseModel):
+        return item.model_dump(exclude_none=True)
+    if isinstance(item, dict):
+        return dict(item)
+    raise _Invalid
+
+
 # Nom, dans l'API Responses, des paramètres de `omit_params` (désignés par leur nom Chat).
 _RESPONSES_PARAMS: dict[str, str] = {
     "temperature": "temperature",
@@ -210,8 +323,13 @@ def response_text(response: Any) -> str:
     text = getattr(response, "output_text", None)
     if isinstance(text, str):
         return text
+    return output_text(getattr(response, "output", None) or [])
+
+
+def output_text(items: list[Any]) -> str:
+    """Concaténation des parts `output_text` des messages d'une liste d'éléments `output`."""
     texts: list[str] = []
-    for item in getattr(response, "output", None) or []:
+    for item in items:
         if getattr(item, "type", None) != "message":
             continue
         for part in getattr(item, "content", None) or []:
@@ -295,67 +413,131 @@ class OpenAICompatibleClient:
             case _:
                 return 0
 
-    async def _attempt(self, client: AsyncOpenAI, request: dict[str, Any]) -> LLMResult:
-        if self._provider.api == "responses":
-            return await self._attempt_responses(client, request)
-        raw = await client.chat.completions.with_raw_response.create(**request)
-        try:
-            completion = raw.parse()
-            content = completion.choices[0].message.content
-            if not content:
-                raise _Invalid
-            analysis = LLMAnalysis.model_validate_json(content)
-        except (
-            ValueError,  # inclut ValidationError et les JSON illisibles
-            TypeError,
-            IndexError,
-            AttributeError,
-            openai.APIResponseValidationError,
-        ):
-            raise _Invalid from None
-        usage = completion.usage
-        return LLMResult(
-            analysis=analysis,
-            tokens_in=_count(getattr(usage, "prompt_tokens", None)),
-            tokens_out=_count(getattr(usage, "completion_tokens", None)),
-            cost_usd_micros=self._cost(usage, raw.headers),
-            raw_text=content,
-            system_prompt=request["messages"][0]["content"],
-        )
+    # --- Boucle commune aux deux API -----------------------------------------------------------
 
-    async def _attempt_responses(self, client: AsyncOpenAI, request: dict[str, Any]) -> LLMResult:
-        """Un appel à l'API Responses ; mêmes règles de validation que la voie Chat."""
-        raw = await client.responses.with_raw_response.create(**request)
-        try:
-            response = raw.parse()
-            content = response_text(response)
-            if not content:
-                raise _Invalid
-            analysis = LLMAnalysis.model_validate_json(content)
-        except (
-            ValueError,  # inclut ValidationError et les JSON illisibles
-            TypeError,
-            IndexError,
-            AttributeError,
-            openai.APIResponseValidationError,
-        ):
-            raise _Invalid from None
-        usage = response.usage
-        return LLMResult(
-            analysis=analysis,
-            tokens_in=_count(getattr(usage, "input_tokens", None)),
-            tokens_out=_count(getattr(usage, "output_tokens", None)),
-            cost_usd_micros=self._cost(usage, raw.headers),
-            raw_text=content,
-            system_prompt=request["instructions"],
-        )
+    async def analyze(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        messages: list[dict],
+        tools: WebSearchTool | None = None,
+        on_event: EventSink | None = None,
+    ) -> LLMResult:
+        """Tours du modèle jusqu'à sa réponse finale. Au plus `max_searches + 2` tours : le
+        dernier possible est demandé sans outil (`tool_choice: "none"`), et un appel d'outil
+        reçu à ce tour est une réponse invalide. Une seule nouvelle tentative pour toute
+        l'analyse : d'une réponse invalide (même tour, même requête), ou d'une erreur de
+        transport tant que le tour n'a émis aucun événement."""
+        client = self._openai()
+        request = self._request(model, system_prompt, messages)
+        max_rounds = (tools.max_searches if tools else 0) + 2
+        reasoning = _Reasoning()
+        retries = ATTEMPTS - 1
+        tokens_in = tokens_out = cost = 0
+        round_no = 1
+        # Chaque `except` ne fait que noter le code ; l'erreur est levée hors du bloc, pour
+        # qu'aucune exception d'origine (corps, requête, Authorization) ne lui soit chaînée.
+        while True:
+            last = tools is None or round_no >= max_rounds
+            sink = _RoundSink(on_event)
+            code: LLMErrorCode = "transport"
+            retryable = False
+            fatal: LLMErrorCode | None = None
+            outcome: _Round | None = None
+            try:
+                async with asyncio.timeout(TIMEOUT_S):
+                    outcome = await self._round(
+                        client, self._round_request(request, tools, last), sink, reasoning
+                    )
+            except (_Invalid, openai.APIResponseValidationError):
+                code, retryable = "invalid_response", True
+            except openai.APIStatusError as exc:
+                if exc.status_code in (401, 403):
+                    fatal = "configuration"
+                elif exc.status_code < 500:  # requête refusée : la répéter ne changerait rien
+                    fatal = "transport"
+                else:
+                    retryable = not sink.emitted
+            # Connexion impossible, délai dépassé (du SDK ou du tour), flux coupé, ou erreur
+            # annoncée dans le flux (`openai.APIError`).
+            except (openai.APIError, _StreamFailed, TimeoutError):
+                retryable = not sink.emitted
+            if fatal is not None:
+                raise self._error(fatal)
+            if outcome is not None:
+                tokens_in += outcome.tokens_in
+                tokens_out += outcome.tokens_out
+                cost += outcome.cost_usd_micros
+                if outcome.calls and not last:
+                    assert tools is not None  # `last` est vrai sans outil
+                    await self._answer_calls(request, outcome, tools)
+                    round_no += 1
+                    continue
+                analysis = None if outcome.calls else _validated(outcome.text)
+                if analysis is not None:
+                    return LLMResult(
+                        analysis=analysis,
+                        tokens_in=tokens_in,
+                        tokens_out=tokens_out,
+                        cost_usd_micros=cost,
+                        raw_text=outcome.text,
+                        system_prompt=self.final_system_prompt(system_prompt),
+                        searches=tools.records if tools else [],
+                        search_traces=tools.traces if tools else [],
+                        reasoning_text=reasoning.text,
+                        rounds=round_no,
+                    )
+                code, retryable = "invalid_response", True
+            if retryable and retries > 0:
+                retries -= 1
+                continue
+            raise self._error(code)
+
+    async def _answer_calls(
+        self, request: dict[str, Any], outcome: _Round, tools: WebSearchTool
+    ) -> None:
+        """Exécute les appels d'outils du tour, dans l'ordre, puis ajoute le tour et leurs
+        sorties à l'historique. Un outil inconnu reçoit une sortie fixe, sans rien exécuter."""
+        outputs: list[tuple[_ToolCall, str]] = []
+        for call in outcome.calls:
+            output = await tools.run(call.arguments) if call.name == tools.NAME else UNKNOWN_TOOL
+            outputs.append((call, output))
+        # Voie Chat : aucun outil n'est proposé, donc aucun appel, avant la tâche 6.
+        self._responses_extend(request, outcome, outputs)
+
+    def _request(self, model: str, system_prompt: str, messages: list[dict]) -> dict[str, Any]:
+        if self._provider.api == "responses":
+            return self._responses_request(model, system_prompt, messages)
+        return self._chat_request(model, system_prompt, messages)
+
+    def _round_request(
+        self, request: dict[str, Any], tools: WebSearchTool | None, last: bool
+    ) -> dict[str, Any]:
+        if self._provider.api == "responses":
+            return self._responses_round_request(request, tools, last)
+        return request  # voie Chat : `tools` ignoré jusqu'à la tâche 6
+
+    async def _round(
+        self,
+        client: AsyncOpenAI,
+        request: dict[str, Any],
+        sink: _RoundSink,
+        reasoning: _Reasoning,
+    ) -> _Round:
+        if self._provider.api == "responses":
+            return await self._responses_round(client, request, sink, reasoning)
+        return await self._chat_round(client, request)  # sans flux ni événement (tâche 6)
+
+    # --- API Responses (en flux) ---------------------------------------------------------------
 
     def _responses_request(
         self, model: str, system_prompt: str, messages: list[dict]
     ) -> dict[str, Any]:
         """Requête de l'API Responses : prompt système dans `instructions`, messages convertis
         dans `input`. Pas de `response_format` : le JSON est imposé par le prompt (schéma
-        ajouté en mode `json_object`) puis vérifié par Pydantic."""
+        ajouté en mode `json_object`) puis vérifié par Pydantic. Le proxy openai-oauth force
+        `store=false` : `input` porte tout l'historique, réflexion chiffrée comprise."""
         extra_body = self._provider.extra_body_dict()
         request: dict[str, Any] = {
             "model": model,
@@ -364,41 +546,133 @@ class OpenAICompatibleClient:
                 {"role": message["role"], "content": _responses_content(message["content"])}
                 for message in messages
             ],
+            "stream": True,
+            "include": ["reasoning.encrypted_content"],
             "temperature": TEMPERATURE,
             "max_output_tokens": MAX_TOKENS,
             "extra_body": extra_body or None,
         }
+        effort = self._provider.reasoning_effort
+        if effort != "none":
+            request["reasoning"] = {"effort": effort, "summary": "auto"}
         for param in self._provider.omit_params:
             del request[_RESPONSES_PARAMS[param]]
         return request
 
-    async def analyze(self, *, model: str, system_prompt: str, messages: list[dict]) -> LLMResult:
-        client = self._openai()
-        if self._provider.api == "responses":
-            request = self._responses_request(model, system_prompt, messages)
-        else:
-            request = self._chat_request(model, system_prompt, messages)
-        # Chaque `except` ne fait que noter le code ; l'erreur est levée après le bloc, pour
-        # qu'aucune exception d'origine (corps, requête, Authorization) ne lui soit chaînée.
-        code: LLMErrorCode = "transport"
-        for _ in range(ATTEMPTS):
-            fatal: LLMErrorCode | None = None
-            try:
-                return await self._attempt(client, request)
-            except _Invalid:
-                code = "invalid_response"
-            except openai.APIStatusError as exc:
-                if exc.status_code in (401, 403):
-                    fatal = "configuration"
-                elif exc.status_code < 500:  # requête refusée : la répéter ne changerait rien
-                    fatal = "transport"
-                else:
-                    code = "transport"
-            except openai.APIConnectionError:  # connexion impossible ou délai dépassé
-                code = "transport"
-            if fatal is not None:
-                raise self._error(fatal)
-        raise self._error(code)
+    def _responses_round_request(
+        self, request: dict[str, Any], tools: WebSearchTool | None, last: bool
+    ) -> dict[str, Any]:
+        round_request = {**request, "input": list(request["input"])}
+        if tools is not None:
+            round_request["tools"] = [
+                {
+                    "type": "function",
+                    "name": tools.NAME,
+                    "description": tools.DESCRIPTION,
+                    # Filtré comme le schéma de la réponse : le mode strict refuse `maxLength`
+                    # (la requête est de toute façon coupée à 200 caractères par clean_query).
+                    "parameters": _strict(tools.parameters(), {}),
+                    "strict": True,
+                }
+            ]
+            if last:
+                round_request["tool_choice"] = "none"
+        return round_request
+
+    def _responses_extend(
+        self, request: dict[str, Any], outcome: _Round, outputs: list[tuple[_ToolCall, str]]
+    ) -> None:
+        """L'`input` reçoit les éléments `output` du tour (réflexion chiffrée, appels), puis un
+        `function_call_output` par appel."""
+        history = request["input"]
+        history.extend(outcome.replay)
+        history.extend(
+            {"type": "function_call_output", "call_id": call.call_id, "output": output}
+            for call, output in outputs
+        )
+
+    async def _responses_round(
+        self,
+        client: AsyncOpenAI,
+        request: dict[str, Any],
+        sink: _RoundSink,
+        reasoning: _Reasoning,
+    ) -> _Round:
+        """Un tour en flux : relaie les résumés de réflexion et le début de la réponse finale,
+        puis rend les éléments de `output` (ceux de `response.output_item.done`, ou à défaut
+        ceux de `response.completed`)."""
+        stream = await client.responses.create(**request)
+        items: dict[int, Any] = {}
+        deltas: list[str] = []
+        completed: Any = None
+        calling = writing = False
+        try:
+            async for event in stream:
+                kind = getattr(event, "type", None)
+                if kind == "response.reasoning_summary_text.delta":
+                    key = (getattr(event, "item_id", None), getattr(event, "summary_index", None))
+                    thinking = reasoning.add(key, _str(getattr(event, "delta", None)))
+                    if thinking is not None:
+                        await sink(thinking)
+                elif kind in ("response.output_item.added", "response.output_item.done"):
+                    item = getattr(event, "item", None)
+                    calling = calling or getattr(item, "type", None) == "function_call"
+                    if kind == "response.output_item.done":
+                        index = getattr(event, "output_index", None)
+                        items[index if isinstance(index, int) else len(items)] = item
+                elif kind == "response.output_text.delta":
+                    deltas.append(_str(getattr(event, "delta", None)))
+                    if not calling and not writing:
+                        writing = True
+                        await sink(Writing())
+                elif kind == "response.completed":
+                    completed = getattr(event, "response", None)
+                elif kind in ("error", "response.failed"):
+                    raise _StreamFailed
+                elif kind == "response.incomplete":  # réponse coupée (limite de tokens)
+                    raise _Invalid
+        except ValueError:  # ligne `data:` illisible
+            raise _Invalid from None
+        finally:
+            await stream.close()
+        if completed is None:
+            raise _StreamFailed
+        output = [items[index] for index in sorted(items)]
+        if not output:
+            output = list(getattr(completed, "output", None) or [])
+        usage = getattr(completed, "usage", None)
+        return _Round(
+            text=output_text(output) or "".join(deltas),
+            calls=[_tool_call(item) for item in output if _is_call(item)],
+            tokens_in=_count(getattr(usage, "input_tokens", None)),
+            tokens_out=_count(getattr(usage, "output_tokens", None)),
+            cost_usd_micros=self._cost(usage, stream.response.headers),
+            replay=[_dump(item) for item in output],
+        )
+
+    # --- API Chat (sans flux ni outil jusqu'à la tâche 6) --------------------------------------
+
+    async def _chat_round(self, client: AsyncOpenAI, request: dict[str, Any]) -> _Round:
+        raw = await client.chat.completions.with_raw_response.create(**request)
+        try:
+            completion = raw.parse()
+            content = completion.choices[0].message.content
+        except (
+            ValueError,  # JSON illisible
+            TypeError,
+            IndexError,
+            AttributeError,
+            openai.APIResponseValidationError,
+        ):
+            raise _Invalid from None
+        usage = getattr(completion, "usage", None)
+        return _Round(
+            text=content if isinstance(content, str) else "",
+            calls=[],
+            tokens_in=_count(getattr(usage, "prompt_tokens", None)),
+            tokens_out=_count(getattr(usage, "completion_tokens", None)),
+            cost_usd_micros=self._cost(usage, raw.headers),
+        )
 
     def _chat_request(self, model: str, system_prompt: str, messages: list[dict]) -> dict[str, Any]:
         extra_body = self._provider.extra_body_dict()

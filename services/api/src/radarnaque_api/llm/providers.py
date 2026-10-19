@@ -19,6 +19,8 @@ CostSource = Literal["usage_cost", "omniroute_headers", "none"]
 OmittableParam = Literal["temperature", "max_tokens"]
 # API d'appel : Chat Completions (`/chat/completions`, par défaut) ou Responses (`/responses`).
 ProviderApi = Literal["chat", "responses"]
+# Effort de réflexion demandé au modèle (`none` : aucun paramètre de réflexion envoyé).
+ReasoningEffort = Literal["none", "low", "medium", "high"]
 
 _KNOWN_KEYS = {
     "base_url",
@@ -30,6 +32,7 @@ _KNOWN_KEYS = {
     "max_images",
     "omit_params",
     "api",
+    "reasoning_effort",
 }
 
 
@@ -77,6 +80,9 @@ class ProviderConfig:
     omit_params: tuple[OmittableParam, ...] = ()
     # API d'appel ; `max_tokens` dans `omit_params` retire aussi `max_output_tokens` (Responses).
     api: ProviderApi = "chat"
+    # Avec l'API Responses : `reasoning = { effort, summary = "auto" }` si l'effort n'est pas
+    # `none` (les résumés de réflexion sont relayés à l'extension).
+    reasoning_effort: ReasoningEffort = "none"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "extra_body", _freeze(deepcopy(dict(self.extra_body))))
@@ -167,6 +173,7 @@ def _parse_provider(code: str, raw: object) -> ProviderConfig:
         max_images=_optional_positive_int(code, raw, "max_images"),
         omit_params=_omit_params(code, raw),
         api=_choice(code, raw, "api", ProviderApi, default="chat"),
+        reasoning_effort=_choice(code, raw, "reasoning_effort", ReasoningEffort, default="none"),
     )
 
 

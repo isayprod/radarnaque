@@ -1,0 +1,30 @@
+event: response.created
+data: {"type": "response.created", "response": {"id": "resp_final", "object": "response", "created_at": 1760000000, "model": "gpt-test", "status": "in_progress", "output": [], "parallel_tool_calls": true, "tool_choice": "auto", "tools": []}, "sequence_number": 0}
+
+event: response.output_item.added
+data: {"type": "response.output_item.added", "output_index": 0, "item": {"type": "message", "id": "msg_final", "role": "assistant", "status": "in_progress", "content": []}, "sequence_number": 1}
+
+event: response.content_part.added
+data: {"type": "response.content_part.added", "item_id": "msg_final", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": "", "annotations": []}, "sequence_number": 2}
+
+event: response.output_text.delta
+data: {"type": "response.output_text.delta", "item_id": "msg_final", "output_index": 0, "content_index": 0, "delta": "{\"score\":72,\"professional\":false,\"summary\":{\"fr\":\"Prix cohérent avec le marché.\",\"nl\":\"Prijs in lijn met de mar", "logprobs": [], "sequence_number": 3}
+
+event: response.output_text.delta
+data: {"type": "response.output_text.delta", "item_id": "msg_final", "output_index": 0, "content_index": 0, "delta": "kt.\"},\"advice\":{\"fr\":\"Vérifiez l'objet en main propre.\",\"nl\":\"Controleer het toestel ter plaatse.\"},\"reasons\":[", "logprobs": [], "sequence_number": 4}
+
+event: response.output_text.delta
+data: {"type": "response.output_text.delta", "item_id": "msg_final", "output_index": 0, "content_index": 0, "delta": "{\"severity\":\"info\",\"fr\":\"Prix proche du marché (exemple.be).\",\"nl\":\"Prijs dicht bij de markt (exemple.be).\"}]}", "logprobs": [], "sequence_number": 5}
+
+event: response.output_text.done
+data: {"type": "response.output_text.done", "item_id": "msg_final", "output_index": 0, "content_index": 0, "text": "{\"score\":72,\"professional\":false,\"summary\":{\"fr\":\"Prix cohérent avec le marché.\",\"nl\":\"Prijs in lijn met de markt.\"},\"advice\":{\"fr\":\"Vérifiez l'objet en main propre.\",\"nl\":\"Controleer het toestel ter plaatse.\"},\"reasons\":[{\"severity\":\"info\",\"fr\":\"Prix proche du marché (exemple.be).\",\"nl\":\"Prijs dicht bij de markt (exemple.be).\"}]}", "logprobs": [], "sequence_number": 6}
+
+event: response.content_part.done
+data: {"type": "response.content_part.done", "item_id": "msg_final", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": "{\"score\":72,\"professional\":false,\"summary\":{\"fr\":\"Prix cohérent avec le marché.\",\"nl\":\"Prijs in lijn met de markt.\"},\"advice\":{\"fr\":\"Vérifiez l'objet en main propre.\",\"nl\":\"Controleer het toestel ter plaatse.\"},\"reasons\":[{\"severity\":\"info\",\"fr\":\"Prix proche du marché (exemple.be).\",\"nl\":\"Prijs dicht bij de markt (exemple.be).\"}]}", "annotations": []}, "sequence_number": 7}
+
+event: response.output_item.done
+data: {"type": "response.output_item.done", "output_index": 0, "item": {"type": "message", "id": "msg_final", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "{\"score\":72,\"professional\":false,\"summary\":{\"fr\":\"Prix cohérent avec le marché.\",\"nl\":\"Prijs in lijn met de markt.\"},\"advice\":{\"fr\":\"Vérifiez l'objet en main propre.\",\"nl\":\"Controleer het toestel ter plaatse.\"},\"reasons\":[{\"severity\":\"info\",\"fr\":\"Prix proche du marché (exemple.be).\",\"nl\":\"Prijs dicht bij de markt (exemple.be).\"}]}", "annotations": []}]}, "sequence_number": 8}
+
+event: response.completed
+data: {"type": "response.completed", "response": {"id": "resp_final", "object": "response", "created_at": 1760000000, "model": "gpt-test", "status": "completed", "output": [], "parallel_tool_calls": true, "tool_choice": "auto", "tools": [], "usage": {"input_tokens": 300, "output_tokens": 80, "total_tokens": 380, "input_tokens_details": {"cached_tokens": 0}, "output_tokens_details": {"reasoning_tokens": 0}}}, "sequence_number": 9}
+

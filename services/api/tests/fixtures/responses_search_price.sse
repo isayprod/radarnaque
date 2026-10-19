@@ -1,0 +1,27 @@
+event: response.created
+data: {"type": "response.created", "response": {"id": "resp_search", "object": "response", "created_at": 1760000000, "model": "gpt-test", "status": "in_progress", "output": [], "parallel_tool_calls": true, "tool_choice": "auto", "tools": []}, "sequence_number": 0}
+
+event: response.output_item.added
+data: {"type": "response.output_item.added", "output_index": 0, "item": {"type": "reasoning", "id": "rs_search", "summary": []}, "sequence_number": 1}
+
+event: response.output_item.done
+data: {"type": "response.output_item.done", "output_index": 0, "item": {"type": "reasoning", "id": "rs_search", "summary": [], "encrypted_content": "gAAAA-chiffre-fictif"}, "sequence_number": 2}
+
+event: response.output_item.added
+data: {"type": "response.output_item.added", "output_index": 1, "item": {"type": "function_call", "id": "fc_search", "call_id": "call_search", "name": "web_search", "arguments": "", "status": "in_progress"}, "sequence_number": 3}
+
+event: response.function_call_arguments.delta
+data: {"type": "response.function_call_arguments.delta", "item_id": "fc_search", "output_index": 1, "delta": "{\"query\": \"iPhone 18 Pro ", "sequence_number": 4}
+
+event: response.function_call_arguments.delta
+data: {"type": "response.function_call_arguments.delta", "item_id": "fc_search", "output_index": 1, "delta": "prix\", \"aspect\": \"price\"}", "sequence_number": 5}
+
+event: response.function_call_arguments.done
+data: {"type": "response.function_call_arguments.done", "item_id": "fc_search", "output_index": 1, "name": "web_search", "arguments": "{\"query\": \"iPhone 18 Pro prix\", \"aspect\": \"price\"}", "sequence_number": 6}
+
+event: response.output_item.done
+data: {"type": "response.output_item.done", "output_index": 1, "item": {"type": "function_call", "id": "fc_search", "call_id": "call_search", "name": "web_search", "arguments": "{\"query\": \"iPhone 18 Pro prix\", \"aspect\": \"price\"}", "status": "completed"}, "sequence_number": 7}
+
+event: response.completed
+data: {"type": "response.completed", "response": {"id": "resp_search", "object": "response", "created_at": 1760000000, "model": "gpt-test", "status": "completed", "output": [], "parallel_tool_calls": true, "tool_choice": "auto", "tools": [], "usage": {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120, "input_tokens_details": {"cached_tokens": 0}, "output_tokens_details": {"reasoning_tokens": 12}}}, "sequence_number": 8}
+

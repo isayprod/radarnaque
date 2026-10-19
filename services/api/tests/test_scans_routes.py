@@ -18,7 +18,9 @@ from radarnaque_api.llm.client import (
     LLMResult,
     OpenAICompatibleClient,
 )
+from radarnaque_api.llm.events import EventSink
 from radarnaque_api.llm.providers import ProviderError
+from radarnaque_api.llm.tools import WebSearchTool
 from radarnaque_api.main import create_app
 
 PROVIDER_SECRET = "provider-secret-body-9c41"
@@ -34,7 +36,15 @@ class FakeLLM:
     def llm_for(self, provider: str) -> "FakeLLM":
         return self
 
-    async def analyze(self, *, model: str, system_prompt: str, messages: list[dict]) -> LLMResult:
+    async def analyze(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        messages: list[dict],
+        tools: WebSearchTool | None = None,
+        on_event: EventSink | None = None,
+    ) -> LLMResult:
         self.calls += 1
         if self.error is not None:
             raise self.error

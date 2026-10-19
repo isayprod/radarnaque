@@ -27,7 +27,9 @@ from radarnaque_api.llm.client import (
     OpenAICompatibleClient,
     SearchRecord,
 )
+from radarnaque_api.llm.events import EventSink
 from radarnaque_api.llm.providers import ProviderConfig, ProviderError
+from radarnaque_api.llm.tools import WebSearchTool
 from radarnaque_api.models import (
     Analysis,
     AnalysisReason,
@@ -93,7 +95,15 @@ class FakeLLM:
         self.providers.append(provider)
         return self
 
-    async def analyze(self, *, model: str, system_prompt: str, messages: list[dict]) -> LLMResult:
+    async def analyze(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        messages: list[dict],
+        tools: WebSearchTool | None = None,
+        on_event: EventSink | None = None,
+    ) -> LLMResult:
         self.calls.append({"model": model, "system_prompt": system_prompt, "messages": messages})
         if self.delay:
             await asyncio.sleep(self.delay)
@@ -623,7 +633,7 @@ async def test_cancellation_during_the_analysis_returns_the_scan(engine, http, c
     started = asyncio.Event()
 
     class BlockingLLM(FakeLLM):
-        async def analyze(self, *, model: str, system_prompt: str, messages: list[dict]):
+        async def analyze(self, *, model: str, system_prompt: str, messages: list[dict], **_):
             self.calls.append({"model": model})
             started.set()
             await asyncio.Event().wait()  # jamais libéré : seule l'annulation en sort
@@ -683,7 +693,7 @@ async def test_failed_give_back_after_cancellation_is_logged(
     started = asyncio.Event()
 
     class BlockingLLM(FakeLLM):
-        async def analyze(self, *, model: str, system_prompt: str, messages: list[dict]):
+        async def analyze(self, *, model: str, system_prompt: str, messages: list[dict], **_):
             started.set()
             await asyncio.Event().wait()
 
@@ -1419,30 +1429,36 @@ async def test_debug_block_summarizes_images_through_the_responses_api(engine, h
         "advice": {"fr": "Conseil", "nl": "Advies"},
         "reasons": [],
     }
+    response = {
+        "id": "resp_1",
+        "object": "response",
+        "created_at": 1,
+        "model": "m",
+        "status": "completed",
+        "parallel_tool_calls": False,
+        "tool_choice": "auto",
+        "tools": [],
+        "output": [
+            {
+                "type": "message",
+                "id": "msg_1",
+                "role": "assistant",
+                "status": "completed",
+                "content": [
+                    {"type": "output_text", "text": json.dumps(analysis), "annotations": []}
+                ],
+            }
+        ],
+        "usage": {"input_tokens": 74, "output_tokens": 45, "total_tokens": 119},
+    }
+    # L'API Responses est lue en flux : un seul événement `response.completed`, sortie comprise.
+    completed = json.dumps(
+        {"type": "response.completed", "sequence_number": 0, "response": response}
+    )
     llm_route = mock.post(f"{LLM_BASE}/responses").respond(
         200,
-        json={
-            "id": "resp_1",
-            "object": "response",
-            "created_at": 1,
-            "model": "m",
-            "status": "completed",
-            "parallel_tool_calls": False,
-            "tool_choice": "auto",
-            "tools": [],
-            "output": [
-                {
-                    "type": "message",
-                    "id": "msg_1",
-                    "role": "assistant",
-                    "status": "completed",
-                    "content": [
-                        {"type": "output_text", "text": json.dumps(analysis), "annotations": []}
-                    ],
-                }
-            ],
-            "usage": {"input_tokens": 74, "output_tokens": 45, "total_tokens": 119},
-        },
+        headers={"content-type": "text/event-stream"},
+        content=f"event: response.completed\ndata: {completed}\n\n".encode(),
     )
     provider = ProviderConfig(
         code="fake",

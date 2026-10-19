@@ -17,6 +17,7 @@ from radarnaque_api.llm.client import (
     strict_json_schema,
 )
 from radarnaque_api.llm.providers import ProviderConfig, ProviderError
+from radarnaque_api.llm.tools import WebSearchTool
 
 BASE = "https://llm.test/v1"
 KEY = "sk-test-secret"
@@ -120,7 +121,7 @@ async def test_json_schema_mode_sends_strict_format_and_extra_body(mock, http):
     body = json.loads(request.content)
     assert body["model"] == "vendor/model"
     assert body["temperature"] == 0.2
-    assert body["max_tokens"] == 800
+    assert body["max_tokens"] == 4000
     assert body["response_format"] == {
         "type": "json_schema",
         "json_schema": {
@@ -314,7 +315,7 @@ async def test_omitted_params_are_not_sent(mock, http):
 
     body = json.loads(route.calls.last.request.content)
     assert "temperature" not in body
-    assert body["max_tokens"] == 800
+    assert body["max_tokens"] == 4000
 
 
 async def test_all_omittable_params_can_be_dropped(mock, http):
@@ -376,11 +377,11 @@ async def test_rate_limited_is_transport_without_retry(mock, http):
     _assert_not_chained(info.value)
 
 
-async def test_timeout_of_30_seconds_reaches_the_request(mock, http):
+async def test_timeout_of_90_seconds_reaches_the_request(mock, http):
     route = mock.post("/chat/completions").mock(return_value=_ok())
     await _analyze(_provider(), http)
     timeout = route.calls.last.request.extensions["timeout"]
-    assert timeout == {"connect": 30, "read": 30, "write": 30, "pool": 30}
+    assert timeout == {"connect": 90, "read": 90, "write": 90, "pool": 90}
 
 
 async def test_server_error_then_success_retries_once(mock, http):
@@ -521,6 +522,32 @@ def test_llm_result_trace_fields_default_to_empty():
         analysis=LLMAnalysis.model_validate(VALID), tokens_in=0, tokens_out=0, cost_usd_micros=0
     )
     assert (result.raw_text, result.system_prompt) == ("", "")
+    assert (result.searches, result.search_traces, result.reasoning_text) == ([], [], "")
+    assert result.rounds == 1
+
+
+async def test_chat_ignores_tools_and_events_for_now(mock, http):
+    # Voie Chat sans flux ni outil jusqu'à la tâche 6 : un seul appel, sans `tools`.
+    route = mock.post("/chat/completions").mock(return_value=_ok())
+    events: list = []
+
+    async def sink(event) -> None:
+        events.append(event)
+
+    tool = WebSearchTool(_NoSearch(), max_searches=3, on_event=sink)
+    client = OpenAICompatibleClient(_provider(), ENV, http_client=http)
+    result = await client.analyze(
+        model="vendor/model", system_prompt="SYS", messages=MESSAGES, tools=tool, on_event=sink
+    )
+    body = json.loads(route.calls.last.request.content)
+    assert route.call_count == 1
+    assert "tools" not in body and "tool_choice" not in body and "stream" not in body
+    assert events == [] and result.searches == [] and result.rounds == 1
+
+
+class _NoSearch:
+    async def search(self, query: str) -> list:
+        raise AssertionError("aucune recherche attendue")
 
 
 # --- API Responses (`api = "responses"`, proxy openai-oauth) -----------------------------------
@@ -580,8 +607,19 @@ def _response(text: str | None, usage: dict | None = None) -> dict:
     }
 
 
+def _sse_of(response: dict) -> httpx.Response:
+    """Flux SSE réduit à `response.completed`, sortie complète comprise (le texte est lu dans
+    `output` quand aucun élément n'est arrivé en cours de flux)."""
+    data = json.dumps({"type": "response.completed", "sequence_number": 0, "response": response})
+    return httpx.Response(
+        200,
+        headers={"content-type": "text/event-stream"},
+        content=f"event: response.completed\ndata: {data}\n\n".encode(),
+    )
+
+
 def _responses_ok(analysis: dict | None = None, usage: dict | None = None) -> httpx.Response:
-    return httpx.Response(200, json=_response(json.dumps(analysis or VALID), usage))
+    return _sse_of(_response(json.dumps(analysis or VALID), usage))
 
 
 @pytest.fixture
@@ -619,9 +657,20 @@ async def test_responses_api_request_shape(mock, direct_http):
             ],
         }
     ]
-    assert body["max_output_tokens"] == 800
+    assert body["max_output_tokens"] == 4000
     assert body["store"] is False  # extra_body transmis
-    for absent in ("temperature", "response_format", "messages", "max_tokens", "text"):
+    assert body["stream"] is True
+    assert body["include"] == ["reasoning.encrypted_content"]
+    for absent in (
+        "temperature",
+        "response_format",
+        "messages",
+        "max_tokens",
+        "text",
+        "reasoning",  # reasoning_effort = none
+        "tools",
+        "tool_choice",
+    ):
         assert absent not in body
     assert result.analysis == LLMAnalysis.model_validate(VALID)
     assert result.system_prompt == body["instructions"]
@@ -643,7 +692,7 @@ async def test_responses_api_sends_temperature_unless_omitted(mock, direct_http)
     await _analyze_responses(_responses_provider(omit_params=()), direct_http)
     body = json.loads(route.calls.last.request.content)
     assert body["temperature"] == 0.2
-    assert body["max_output_tokens"] == 800
+    assert body["max_output_tokens"] == 4000
 
     await _analyze_responses(_responses_provider(omit_params=("max_tokens",)), direct_http)
     body = json.loads(route.calls.last.request.content)
@@ -653,7 +702,7 @@ async def test_responses_api_sends_temperature_unless_omitted(mock, direct_http)
 
 async def test_responses_api_reads_output_text_and_maps_tokens(mock, direct_http):
     raw = json.dumps(VALID, ensure_ascii=False)
-    mock.post("/responses").mock(return_value=httpx.Response(200, json=_response(raw)))
+    mock.post("/responses").mock(return_value=_sse_of(_response(raw)))
     result = await _analyze_responses(_responses_provider(), direct_http)
 
     assert result.raw_text == raw
@@ -672,7 +721,7 @@ async def test_responses_api_cost_follows_cost_source(mock, direct_http):
 async def test_responses_api_invalid_then_valid_json_uses_two_calls(mock, direct_http):
     route = mock.post("/responses").mock(
         side_effect=[
-            httpx.Response(200, json=_response("pas du json")),
+            _sse_of(_response("pas du json")),
             _responses_ok(),
         ]
     )
@@ -682,7 +731,7 @@ async def test_responses_api_invalid_then_valid_json_uses_two_calls(mock, direct
 
 
 async def test_responses_api_empty_output_twice_is_an_invalid_response(mock, direct_http):
-    route = mock.post("/responses").mock(return_value=httpx.Response(200, json=_response(None)))
+    route = mock.post("/responses").mock(return_value=_sse_of(_response(None)))
     with pytest.raises(LLMError) as info:
         await _analyze_responses(_responses_provider(), direct_http)
     assert info.value.code == "invalid_response"
