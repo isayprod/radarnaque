@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     internal_api_secret: SecretStr
     env: Literal["development", "test", "production"] = "development"
     providers_file: Path = DEFAULT_PROVIDERS_FILE
+    # Recherche web du modèle : "none" ne propose pas l'outil (tests). En production, SearXNG est
+    # joignable sur le réseau interne de Docker (http://searxng:8080).
+    search_backend: Literal["searxng", "none"] = "searxng"
+    searxng_url: str = "http://127.0.0.1:8888"
 
     @field_validator("internal_api_secret")
     @classmethod
