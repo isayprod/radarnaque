@@ -1,6 +1,7 @@
 """Recherche web de l'outil `web_search` : un moteur SearXNG auto-hébergé, derrière une interface
 minimale (`SearchBackend`) pour qu'un autre moteur puisse s'ajouter sans toucher au reste."""
 
+import math
 import re
 import time
 from collections import OrderedDict
@@ -24,10 +25,13 @@ OUTPUT_MAX = 2500
 CACHE_TTL_SECONDS = 24 * 3600
 CACHE_MAX_ENTRIES = 1000
 DOMAIN_MAX = 100
+URL_MAX = 300
 
 _OPEN_TAG = "<resultats_recherche>"
 _CLOSE_TAG = "</resultats_recherche>"
 _SPACES_RE = re.compile(r"\s+")
+# Espace ou caractère de contrôle (dont DEL) dans une URL : le résultat est écarté.
+_BAD_URL_CHARS_RE = re.compile(r"[\s\x00-\x1f\x7f]")
 # Fin de texte coupée au milieu d'une entité (`&l`, `&gt`) : retirée après une troncature.
 _PARTIAL_ENTITY_RE = re.compile(r"&[a-z]*$")
 
@@ -59,25 +63,37 @@ def _cache_key(query: str) -> tuple[str, str]:
 
 
 def _score(result: dict) -> float:
+    """Score SearXNG, ou 0 s'il est absent, non numérique, infini, NaN ou hors des flottants."""
     score = result.get("score")
-    return float(score) if isinstance(score, int | float) and not isinstance(score, bool) else 0.0
+    if not isinstance(score, int | float) or isinstance(score, bool):
+        return 0.0
+    try:
+        value = float(score)
+    except OverflowError:  # entier JSON géant
+        return 0.0
+    return value if math.isfinite(value) else 0.0
 
 
 def _text(value: object, limit: int) -> str:
     return _SPACES_RE.sub(" ", value).strip()[:limit] if isinstance(value, str) else ""
 
 
+def _valid_url(url: object) -> bool:
+    """URL http(s) d'au plus 300 caractères, sans espace ni caractère de contrôle, qui se
+    découpe (`http://[::1` lève ValueError). Les résultats viennent du web : rien n'est supposé."""
+    if not isinstance(url, str) or len(url) > URL_MAX or _BAD_URL_CHARS_RE.search(url):
+        return False
+    try:
+        return urlsplit(url).scheme in ("http", "https")
+    except ValueError:
+        return False
+
+
 def _parse_hits(body: object) -> list[SearchHit]:
     results = body.get("results") if isinstance(body, dict) else None
     if not isinstance(results, list):
         raise SearchUnavailable("réponse SearXNG sans liste de résultats")
-    valid = [
-        r
-        for r in results
-        if isinstance(r, dict)
-        and isinstance(r.get("url"), str)
-        and urlsplit(r["url"]).scheme in ("http", "https")
-    ]
+    valid = [r for r in results if isinstance(r, dict) and _valid_url(r.get("url"))]
     valid.sort(key=_score, reverse=True)  # tri stable : à score égal, l'ordre du moteur
     return [
         SearchHit(
@@ -92,7 +108,7 @@ def _parse_hits(body: object) -> list[SearchHit]:
 class SearxngBackend:
     """SearXNG via `GET /search?format=json`. Cache en mémoire de l'API : 24 h, 1 000 requêtes
     au plus, clé = requête normalisée (minuscules, espaces réduits) et langue. Un échec n'est
-    jamais mis en cache."""
+    jamais mis en cache, ni une réponse sans résultat exploitable."""
 
     def __init__(
         self,
@@ -117,6 +133,10 @@ class SearxngBackend:
             return list(cached[1])
         hits = await self._fetch(query)
         self._cache.pop(key, None)  # une entrée périmée repasse en dernière position
+        if not hits:
+            # Pas de cache : SearXNG répond 200 avec `results: []` quand ses moteurs amont sont
+            # bloqués, et cette panne passagère ne doit pas durer 24 h.
+            return []
         self._cache[key] = (self._now(), hits)
         while len(self._cache) > CACHE_MAX_ENTRIES:
             self._cache.popitem(last=False)
@@ -134,7 +154,12 @@ class SearxngBackend:
         except (httpx.HTTPError, ValueError) as exc:
             # Message sans la requête ni l'URL : rien d'autre que le type d'erreur dans les logs.
             raise SearchUnavailable(type(exc).__name__) from exc
-        return _parse_hits(body)
+        try:
+            return _parse_hits(body)
+        except SearchUnavailable:
+            raise
+        except Exception as exc:  # dernier filet : le web ne doit pas faire échouer l'analyse
+            raise SearchUnavailable(type(exc).__name__) from exc
 
 
 def _escape(text: str) -> str:
