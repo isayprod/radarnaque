@@ -242,9 +242,11 @@ export function RiskBadge({
 							pricingUrl={scan.pricingUrl}
 						/>
 						{debug && (
-							// Nouvelle tentative de rendu pour chaque nouveau bloc debug.
+							// Nouvelle tentative de rendu pour chaque nouveau bloc debug. La durée
+							// totale distingue une relance sans cache, qui réécrit l'analyse en
+							// place (même analysisId, même inputHash).
 							<DebugBoundary
-								key={`${listing.site}|${listing.externalId}|${debug.kind}|${debug.data.analysisId}|${debug.data.inputHash}`}
+								key={`${listing.site}|${listing.externalId}|${debug.kind}|${debug.data.analysisId}|${debug.data.inputHash}|${debug.data.timingsMs.total}`}
 							>
 								<DebugSection
 									locale={locale}
