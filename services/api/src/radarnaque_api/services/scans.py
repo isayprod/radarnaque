@@ -8,6 +8,10 @@ l'utilisateur : ni un fournisseur en panne ni un bogue du serveur ne consomment 
 Un seul type de scan, `full` : les photos (selon l'offre) et la recherche web servent toute
 annonce. Le nombre de photos envoyées entre dans la clé du cache.
 
+Le scan se fait en deux temps : `admit_scan` (étapes 1 à 5), dont un refus est une erreur JSON
+même pour la route en flux, puis `serve_admitted` (étapes 6 et 7, 180 s au plus), qui émet les
+événements du scan vers un récepteur facultatif (`services/scan_stream.py`).
+
 Superuser hors production (`privileges.debug`) : la réponse porte un bloc `debug`, aussi écrit
 dans le logger `radarnaque.debug`, et `noCache` relance l'analyse sans consulter le cache."""
 
@@ -17,8 +21,9 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, NoReturn
+from zoneinfo import ZoneInfo
 
 import httpx
 from sqlalchemy import ColumnElement, func, select
@@ -39,6 +44,7 @@ from radarnaque_api.images import (
 from radarnaque_api.llm.client import LLMClient, LLMError
 from radarnaque_api.llm.payload import build_messages, summarize_messages
 from radarnaque_api.llm.providers import ProviderError
+from radarnaque_api.llm.tools import SearchTrace, WebSearchTool
 from radarnaque_api.models import (
     Analysis,
     AppSettings,
@@ -53,6 +59,7 @@ from radarnaque_api.models import (
 from radarnaque_api.schemas import (
     AnalysisResultOut,
     DebugMessageOut,
+    DebugSearchOut,
     DebugTimingsOut,
     PromptVersionDebugOut,
     RemainingOut,
@@ -60,6 +67,7 @@ from radarnaque_api.schemas import (
     ScanDebugOut,
     ScanIn,
 )
+from radarnaque_api.search import SearchBackend
 from radarnaque_api.services.hashing import input_hash
 from radarnaque_api.services.scan_store import (
     ActiveSetup,
@@ -70,6 +78,8 @@ from radarnaque_api.services.scan_store import (
     upsert_snapshot,
     valid_analysis_id,
 )
+from radarnaque_api.services.scan_stream import ScanEvent as StreamEvent
+from radarnaque_api.services.scan_stream import ScanEventSink, Stage
 from radarnaque_api.services.subscriptions import get_active_subscription
 from radarnaque_api.services.usage import compute_usage, plan_features, plan_max_images
 
@@ -77,6 +87,10 @@ RATE_WINDOW = timedelta(minutes=1)
 SCAN_KIND = "full"  # type de scan unique ; `text` et `image` ne survivent que dans l'historique
 CARD_ICONS_FEATURE = "card_icons"
 INTERNAL_FAILURE = "internal"
+ANALYSIS_TIMEOUT_S = 180  # toute l'analyse après l'admission : cache, photos, tours, recherches
+TIMEOUT_FAILURE = "timeout"
+# Le modèle reçoit la date du jour en Belgique : entre minuit et 2 h, la date UTC serait la veille.
+LOCAL_TZ = ZoneInfo("Europe/Brussels")
 
 logger = logging.getLogger(__name__)
 # Logs détaillés du superuser hors production ; son gestionnaire console est posé par
@@ -141,6 +155,7 @@ class _Admission:
     image_host_suffixes: list[str]
     cache_ttl: timedelta
     max_images: int  # photos au plus, selon l'offre (avant la limite du fournisseur)
+    max_searches: int  # recherches web au plus (`settings.max_web_searches`)
 
 
 @dataclass(frozen=True)
@@ -156,6 +171,9 @@ class _Trace:
     llm_called: bool
     images_ms: int | None
     llm_ms: int | None
+    rounds: int = 0
+    searches: tuple[SearchTrace, ...] = ()
+    reasoning: str = ""
 
 
 def _invalid_listing(field: str) -> ScanError:
@@ -267,6 +285,7 @@ async def _admit(
     # Lus tout de suite : rien ne dépend de l'objet `settings` après les commits qui suivent.
     rate_limit = settings.rate_limit_per_minute
     cache_ttl = timedelta(hours=settings.cache_ttl_hours)
+    max_searches = settings.max_web_searches
     # Premier contrôle sans verrou, pour refuser tôt ; `_reserve` recompte sous verrou.
     if privileges.rate_limited:
         await _check_rate_limit(session, user.id, rate_limit, now())
@@ -289,11 +308,19 @@ async def _admit(
         image_host_suffixes=suffixes,
         cache_ttl=cache_ttl,
         max_images=max_images,
+        max_searches=max_searches,
     )
 
 
 def _link(session: AsyncSession, event_id: int, analysis_id: int) -> None:
     session.add(ScanResult(scan_event_id=event_id, analysis_id=analysis_id))
+
+
+async def _emit(on_event: ScanEventSink | None, event: StreamEvent) -> None:
+    """Émet un événement du flux (`StreamEvent` : le `ScanEvent` de `scan_stream`, renommé à
+    l'import pour ne pas masquer le modèle de la table `scan_events`)."""
+    if on_event is not None:
+        await on_event(event)
 
 
 async def _serve(
@@ -305,9 +332,15 @@ async def _serve(
     llm_for: Callable[[str], LLMClient],
     http: httpx.AsyncClient,
     resolve: Resolver,
+    search: SearchBackend | None,
+    on_event: ScanEventSink | None,
 ) -> _Trace | None:
     """Étapes 6 et 7 : relie l'événement à une analyse, en cache ou nouvelle. Renvoie la trace
     du scan pour le bloc debug, `None` sans le privilège `debug`.
+
+    Événements : `cache` pour un succès du cache ; sinon `photos` (s'il y en a à télécharger),
+    `analyzing`, puis ceux du client LLM. Sans moteur de recherche (`search` à None), ou avec
+    `max_web_searches` à 0, aucun outil n'est proposé au modèle.
 
     `noCache` (superuser hors production seulement) saute les deux lectures du cache : le LLM
     est rappelé et l'analyse enregistrée par `save_analysis`, qui rafraîchit sur place l'entrée
@@ -337,6 +370,7 @@ async def _serve(
             trace = _cached_trace(setup, key, scan, client, admission, photos) if debug else None
             _link(session, admission.event_id, cached)
             await session.commit()
+            await _emit(on_event, Stage("cache"))
             return trace
 
     # Nouvelle connexion : le verrou consultatif, propre à la clé du cache, est libéré par le
@@ -358,6 +392,7 @@ async def _serve(
             images_ms: int | None = None
             images: list[str] = []
             if photos:
+                await _emit(on_event, Stage("photos", photos))
                 started = time.perf_counter()
                 images = await fetch_images(
                     [str(url) for url in scan.listing.images],
@@ -367,10 +402,23 @@ async def _serve(
                     limit=photos,
                 )
                 images_ms = _elapsed_ms(started)
-            messages = build_messages(scan.listing, scan.rules, images, today=_today(admission))
+            # `fetch_images` rend toutes les photos demandées ou échoue : `photos` sont envoyées.
+            messages = build_messages(
+                scan.listing, scan.rules, images, today=_today(admission), images_sent=photos
+            )
+            tools = (
+                WebSearchTool(search, admission.max_searches, on_event)
+                if search is not None and admission.max_searches > 0
+                else None
+            )
+            await _emit(on_event, Stage("analyzing", photos))
             started = time.perf_counter()
             result = await llm.analyze(
-                model=setup.slug, system_prompt=setup.system_prompt, messages=messages
+                model=setup.slug,
+                system_prompt=setup.system_prompt,
+                messages=messages,
+                tools=tools,
+                on_event=on_event,
             )
             llm_ms = _elapsed_ms(started)
             analysis_id = await save_analysis(
@@ -388,13 +436,20 @@ async def _serve(
                     llm_called=True,
                     images_ms=images_ms,
                     llm_ms=llm_ms,
+                    rounds=result.rounds,
+                    searches=tuple(result.search_traces),
+                    reasoning=result.reasoning_text,
                 )
                 if debug
                 else None
             )
+            cache_hit = False
         else:  # analysée par un scan concurrent pendant l'attente du verrou
             trace = _cached_trace(setup, key, scan, client, admission, photos) if debug else None
+            cache_hit = True
         _link(session, admission.event_id, analysis_id)
+    if cache_hit:  # après le commit, comme le succès de la première lecture du cache
+        await _emit(on_event, Stage("cache"))
     return trace
 
 
@@ -426,8 +481,9 @@ def _photos_to_send(admission: _Admission, scan: ScanIn, client: LLMClient | Pro
 
 
 def _today(admission: _Admission) -> date:
-    """Date du jour (UTC) du moment de l'événement, donnée au modèle (hors des empreintes)."""
-    return admission.event_at.astimezone(UTC).date()
+    """Date du jour à Bruxelles au moment de l'événement, donnée au modèle (hors des
+    empreintes)."""
+    return admission.event_at.astimezone(LOCAL_TZ).date()
 
 
 def _cached_trace(
@@ -473,6 +529,8 @@ def _failure_code(exc: Exception) -> str:
     brut ni de corps de réponse du fournisseur."""
     if isinstance(exc, LLMError):
         return exc.code
+    if isinstance(exc, TimeoutError):  # délai total de l'analyse (`ANALYSIS_TIMEOUT_S`)
+        return TIMEOUT_FAILURE
     if isinstance(exc, ImageFetchError):
         return f"image_{exc.reason}"
     if isinstance(exc, ProviderError | _NotConfigured):
@@ -532,7 +590,8 @@ def _debug_block(
     started: float,
 ) -> ScanDebugOut:
     """Bloc debug du superuser : jetons et coût de l'analyse servie, empreintes et identifiants
-    du déroulé, durée totale depuis le début de `run_scan`."""
+    du déroulé, tours, recherches et réflexion du modèle, durée totale depuis le début du scan
+    (avant l'admission)."""
     return ScanDebugOut(
         provider=trace.setup.provider,
         model=trace.setup.slug,
@@ -548,8 +607,17 @@ def _debug_block(
         tokens_out=analysis.tokens_out,
         cost_usd_micros=analysis.cost_usd_micros,
         timings_ms=DebugTimingsOut(
-            images=trace.images_ms, llm=trace.llm_ms, total=_elapsed_ms(started)
+            images=trace.images_ms,
+            llm=trace.llm_ms,
+            search=sum(s.ms for s in trace.searches) if trace.searches else None,
+            total=_elapsed_ms(started),
         ),
+        rounds=trace.rounds,
+        searches=[
+            DebugSearchOut(query=s.query, aspect=s.aspect, ok=s.ok, output=s.output, ms=s.ms)
+            for s in trace.searches
+        ],
+        reasoning=trace.reasoning,
         content_hash=admission.content_hash,
         input_hash=trace.key.input_hash,
         snapshot_id=admission.snapshot_id,
@@ -620,7 +688,25 @@ async def _result(
     )
 
 
-async def run_scan(
+@dataclass(frozen=True)
+class _Admitted:
+    """Scan admis et réservé par `admit_scan`, prêt à être servi par `serve_admitted`."""
+
+    engine: AsyncEngine
+    maker: async_sessionmaker[AsyncSession]
+    user: AuthUser
+    privileges: Privileges
+    scan: ScanIn
+    admission: _Admission
+    llm_for: Callable[[str], LLMClient]
+    http: httpx.AsyncClient
+    search: SearchBackend | None
+    now: Callable[[], datetime]
+    resolve: Resolver
+    started: float  # début du scan (`time.perf_counter`), pour la durée totale du bloc debug
+
+
+async def admit_scan(
     *,
     engine: AsyncEngine,
     user: AuthUser,
@@ -629,27 +715,66 @@ async def run_scan(
     llm_for: Callable[[str], LLMClient],
     http: httpx.AsyncClient,
     now: Callable[[], datetime],
+    search: SearchBackend | None = None,
     resolve: Resolver = default_resolve,
-) -> AnalysisResultOut:
-    """Lance un scan pour `user` et renvoie le résultat ; lève `ScanError` pour un refus (402,
-    403, 422, 429) ou un échec de l'analyse (502).
+) -> _Admitted:
+    """Étapes 1 à 5 : lève `ScanError` pour un refus (402, 403, 422, 429), sans rien réserver.
+    Une fois admis, le scan est décompté : `serve_admitted` doit suivre, qui le rend en cas
+    d'échec.
 
     `privileges` : ceux de `user` (`privileges_of`), qui décident de la limite de requêtes, des
     droits et du quota. `llm_for(code)` donne le client du fournisseur du modèle actif. `http`
     est le client dédié aux photos (règles R6/R7 : `trust_env=False`, `follow_redirects=False`,
-    ni en-têtes, ni cookies, ni authentification partagés), jamais celui du LLM. `resolve`
-    remplace la résolution DNS des hôtes d'images (tests)."""
+    ni en-têtes, ni cookies, ni authentification partagés), jamais celui du LLM. `search` : le
+    moteur de recherche web (`None` : aucun outil proposé au modèle). `resolve` remplace la
+    résolution DNS des hôtes d'images (tests)."""
     started = time.perf_counter()
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as session:
         admission = await _admit(session, user, privileges, scan, now)
+    return _Admitted(
+        engine=engine,
+        maker=maker,
+        user=user,
+        privileges=privileges,
+        scan=scan,
+        admission=admission,
+        llm_for=llm_for,
+        http=http,
+        search=search,
+        now=now,
+        resolve=resolve,
+        started=started,
+    )
 
+
+async def serve_admitted(
+    admitted: _Admitted,
+    on_event: ScanEventSink | None = None,
+    *,
+    timeout_s: float = ANALYSIS_TIMEOUT_S,
+) -> AnalysisResultOut:
+    """Étapes 6 et 7, en `timeout_s` secondes au plus ; `on_event` reçoit les événements du
+    scan. Toute erreur rend le scan : un échec de l'analyse, ou le délai dépassé, donne
+    `502 analysis_failed` (`details.reason`) ; une annulation (client parti) est propagée."""
+    admission, maker, now = admitted.admission, admitted.maker, admitted.now
     failure: Exception | None = None
     trace: _Trace | None = None
     try:
-        trace = await _serve(
-            maker, admission, scan, privileges, llm_for=llm_for, http=http, resolve=resolve
-        )
+        # Le délai annule l'étape en cours (verrou consultatif libéré par le rollback) et
+        # devient une `TimeoutError` à la sortie du bloc : `_failure_code` la note `timeout`.
+        async with asyncio.timeout(timeout_s):
+            trace = await _serve(
+                maker,
+                admission,
+                admitted.scan,
+                admitted.privileges,
+                llm_for=admitted.llm_for,
+                http=admitted.http,
+                resolve=admitted.resolve,
+                search=admitted.search,
+                on_event=on_event,
+            )
     except asyncio.CancelledError:
         # Annulation (client parti, arrêt du serveur) : une `BaseException`, que `except
         # Exception` laisserait passer. Le scan est rendu sous `shield`, pour que l'écriture
@@ -662,8 +787,54 @@ async def run_scan(
         await _give_back(maker, admission.event_id, failure, now())
 
     result = await _result(
-        engine, user, privileges, admission, scan, now(), trace=trace, started=started
+        admitted.engine,
+        admitted.user,
+        admitted.privileges,
+        admission,
+        admitted.scan,
+        now(),
+        trace=trace,
+        started=admitted.started,
     )
     if result.debug is not None:
-        _log_debug(scan, result.debug)
+        _log_debug(admitted.scan, result.debug)
     return result
+
+
+async def give_back_unserved(admitted: _Admitted) -> None:
+    """Rend un scan admis que `serve_admitted` n'a jamais servi (client parti avant le début
+    du flux)."""
+    await _record_failure(
+        admitted.maker, admitted.admission.event_id, INTERNAL_FAILURE, admitted.now()
+    )
+
+
+async def run_scan(
+    *,
+    engine: AsyncEngine,
+    user: AuthUser,
+    privileges: Privileges,
+    scan: ScanIn,
+    llm_for: Callable[[str], LLMClient],
+    http: httpx.AsyncClient,
+    now: Callable[[], datetime],
+    search: SearchBackend | None = None,
+    on_event: ScanEventSink | None = None,
+    resolve: Resolver = default_resolve,
+    timeout_s: float = ANALYSIS_TIMEOUT_S,
+) -> AnalysisResultOut:
+    """Lance un scan pour `user` et renvoie le résultat : `admit_scan` puis `serve_admitted`
+    (voir leurs paramètres). Lève `ScanError` pour un refus (402, 403, 422, 429) ou un échec de
+    l'analyse (502)."""
+    admitted = await admit_scan(
+        engine=engine,
+        user=user,
+        privileges=privileges,
+        scan=scan,
+        llm_for=llm_for,
+        http=http,
+        now=now,
+        search=search,
+        resolve=resolve,
+    )
+    return await serve_admitted(admitted, on_event, timeout_s=timeout_s)

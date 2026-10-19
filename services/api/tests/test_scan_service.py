@@ -810,6 +810,15 @@ async def test_today_in_the_payload_is_the_event_day(engine, http, clock, llm):
     assert '"today":"2026-10-17"' in llm.calls[0]["messages"][0]["content"][0]["text"]
 
 
+async def test_today_is_the_brussels_day_of_the_event(engine, http, llm):
+    """23 h 30 UTC le 17 octobre : déjà le 18 à Bruxelles (UTC+2 en été)."""
+    user = await _user(engine)
+    await _scan_once(
+        engine, user, _scan(), llm, http, Clock(datetime(2026, 10, 17, 23, 30, tzinfo=UTC))
+    )
+    assert '"today":"2026-10-18"' in llm.calls[0]["messages"][0]["content"][0]["text"]
+
+
 async def test_cache_key_differs_by_photo_count(engine, http, mock, clock, llm):
     await _mock_photos(mock, 3)
     standard = await _user(engine, plan="standard")

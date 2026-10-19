@@ -168,11 +168,27 @@ class DebugMessageOut(CamelModel):
 
 
 class DebugTimingsOut(CamelModel):
-    """Durées en millisecondes ; `None` pour une étape sautée (pas de photo, cache)."""
+    """Durées en millisecondes ; `None` pour une étape sautée (pas de photo, cache, aucune
+    recherche). `search` : somme des recherches, déjà comprise dans `llm`."""
 
     images: int | None
     llm: int | None
+    search: int | None
     total: int
+
+
+WebSearchAspect = Literal["model", "price", "scam", "other"]
+
+
+class DebugSearchOut(CamelModel):
+    """Une recherche lancée par le modèle, réussie ou non : la requête masquée, la sortie
+    exacte rendue au modèle et sa durée en millisecondes."""
+
+    query: str
+    aspect: WebSearchAspect
+    ok: bool
+    output: str
+    ms: int
 
 
 class ScanDebugOut(CamelModel):
@@ -193,13 +209,14 @@ class ScanDebugOut(CamelModel):
     tokens_out: int
     cost_usd_micros: int
     timings_ms: DebugTimingsOut
+    # Tours du modèle (0 : servi par le cache), recherches lancées, résumés de réflexion complets.
+    rounds: int
+    searches: list[DebugSearchOut]
+    reasoning: str
     content_hash: str
     input_hash: str
     snapshot_id: int
     analysis_id: int
-
-
-WebSearchAspect = Literal["model", "price", "scam", "other"]
 
 
 class WebSearchOut(CamelModel):
@@ -228,6 +245,52 @@ class AnalysisResultOut(CamelModel):
     remaining: RemainingOut
     # Seulement pour un superuser hors production ; `None` (null) pour tout autre compte.
     debug: ScanDebugOut | None = None
+
+
+# Événements de `POST /api/scans/stream` (spec §8.3), le champ `data` de chaque événement SSE.
+# Hors du schéma OpenAPI (la route n'a pas de modèle de réponse) : l'extension en tient un miroir
+# écrit à la main (`packages/shared/src/stream.ts`).
+
+
+class StageEventOut(CamelModel):
+    """Étape du scan. `count` : photos à télécharger (`photos`) ou envoyées (`analyzing`),
+    absent pour `cache` et `writing`."""
+
+    stage: Literal["cache", "photos", "analyzing", "writing"]
+    count: int | None = None
+
+
+class ThinkingEventOut(CamelModel):
+    """Résumé de réflexion, cumulé depuis le début de la partie (600 caractères au plus)."""
+
+    part: int
+    text: str
+
+
+class SearchEventOut(CamelModel):
+    """Le modèle lance une recherche (requête déjà masquée)."""
+
+    id: int
+    query: str
+    aspect: WebSearchAspect
+
+
+class SearchDoneEventOut(CamelModel):
+    """Résultats renvoyés au modèle (3 domaines au plus) ; `ok` faux : moteur indisponible."""
+
+    id: int
+    ok: bool
+    count: int
+    domains: list[str]
+
+
+class ScanStreamErrorOut(CamelModel):
+    """Échec après la réservation (le scan est rendu) : mêmes code, message et détails que la
+    réponse JSON de `POST /api/scans`."""
+
+    code: str
+    message: str
+    details: dict[str, Any]
 
 
 class ScanHistoryItemOut(CamelModel):

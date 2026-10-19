@@ -148,6 +148,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scans/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Scan Stream
+         * @description Même scan que `POST /api/scans`, en Server-Sent Events (spec §8.3). L'admission se fait
+         *     avant toute réponse : un refus (401, 402, 403, 422, 429) reste une erreur JSON.
+         */
+        post: operations["create_scan_stream_api_scans_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -234,14 +255,37 @@ export interface components {
             role: string;
         };
         /**
+         * DebugSearchOut
+         * @description Une recherche lancée par le modèle, réussie ou non : la requête masquée, la sortie
+         *     exacte rendue au modèle et sa durée en millisecondes.
+         */
+        DebugSearchOut: {
+            /**
+             * Aspect
+             * @enum {string}
+             */
+            aspect: "model" | "price" | "scam" | "other";
+            /** Ms */
+            ms: number;
+            /** Ok */
+            ok: boolean;
+            /** Output */
+            output: string;
+            /** Query */
+            query: string;
+        };
+        /**
          * DebugTimingsOut
-         * @description Durées en millisecondes ; `None` pour une étape sautée (pas de photo, cache).
+         * @description Durées en millisecondes ; `None` pour une étape sautée (pas de photo, cache, aucune
+         *     recherche). `search` : somme des recherches, déjà comprise dans `llm`.
          */
         DebugTimingsOut: {
             /** Images */
             images: number | null;
             /** Llm */
             llm: number | null;
+            /** Search */
+            search: number | null;
             /** Total */
             total: number;
         };
@@ -408,6 +452,12 @@ export interface components {
             provider: string;
             /** Rawresponse */
             rawResponse: string | null;
+            /** Reasoning */
+            reasoning: string;
+            /** Rounds */
+            rounds: number;
+            /** Searches */
+            searches: components["schemas"]["DebugSearchOut"][];
             /** Snapshotid */
             snapshotId: number;
             /** Systemprompt */
@@ -763,6 +813,37 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ScanHistoryOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_scan_stream_api_scans_stream_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScanIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

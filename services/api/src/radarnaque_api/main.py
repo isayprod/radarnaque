@@ -16,6 +16,7 @@ from radarnaque_api.llm.client import LLMClientFactory
 from radarnaque_api.llm.providers import ensure_models_use_known_providers, load_providers
 from radarnaque_api.routes import billing, health, internal, me, scans
 from radarnaque_api.search import make_search_backend
+from radarnaque_api.services.scans import ANALYSIS_TIMEOUT_S
 
 # En DEBUG, ces bibliothèques journalisent les URL et les corps des requêtes : l'annonce, les
 # photos, et les réponses du fournisseur.
@@ -108,6 +109,7 @@ def create_app(
     app.state.settings = settings
     app.state.providers = providers
     app.state.billing = ManualBillingProvider()
+    app.state.analysis_timeout_s = ANALYSIS_TIMEOUT_S  # délai total d'une analyse (réduit en test)
     app.state.jwt_verifier = JwtVerifier(
         jwks_fetcher or http_jwks_fetcher(settings.jwks_url),
         settings.jwt_issuer,
