@@ -3,6 +3,7 @@ import { admin, bearer, emailOTP, jwt, magicLink } from "better-auth/plugins";
 import type { Pool } from "pg";
 import type { Env } from "./env";
 import { onMagicLink, onOtp } from "./sign-in";
+import { isDevSuperuserEmail, SUPERUSER_ROLE } from "./superuser";
 
 /** Durée de validité commune du lien magique et du code OTP (secondes). */
 export const SIGN_IN_TTL_SECONDS = 600;
@@ -55,6 +56,13 @@ export function createAuth({ pool, env, onUserCreated }: CreateAuthOptions) {
 		databaseHooks: {
 			user: {
 				create: {
+					// Passe après le hook du plugin admin (rôle par défaut `user`) : hors production,
+					// le compte DEV_SUPERUSER_EMAIL reçoit le rôle superuser dès son inscription.
+					before: async (user) => {
+						if (isDevSuperuserEmail(user.email, env)) {
+							return { data: { role: SUPERUSER_ROLE } };
+						}
+					},
 					after: async (user) => {
 						try {
 							await onUserCreated(user.id);
