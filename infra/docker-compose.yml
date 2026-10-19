@@ -84,6 +84,7 @@ services:
     image: radarnaque-api
     restart: unless-stopped
     environment:
+      # Déjà posé par l'image (services/api/Dockerfile) ; répété ici par sûreté.
       ENV: production
       # uvicorn --proxy-headers ne lit X-Forwarded-For / -Proto que des IP listées ici
       # (127.0.0.1 par défaut, jamais Caddy). `*` est sûr : api:8000 n'est pas publié, seul

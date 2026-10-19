@@ -3,6 +3,11 @@ FROM python:3.13-slim
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /usr/local/bin/uv
 
+# Image de production : ENV=production coupe le rôle superuser, le bloc `debug` et ses
+# logs (Settings.env vaut `development` par défaut). Le dev passe par `uv run`, sans
+# cette image ; infra/docker-compose.yml le répète.
+ENV ENV=production
+
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never \
