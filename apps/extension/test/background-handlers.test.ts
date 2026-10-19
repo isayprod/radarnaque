@@ -491,7 +491,7 @@ describe("superuser debug logs", () => {
 			{ title: "[Radarnaque debug] scan envoyé", data: body },
 			{
 				title: "[Radarnaque debug] scan reçu",
-				data: { status: "ok", result: debugAnalysis },
+				data: { outcome: "ok", result: debugAnalysis },
 			},
 		]);
 		expect(sink.groupEnd).toHaveBeenCalledTimes(2);
@@ -615,6 +615,207 @@ describe("superuser debug logs", () => {
 			"authorization",
 		]) {
 			expect(out).not.toContain(secret);
+		}
+	});
+});
+
+describe("superuser debug logs : lié au jeton de session (R3)", () => {
+	const PUBLIC = "http://localhost:8080";
+
+	/** Promesse résolue à la main, pour finir un `getMe` au moment voulu. */
+	function deferred<T>() {
+		let resolve!: (value: T) => void;
+		const promise = new Promise<T>((r) => {
+			resolve = r;
+		});
+		return { promise, resolve };
+	}
+
+	test("superuser vu, puis nouveau jeton (compte ordinaire) par handleExternal → scan/run ne journalise rien", async () => {
+		await sessionToken.setValue("session-su");
+		const sink = fakeConsole();
+		const { deps, api, jwt } = makeDeps({ debugLog: sink });
+		const handle = createHandlers(deps);
+		api.getMe.mockResolvedValue(superuserMe);
+		await handle({ type: "content/access" });
+
+		expect(
+			await handleExternal(
+				{ type: "radarnaque/session", token: "session-ordinaire" },
+				{ url: `${PUBLIC}/auth/callback` },
+				{ publicUrl: PUBLIC, sessionToken, jwt },
+			),
+		).toEqual({ ok: true });
+		api.getMe.mockResolvedValue(trialMe);
+		await handle({ type: "scan/run", scan: scanRequest() });
+		await handle({ type: "scan/run", scan: scanRequest() });
+
+		expect(sink.groupCollapsed).not.toHaveBeenCalled();
+		// Une seule relecture paresseuse de `me` pour le nouveau jeton.
+		expect(api.getMe).toHaveBeenCalledTimes(2);
+	});
+
+	test("onUnauthenticated pendant un scan → plus aucun log ensuite", async () => {
+		await sessionToken.setValue("session-su");
+		const JWT = makeJwt(Math.floor(Date.now() / 1000) + 600, "user-su");
+		const fetchFn = fetchSequence(
+			jsonResponse(200, superuserMe),
+			errorResponse(401, "unauthorized"),
+			errorResponse(401, "unauthorized"),
+		);
+		const jwt = {
+			get: vi.fn<() => Promise<string>>(async () => JWT),
+			invalidate: vi.fn(),
+		};
+		const api = createApiClient({
+			jwt,
+			fetch: fetchFn,
+			onUnauthenticated: async () => {
+				await sessionToken.setValue(null);
+			},
+		});
+		const sink = fakeConsole();
+		const { deps } = makeDeps({ api, jwt, debugLog: sink });
+		const handle = createHandlers(deps);
+
+		await handle({ type: "content/access" });
+		expect(await handle({ type: "scan/run", scan: scanRequest() })).toEqual({
+			ok: false,
+			error: { code: "session_expired" },
+		});
+		// L'envoi a eu lieu avec la session ; l'erreur arrive après sa suppression.
+		expect(groups(sink).map((g) => g.title)).toEqual([
+			"[Radarnaque debug] scan envoyé",
+		]);
+		await handle({ type: "scan/run", scan: scanRequest() });
+		expect(sink.groupCollapsed).toHaveBeenCalledTimes(1);
+	});
+
+	test("nouveau jeton (non nul) pendant le scan → la réponse n'est pas journalisée", async () => {
+		await sessionToken.setValue("session-su");
+		const sink = fakeConsole();
+		const { deps, api } = makeDeps({ debugLog: sink });
+		api.getMe.mockResolvedValue(superuserMe);
+		api.scan.mockImplementationOnce(async () => {
+			await sessionToken.setValue("session-autre");
+			return debugAnalysis;
+		});
+		const handle = createHandlers(deps);
+		await handle({ type: "content/access" });
+		await handle({ type: "scan/run", scan: scanRequest() });
+		expect(groups(sink).map((g) => g.title)).toEqual([
+			"[Radarnaque debug] scan envoyé",
+		]);
+	});
+
+	test("un getMe résolu après une déconnexion est ignoré", async () => {
+		await sessionToken.setValue("session-old");
+		const sink = fakeConsole();
+		const { deps, api } = makeDeps({ debugLog: sink });
+		const handle = createHandlers(deps);
+		const late = deferred<Me>();
+		api.getMe.mockReturnValueOnce(late.promise);
+
+		const pending = handle({ type: "content/access" });
+		await vi.waitFor(() => expect(api.getMe).toHaveBeenCalledTimes(1));
+		await handle({ type: "auth/sign-out" });
+		await handle({ type: "auth/verify-otp", email: "a@b.be", otp: "123456" });
+		expect(await sessionToken.getValue()).toBe("session-abc");
+		late.resolve(superuserMe);
+		await pending;
+
+		api.getMe.mockResolvedValue(trialMe);
+		await handle({ type: "scan/run", scan: scanRequest() });
+		expect(sink.groupCollapsed).not.toHaveBeenCalled();
+		// Le résultat tardif a été jeté : `me` est relu pour la nouvelle session.
+		expect(api.getMe).toHaveBeenCalledTimes(2);
+	});
+
+	test("service worker redémarré, jeton superuser : un seul getMe, puis les logs", async () => {
+		await sessionToken.setValue("session-su");
+		const sink = fakeConsole();
+		const { deps, api } = makeDeps({ debugLog: sink });
+		api.getMe.mockResolvedValue(superuserMe);
+		const handle = createHandlers(deps);
+
+		await handle({ type: "scan/run", scan: scanRequest() });
+		await handle({ type: "scan/run", scan: scanRequest() });
+
+		expect(api.getMe).toHaveBeenCalledTimes(1);
+		expect(groups(sink).map((g) => g.title)).toEqual([
+			"[Radarnaque debug] scan envoyé",
+			"[Radarnaque debug] scan reçu",
+			"[Radarnaque debug] scan envoyé",
+			"[Radarnaque debug] scan reçu",
+		]);
+	});
+
+	test("service worker redémarré, compte ordinaire : un seul getMe, aucun log", async () => {
+		await sessionToken.setValue("session-abc");
+		const sink = fakeConsole();
+		const { deps, api } = makeDeps({ debugLog: sink });
+		const handle = createHandlers(deps);
+
+		await handle({ type: "scan/run", scan: scanRequest() });
+		await handle({ type: "scan/run", scan: scanRequest() });
+
+		expect(api.getMe).toHaveBeenCalledTimes(1);
+		expect(api.scan).toHaveBeenCalledTimes(2);
+		expect(sink.groupCollapsed).not.toHaveBeenCalled();
+	});
+
+	test("service worker redémarré, lecture de me en échec : scan fait, aucun log", async () => {
+		await sessionToken.setValue("session-su");
+		const sink = fakeConsole();
+		const { deps, api } = makeDeps({ debugLog: sink });
+		api.getMe.mockRejectedValueOnce(
+			new ApiRequestError(503, {
+				error: { code: "auth_unavailable", message: "", details: {} },
+			}),
+		);
+		const handle = createHandlers(deps);
+		expect(await handle({ type: "scan/run", scan: scanRequest() })).toEqual({
+			ok: true,
+			data: sampleAnalysis,
+		});
+		expect(sink.groupCollapsed).not.toHaveBeenCalled();
+	});
+
+	test("sans session : aucun getMe paresseux", async () => {
+		const sink = fakeConsole();
+		const { deps, api } = makeDeps({ debugLog: sink });
+		await createHandlers(deps)({ type: "scan/run", scan: scanRequest() });
+		expect(api.getMe).not.toHaveBeenCalled();
+		expect(sink.groupCollapsed).not.toHaveBeenCalled();
+	});
+
+	test("invalid_listing : { code } journalisé pour un superuser, rien pour un compte ordinaire", async () => {
+		const malformed = [
+			{},
+			{ ...scanRequest(), listing: { ...scanRequest().listing, title: " " } },
+		];
+		for (const [me, expected] of [
+			[superuserMe, 2],
+			[trialMe, 0],
+		] as const) {
+			await sessionToken.setValue("session-abc");
+			const sink = fakeConsole();
+			const { deps, api } = makeDeps({ debugLog: sink });
+			api.getMe.mockResolvedValue(me);
+			const handle = createHandlers(deps);
+			await handle({ type: "content/access" });
+			for (const scan of malformed) {
+				expect(
+					await handle({ type: "scan/run", scan } as unknown as BgRequest),
+				).toEqual({ ok: false, error: { code: "invalid_listing" } });
+			}
+			expect(groups(sink)).toEqual(
+				Array.from({ length: expected }, () => ({
+					title: "[Radarnaque debug] scan en erreur",
+					data: { code: "invalid_listing" },
+				})),
+			);
+			expect(api.scan).not.toHaveBeenCalled();
 		}
 	});
 });

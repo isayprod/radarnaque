@@ -91,16 +91,36 @@ export function createHandlers(
 	const { sessionToken, auth, jwt, api, openPopup } = deps;
 
 	/**
-	 * Debug du dernier `me` lu (`auth/state` ou `content/access`). Faux au démarrage du
-	 * service worker, sans session, après une erreur et à chaque changement de session.
+	 * Debug du dernier `me` lu, lié au jeton de session utilisé pour le lire (R3). Un
+	 * changement de jeton, quelle qu'en soit la cause (OTP, lien magique, déconnexion,
+	 * `onUnauthenticated`), coupe les logs sans remise à zéro explicite.
 	 */
-	let lastAccessDebug = false;
+	let debugFor: { token: string; debug: boolean } | null = null;
+	/** Jeton lu juste avant chaque groupe de log : `enabled()` est synchrone. */
+	let tokenForLog: string | null = null;
 	// Seuls le corps `ScanIn`, le résultat et le code d'erreur y passent : jamais
 	// d'en-tête, de JWT, de jeton de session ni de cookie.
-	const debugLog = createDebugLog(() => lastAccessDebug, deps.debugLog);
+	const debugLog = createDebugLog(
+		() =>
+			debugFor?.debug === true &&
+			tokenForLog !== null &&
+			debugFor.token === tokenForLog,
+		deps.debugLog,
+	);
+
+	/** Écrit un groupe seulement si le jeton courant est celui du superuser vu. */
+	async function logGroup(title: string, data: unknown): Promise<void> {
+		// Compte ordinaire : pas même une lecture du stockage.
+		if (!debugFor?.debug) return;
+		try {
+			tokenForLog = await sessionToken.getValue();
+		} catch {
+			tokenForLog = null;
+		}
+		debugLog.group(title, data);
+	}
 
 	async function storeSession(token: string | null): Promise<void> {
-		lastAccessDebug = false;
 		await sessionToken.setValue(token);
 		jwt.invalidate();
 	}
@@ -122,12 +142,34 @@ export function createHandlers(
 		}
 	}
 
-	/** `currentMe` qui met aussi à jour `lastAccessDebug` (faux en cas d'erreur). */
+	/**
+	 * `currentMe` qui met aussi à jour `debugFor`. Le jeton est lu avant l'appel ; si
+	 * la session a changé pendant l'appel (déconnexion, nouveau jeton), le résultat
+	 * n'est pas retenu pour le debug.
+	 */
 	async function trackedMe(): Promise<Me | null> {
-		lastAccessDebug = false;
+		const token = await sessionToken.getValue();
 		const me = await currentMe();
-		lastAccessDebug = me !== null && isDebug(accessOf(me));
+		const after = await sessionToken.getValue();
+		if (token && after === token) {
+			debugFor = me ? { token, debug: isDebug(accessOf(me)) } : null;
+		}
 		return me;
+	}
+
+	/**
+	 * Après un réveil du service worker (ou un changement de session), `debugFor` ne
+	 * correspond pas au jeton courant : une seule lecture de `me`, et seulement quand
+	 * un scan est demandé. Un échec laisse les logs coupés.
+	 */
+	async function ensureDebugKnown(): Promise<void> {
+		try {
+			const token = await sessionToken.getValue();
+			if (!token || debugFor?.token === token) return;
+			await trackedMe();
+		} catch {
+			// Logs coupés ; le scan continue normalement.
+		}
 	}
 
 	async function state(): Promise<BgResponse<AuthState>> {
@@ -145,20 +187,21 @@ export function createHandlers(
 	 * est vérifiée avant `toScanIn`, qui retire l'identité du vendeur et applique les bornes.
 	 */
 	async function runScan(scan: unknown): Promise<BgResponse<AnalysisResult>> {
+		await ensureDebugKnown();
 		const listing = (scan as { listing?: unknown } | null)?.listing;
 		if (typeof scan !== "object" || typeof listing !== "object" || !listing) {
-			debugLog.group("scan en erreur", { code: "invalid_listing" });
+			await logGroup("scan en erreur", { code: "invalid_listing" });
 			return fail("invalid_listing");
 		}
 		try {
 			const body = toScanIn(scan as ScanRequest);
-			debugLog.group("scan envoyé", body);
+			await logGroup("scan envoyé", body);
 			const result = await api.scan(body);
-			debugLog.group("scan reçu", { status: "ok", result });
+			await logGroup("scan reçu", { outcome: "ok", result });
 			return ok(result);
 		} catch (error) {
 			// Le code seul : jamais le message ni les détails de l'erreur.
-			debugLog.group("scan en erreur", {
+			await logGroup("scan en erreur", {
 				code: knownCode(error) ?? "internal_error",
 			});
 			throw error;
