@@ -566,14 +566,18 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 		expect(button.getAttribute("type")).toBe("button");
 		expect(button.textContent).toBe("Analyser");
 		await user.click(button);
-		// Accès inconnu : lu d'abord, puis l'analyse part.
-		await vi.waitFor(() => expect(ai.scan).toHaveBeenCalledTimes(1));
+		// Accès inconnu : lu d'abord, puis l'analyse part. Elle part dans un effet,
+		// après la réponse de l'accès (hors `act`) : `ai.scan` est appelé avant le
+		// rendu de l'état `loading`. On attend donc ce rendu, pas l'appel.
+		await vi.waitFor(() =>
+			expect(toggle().querySelector(".radarnaque-spin")).not.toBeNull(),
+		);
+		expect(ai.scan).toHaveBeenCalledTimes(1);
 		expect(ai.access).toHaveBeenCalledTimes(1);
 		expect(screen.queryByRole("dialog")).toBeNull();
 		expect(toggle().getAttribute("aria-expanded")).toBe("false");
 		// Pendant l'analyse, la ligne en direct remplace le bouton.
 		expect(queryLaunch()).toBeNull();
-		expect(toggle().querySelector(".radarnaque-spin")).not.toBeNull();
 	});
 
 	test("accès déjà en cache : l'analyse part au clic, sans lecture", () => {
