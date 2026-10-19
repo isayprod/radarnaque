@@ -61,7 +61,8 @@ def test_repo_file_groq_and_openai_oauth():
     assert oauth.cost_source == "none"
     # Les modèles de raisonnement du service Codex refusent `temperature` (400, que le proxy
     # transforme en 500).
-    assert oauth.omit_params == ("temperature",)
+    # `max_tokens` aussi : la réflexion élevée compte dans `max_output_tokens`.
+    assert oauth.omit_params == ("temperature", "max_tokens")
     assert providers["openrouter"].omit_params == ()
 
 
@@ -77,6 +78,31 @@ def test_repo_file_openai_oauth_uses_the_responses_api():
 def test_api_defaults_to_chat(tmp_path):
     assert load_providers(_write(tmp_path, VALID))["p"].api == "chat"
     assert _config().api == "chat"
+
+
+def test_repo_file_reasoning_effort():
+    providers = load_providers(REPO_PROVIDERS)
+    assert providers["openai-oauth"].reasoning_effort == "high"
+    others = {p.reasoning_effort for code, p in providers.items() if code != "openai-oauth"}
+    assert others == {"none"}  # openrouter passe à « low » en tâche 6
+
+
+@pytest.mark.parametrize("value", ["none", "low", "medium", "high"])
+def test_reasoning_effort_is_read(tmp_path, value):
+    path = _write(tmp_path, VALID + f'reasoning_effort = "{value}"\n')
+    assert load_providers(path)["p"].reasoning_effort == value
+
+
+def test_reasoning_effort_defaults_to_none(tmp_path):
+    assert load_providers(_write(tmp_path, VALID))["p"].reasoning_effort == "none"
+    assert _config().reasoning_effort == "none"
+
+
+@pytest.mark.parametrize("value", ['"max"', '"HIGH"', '""', "1", "true", '["low"]'])
+def test_invalid_reasoning_effort_names_the_key(tmp_path, value):
+    path = _write(tmp_path, VALID + f"reasoning_effort = {value}\n")
+    with pytest.raises(ProviderError, match=r"providers\.p\.reasoning_effort"):
+        load_providers(path)
 
 
 @pytest.mark.parametrize("value", ['"responses"', '"chat"'])

@@ -27,10 +27,14 @@ base_url = "http://127.0.0.1:10531/v1"
 base_url_env = "OPENAI_OAUTH_BASE_URL"
 structured_output = "json_object"
 cost_source = "none"
-omit_params = ["temperature"]
+# `max_tokens` (`max_output_tokens`) est omis : avec une réflexion élevée, ses tokens comptent dans
+# la limite, et une réponse coupée serait invalide.
+omit_params = ["temperature", "max_tokens"]
 # API Responses : sur /chat/completions, le proxy refuse les photos en data URL (« URL scheme
 # must be http or https », erreur 500) ; /responses les accepte (`input_image`).
 api = "responses"
+# Réflexion élevée, avec résumés relayés en direct à l'extension.
+reasoning_effort = "high"
 
 [providers.omniroute]
 base_url = "http://localhost:20128/v1"
