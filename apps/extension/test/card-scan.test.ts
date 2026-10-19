@@ -7,6 +7,7 @@ import { twhAdapter } from "../lib/adapters/twh";
 import type { CardRef } from "../lib/adapters/types";
 import type { AiClient } from "../lib/content/ai-client";
 import { defaultFetchPage, scanCard } from "../lib/content/card-scan";
+import { createDebugLog, type DebugSink } from "../lib/debug-log";
 import { evaluate } from "../lib/rules/score";
 import { loadFixture, sampleAnalysis } from "./helpers";
 
@@ -185,6 +186,74 @@ describe("scanCard", () => {
 		});
 		expect(response).toEqual({ ok: false, error: { code: "invalid_listing" } });
 		expect(ai.scan).not.toHaveBeenCalled();
+	});
+});
+
+/** Console simulée : les groupes écrits, titre et objet. */
+function fakeSink() {
+	const sink = {
+		groupCollapsed: vi.fn<DebugSink["groupCollapsed"]>(),
+		log: vi.fn<DebugSink["log"]>(),
+		groupEnd: vi.fn<DebugSink["groupEnd"]>(),
+	};
+	const groups = () =>
+		sink.groupCollapsed.mock.calls.map(([title], i) => ({
+			title,
+			data: sink.log.mock.calls[i]?.[0],
+		}));
+	return { sink, groups };
+}
+
+describe("scanCard : logs de debug (superuser)", () => {
+	test("fiche extraite : fiche récupérée puis scan demandé avec la requête envoyée", async () => {
+		const { sink, groups } = fakeSink();
+		await scanCard(twhCard(), {
+			pageUrl: TWH_SEARCH,
+			adapter: twhAdapter,
+			ai,
+			fetchPage: vi.fn(async () => FIXED_HTML),
+			debugLog: createDebugLog(() => true, sink),
+		});
+		expect(groups()).toEqual([
+			{
+				title: "[Radarnaque debug] fiche récupérée",
+				data: { url: FIXED_URL, extracted: true, partial: false },
+			},
+			{
+				title: "[Radarnaque debug] scan demandé",
+				data: ai.scan.mock.calls[0]?.[0],
+			},
+		]);
+	});
+
+	test("fiche illisible, repli sur la carte : extracted false, partial true", async () => {
+		const { sink, groups } = fakeSink();
+		const card = fbCard();
+		await scanCard(card, {
+			pageUrl: FB_SEARCH,
+			adapter: facebookAdapter,
+			ai,
+			fetchPage: vi.fn(async () => "<html><body></body></html>"),
+			debugLog: createDebugLog(() => true, sink),
+		});
+		expect(groups()[0]).toEqual({
+			title: "[Radarnaque debug] fiche récupérée",
+			data: { url: card.url, extracted: false, partial: true },
+		});
+		expect(groups()[1]?.data).toMatchObject({ partial: true });
+	});
+
+	test("utilisateur standard : aucun log", async () => {
+		const { sink } = fakeSink();
+		await scanCard(twhCard(), {
+			pageUrl: TWH_SEARCH,
+			adapter: twhAdapter,
+			ai,
+			fetchPage: vi.fn(async () => FIXED_HTML),
+			debugLog: createDebugLog(() => false, sink),
+		});
+		expect(ai.scan).toHaveBeenCalledTimes(1);
+		expect(sink.groupCollapsed).not.toHaveBeenCalled();
 	});
 });
 

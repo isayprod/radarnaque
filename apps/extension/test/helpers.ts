@@ -102,6 +102,36 @@ export const sampleAnalysis: AnalysisResult = {
 	remaining: { text: 2, image: 3, total: 2 },
 };
 
+/** Bloc `debug` d'un superuser (hors production), avec des empreintes longues. */
+export const sampleDebug: NonNullable<AnalysisResult["debug"]> = {
+	analysisId: 42,
+	contentHash:
+		"c0ffee0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+	costUsdMicros: 1234,
+	fromCache: false,
+	inputHash: "feedface0123456789abcdef0123456789abcdef0123456789abcdef01234567",
+	llmCalled: true,
+	messages: [
+		{ role: "user", content: "Annonce : Vélo <b>gras</b>" },
+		{ role: "user", content: "[image 1 : 2048 octets]" },
+	],
+	model: "modele-test",
+	promptVersion: { scanKind: "text", version: 2 },
+	provider: "fournisseur-test",
+	rawResponse: '{"score": 55}',
+	snapshotId: 7,
+	systemPrompt: "Tu analyses une annonce.",
+	timingsMs: { images: null, llm: 900, total: 950 },
+	tokensIn: 100,
+	tokensOut: 20,
+};
+
+/** Résultat d'un superuser : l'analyse type et son bloc `debug`. */
+export const debugAnalysis: AnalysisResult = {
+	...sampleAnalysis,
+	debug: sampleDebug,
+};
+
 /** Corps de scan minimal, déjà nettoyé (sortie de `toScanIn`). */
 export const sampleScanIn: ScanIn = {
 	listing: {

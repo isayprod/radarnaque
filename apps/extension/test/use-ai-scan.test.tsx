@@ -16,10 +16,15 @@ import {
 	type StoredAiResults,
 } from "../lib/content/ai-results";
 import { type BadgeView, useAiScan } from "../lib/content/use-ai-scan";
+import {
+	createDebugLog,
+	type DebugLog,
+	type DebugSink,
+} from "../lib/debug-log";
 import type { Listing } from "../lib/listing/types";
-import type { BgResponse, ContentAccess } from "../lib/messages";
+import type { BgResponse, ContentAccess, ScanRequest } from "../lib/messages";
 import type { RiskReport } from "../lib/rules/score";
-import { sampleAnalysis } from "./helpers";
+import { debugAnalysis, sampleAnalysis } from "./helpers";
 
 /** Promesse résolue de l'extérieur. */
 function deferred<T>() {
@@ -86,7 +91,7 @@ function fakeClient() {
 			accesses.push(d);
 			return d.promise;
 		}),
-		scan: vi.fn(() => {
+		scan: vi.fn((_request: ScanRequest) => {
 			const d = deferred<BgResponse<AnalysisResult>>();
 			scans.push(d);
 			return d.promise;
@@ -100,13 +105,17 @@ function fakeClient() {
 	return { client, scans, accesses, logins };
 }
 
-function setup(initial: BadgeView = viewOf("m1"), store?: AiResultStore) {
+function setup(
+	initial: BadgeView = viewOf("m1"),
+	store?: AiResultStore,
+	debugLog?: DebugLog,
+) {
 	const fake = fakeClient();
 	let clock = 1_000;
 	const cache: AccessCache = createAccessCache(() => clock);
 	const hook = renderHook(
 		({ view }: { view: BadgeView }) =>
-			useAiScan(fake.client, view, "fr", cache, store),
+			useAiScan(fake.client, view, "fr", cache, store, debugLog),
 		{ initialProps: { view: initial } },
 	);
 	return {
@@ -762,5 +771,133 @@ describe("useAiScan : résultats gardés 24 h", () => {
 		t.scans[0]?.resolve(ok(sampleAnalysis));
 		await settle();
 		expect(t.result.current.text.status).toBe("done");
+	});
+});
+
+/** Console simulée : les groupes écrits, titre et objet. */
+function fakeSink() {
+	const sink = {
+		groupCollapsed: vi.fn<DebugSink["groupCollapsed"]>(),
+		log: vi.fn<DebugSink["log"]>(),
+		groupEnd: vi.fn<DebugSink["groupEnd"]>(),
+	};
+	const groups = () =>
+		sink.groupCollapsed.mock.calls.map(([title], i) => ({
+			title,
+			data: sink.log.mock.calls[i]?.[0],
+		}));
+	return { sink, groups };
+}
+
+describe("useAiScan : relance sans cache (superuser)", () => {
+	test("un scan ordinaire n'envoie pas noCache", () => {
+		const t = setup();
+		act(() => t.result.current.scan("text"));
+		expect(t.client.scan.mock.calls[0]?.[0]).not.toHaveProperty("noCache");
+	});
+
+	test("rescan envoie la même requête avec noCache: true, pour le type demandé", async () => {
+		const t = setup();
+		act(() => t.result.current.scan("image"));
+		t.scans[0]?.resolve(ok(debugAnalysis));
+		await settle();
+		act(() => t.result.current.rescan("image"));
+		const [first, second] = t.client.scan.mock.calls.map((c) => c[0]);
+		expect(second).toEqual({ ...first, noCache: true });
+		expect(second?.scanKind).toBe("image");
+	});
+
+	test("sticky : le résultat reste affiché pendant la relance, puis il est remplacé", async () => {
+		const t = setup();
+		act(() => t.result.current.scan("text"));
+		t.scans[0]?.resolve(ok(debugAnalysis));
+		await settle();
+
+		act(() => t.result.current.rescan("text"));
+		// Pas de retour à `loading` (analyse locale) : seul le bouton l'indique.
+		expect(t.result.current.text).toEqual({
+			status: "done",
+			result: debugAnalysis,
+		});
+		expect(t.result.current.rescanning.text).toBe(true);
+		// Double clic pendant la relance : ignoré.
+		act(() => t.result.current.rescan("text"));
+		expect(t.client.scan).toHaveBeenCalledTimes(2);
+
+		const fresh = { ...debugAnalysis, score: 90, level: "high" as const };
+		t.scans[1]?.resolve(ok(fresh));
+		await settle();
+		expect(t.result.current.text).toEqual({ status: "done", result: fresh });
+		expect(t.result.current.rescanning.text).toBeFalsy();
+	});
+
+	test("relance en erreur : l'erreur remplace le résultat, comme un scan ordinaire", async () => {
+		const t = setup();
+		act(() => t.result.current.scan("text"));
+		t.scans[0]?.resolve(ok(debugAnalysis));
+		await settle();
+		act(() => t.result.current.rescan("text"));
+		t.scans[1]?.resolve(fail("rate_limited"));
+		await settle();
+		expect(t.result.current.text).toEqual({
+			status: "error",
+			code: "rate_limited",
+		});
+		expect(t.result.current.rescanning.text).toBeFalsy();
+	});
+});
+
+describe("useAiScan : logs de debug (superuser)", () => {
+	test("scan demandé avec la requête, puis scan reçu avec le résultat et son debug", async () => {
+		const { sink, groups } = fakeSink();
+		const t = setup(
+			viewOf("m1"),
+			undefined,
+			createDebugLog(() => true, sink),
+		);
+		act(() => t.result.current.scan("text"));
+		expect(groups()).toEqual([
+			{
+				title: "[Radarnaque debug] scan demandé",
+				data: t.client.scan.mock.calls[0]?.[0],
+			},
+		]);
+		t.scans[0]?.resolve(ok(debugAnalysis));
+		await settle();
+		expect(groups()[1]).toEqual({
+			title: "[Radarnaque debug] scan reçu",
+			data: debugAnalysis,
+		});
+		expect(groups()).toHaveLength(2);
+	});
+
+	test("scan en erreur : scan reçu avec le code", async () => {
+		const { sink, groups } = fakeSink();
+		const t = setup(
+			viewOf("m1"),
+			undefined,
+			createDebugLog(() => true, sink),
+		);
+		act(() => t.result.current.scan("text"));
+		t.scans[0]?.resolve(fail("quota_exhausted"));
+		await settle();
+		expect(groups()[1]).toEqual({
+			title: "[Radarnaque debug] scan reçu",
+			data: { error: "quota_exhausted" },
+		});
+	});
+
+	test("utilisateur standard : aucun log", async () => {
+		const { sink } = fakeSink();
+		const t = setup(
+			viewOf("m1"),
+			undefined,
+			createDebugLog(() => false, sink),
+		);
+		act(() => t.result.current.scan("text"));
+		t.scans[0]?.resolve(ok(sampleAnalysis));
+		await settle();
+		expect(t.client.scan).toHaveBeenCalledTimes(1);
+		expect(sink.groupCollapsed).not.toHaveBeenCalled();
 	});
 });

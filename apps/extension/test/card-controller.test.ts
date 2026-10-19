@@ -27,8 +27,13 @@ import {
 	createCardController,
 } from "../lib/content/card-controller";
 import type { scanCard } from "../lib/content/card-scan";
+import {
+	createDebugLog,
+	type DebugLog,
+	type DebugSink,
+} from "../lib/debug-log";
 import type { BgResponse, ContentAccess } from "../lib/messages";
-import { loadFixture, sampleAnalysis } from "./helpers";
+import { debugAnalysis, loadFixture, sampleAnalysis } from "./helpers";
 
 const FB_SEARCH = "https://www.facebook.com/marketplace/brussels/";
 const FB_ITEM = "https://www.facebook.com/marketplace/item/9000000000000001/";
@@ -122,6 +127,7 @@ interface SetupOptions {
 	/** Vrai : le vrai `scanCard`, qui appelle `ai.scan` (fiche illisible, repli sur la carte). */
 	realScan?: boolean;
 	aiResults?: AiResultStore;
+	debugLog?: DebugLog;
 }
 
 function setup(
@@ -163,6 +169,7 @@ function setup(
 		fetchPage,
 		accessCache: options.accessCache,
 		aiResults: options.aiResults,
+		debugLog: options.debugLog,
 		log: vi.fn(),
 	});
 	disposers.push(controller.dispose);
@@ -1134,5 +1141,71 @@ describe("createCardController — résultats gardés 24 h", () => {
 				result: sampleAnalysis,
 			}),
 		);
+	});
+});
+
+/** Console simulée : les groupes écrits, titre et objet. */
+function fakeSink() {
+	const sink = {
+		groupCollapsed: vi.fn<DebugSink["groupCollapsed"]>(),
+		log: vi.fn<DebugSink["log"]>(),
+		groupEnd: vi.fn<DebugSink["groupEnd"]>(),
+	};
+	const groups = () =>
+		sink.groupCollapsed.mock.calls.map(([title], i) => ({
+			title,
+			data: sink.log.mock.calls[i]?.[0],
+		}));
+	return { sink, groups };
+}
+
+describe("createCardController — logs de debug (superuser)", () => {
+	test("le logger est passé au scan de la carte, et le résultat reçu est journalisé avec debug", async () => {
+		const doc = loadFixture("facebook/grid.html");
+		const { sink, groups } = fakeSink();
+		const debugLog = createDebugLog(() => true, sink);
+		const t = setup(doc, FB_SEARCH, [withCards], { debugLog });
+		t.scan.mockResolvedValue({ ok: true, data: debugAnalysis });
+		await t.controller.refresh();
+		const id = FB_IDS[0] as string;
+		t.lastView(id).onActivate();
+		await vi.waitFor(() => expect(t.lastView(id).state.status).toBe("done"));
+
+		expect(t.scan.mock.calls[0]?.[1].debugLog).toBe(debugLog);
+		expect(groups()).toEqual([
+			{ title: "[Radarnaque debug] scan reçu", data: debugAnalysis },
+		]);
+	});
+
+	test("erreur du scan : scan reçu avec le code d'erreur", async () => {
+		const doc = loadFixture("facebook/grid.html");
+		const { sink, groups } = fakeSink();
+		const t = setup(doc, FB_SEARCH, [withCards], {
+			debugLog: createDebugLog(() => true, sink),
+		});
+		t.scan.mockResolvedValue({ ok: false, error: { code: "rate_limited" } });
+		await t.controller.refresh();
+		const id = FB_IDS[0] as string;
+		t.lastView(id).onActivate();
+		await vi.waitFor(() => expect(t.lastView(id).state.status).toBe("error"));
+		expect(groups()).toEqual([
+			{
+				title: "[Radarnaque debug] scan reçu",
+				data: { error: "rate_limited" },
+			},
+		]);
+	});
+
+	test("utilisateur standard : aucun log", async () => {
+		const doc = loadFixture("facebook/grid.html");
+		const { sink } = fakeSink();
+		const t = setup(doc, FB_SEARCH, [withCards], {
+			debugLog: createDebugLog(() => false, sink),
+		});
+		await t.controller.refresh();
+		const id = FB_IDS[0] as string;
+		t.lastView(id).onActivate();
+		await vi.waitFor(() => expect(t.lastView(id).state.status).toBe("done"));
+		expect(sink.groupCollapsed).not.toHaveBeenCalled();
 	});
 });

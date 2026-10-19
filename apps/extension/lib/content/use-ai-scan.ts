@@ -2,6 +2,7 @@ import type { Locale } from "@radarnaque/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiSectionProps } from "../../components/AiSection";
 import { PUBLIC_URL } from "../config";
+import type { DebugLog } from "../debug-log";
 import type { ScanKind, ScanRequest } from "../messages";
 import {
 	type AccessCache,
@@ -9,7 +10,7 @@ import {
 	createAccessCache,
 	RELOGIN_CODES,
 } from "./access-policy";
-import type { AiClient, ScanState } from "./ai-client";
+import { type AiClient, type ScanState, scanOutcome } from "./ai-client";
 import {
 	type AiResultStore,
 	listingFingerprint,
@@ -35,6 +36,11 @@ interface Slots {
 	 * revient à `idle` et la pastille à l'analyse locale (I2).
 	 */
 	doneFingerprint: Partial<Record<ScanKind, string>>;
+	/**
+	 * Relance sans cache en cours (superuser), par type : le résultat affiché
+	 * reste en place, seul le bouton de la section Debug l'indique.
+	 */
+	rescanning: Partial<Record<ScanKind, true>>;
 	loginUnavailable: boolean;
 }
 
@@ -63,6 +69,7 @@ const freshSlots = (key: string, access: AccessState | null): Slots => ({
 	text: IDLE,
 	image: IDLE,
 	doneFingerprint: {},
+	rescanning: {},
 	loginUnavailable: false,
 });
 
@@ -107,6 +114,14 @@ export interface AiScan {
 	 */
 	loadAccess(): void;
 	scan(kind: ScanKind): void;
+	/**
+	 * Superuser : relance le scan `kind` avec `noCache: true`. Le résultat
+	 * affiché reste en place pendant la relance (`rescanning`), puis il est
+	 * remplacé par la réponse, résultat ou erreur.
+	 */
+	rescan(kind: ScanKind): void;
+	/** Types dont une relance sans cache est en cours. */
+	rescanning: Partial<Record<ScanKind, true>>;
 	login(): void;
 }
 
@@ -120,6 +135,8 @@ export interface AiScan {
  * résultat complet dont l'empreinte est celle de l'annonce affichée est repris
  * sans nouveau scan. Une annonce modifiée, ou un résultat partiel venu d'une
  * carte, laisse la pastille sur l'analyse locale.
+ *
+ * `debugLog` (superuser) reçoit chaque requête envoyée et chaque réponse.
  */
 export function useAiScan(
 	client: AiClient,
@@ -127,6 +144,7 @@ export function useAiScan(
 	locale: Locale,
 	accessCache?: AccessCache,
 	aiResults?: AiResultStore,
+	debugLog?: DebugLog,
 ): AiScan {
 	const [ownCache] = useState(createAccessCache);
 	const cache = accessCache ?? ownCache;
@@ -197,7 +215,9 @@ export function useAiScan(
 					state.status === "done" && analysed !== undefined
 						? { ...others, [kind]: analysed }
 						: others;
-				return { ...prev, [kind]: state, doneFingerprint };
+				// Un nouvel état pour ce type met fin à sa relance sans cache.
+				const { [kind]: __, ...rescanning } = prev.rescanning;
+				return { ...prev, [kind]: state, doneFingerprint, rescanning };
 			});
 		},
 		[],
@@ -268,8 +288,8 @@ export function useAiScan(
 		if (access) patch(scope, { access });
 	}, [readAccess, patch, cache, key]);
 
-	const scan = useCallback(
-		(kind: ScanKind) => {
+	const run = useCallback(
+		(kind: ScanKind, noCache: boolean) => {
 			const scope = scopeRef.current;
 			// Un scan en cours pour ce type : pas de second (double clic).
 			if (scope.inflight.has(kind)) return;
@@ -283,11 +303,25 @@ export function useAiScan(
 				trigger: "button",
 				// Fiche lue en entier : `partial` ne vaut vrai que pour un scan depuis une carte.
 				partial: false,
+				// Clé absente d'un scan ordinaire : le serveur l'ignore de toute façon
+				// pour un compte qui n'est pas superuser.
+				...(noCache ? { noCache: true } : {}),
 			};
 			const analysed = listingFingerprint(listing);
-			setKind(scope, kind, { status: "loading" });
+			if (noCache) {
+				// Relance : le résultat affiché reste en place (pas de retour à
+				// l'analyse locale), seul le bouton de la section Debug change.
+				if (mountedRef.current && scopeRef.current === scope)
+					setSlots((prev) =>
+						prev.key === scope.key
+							? { ...prev, rescanning: { ...prev.rescanning, [kind]: true } }
+							: prev,
+					);
+			} else setKind(scope, kind, { status: "loading" });
+			debugLog?.group("scan demandé", request);
 			const finish = (state: ScanState) => {
 				scope.inflight.delete(kind);
+				debugLog?.group("scan reçu", scanOutcome(state));
 				// Gardé 24 h, même si l'annonce affichée a changé entre-temps :
 				// l'entrée porte l'empreinte de l'annonce lue au clic.
 				if (state.status === "done")
@@ -319,8 +353,11 @@ export function useAiScan(
 				() => finish({ status: "error", code: "background_unavailable" }),
 			);
 		},
-		[client, setKind, readAccess, cache, aiResults],
+		[client, setKind, readAccess, cache, aiResults, debugLog],
 	);
+
+	const scan = useCallback((kind: ScanKind) => run(kind, false), [run]);
+	const rescan = useCallback((kind: ScanKind) => run(kind, true), [run]);
 
 	const login = useCallback(() => {
 		const scope = scopeRef.current;
@@ -340,6 +377,8 @@ export function useAiScan(
 		pricingUrl: `${PUBLIC_URL}/pricing/?lang=${locale}`,
 		loadAccess,
 		scan,
+		rescan,
+		rescanning: slots.rescanning,
 		login,
 	};
 }

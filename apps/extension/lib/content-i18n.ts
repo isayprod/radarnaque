@@ -22,6 +22,7 @@ type TextKey =
 	| "severity.warning"
 	| "severity.info"
 	| AiKey
+	| DebugKey
 	| Exclude<RuleId, "price_anomaly">;
 
 // Codes d'erreur de la section IA : ceux de l'API (§7.5) et ceux du service worker.
@@ -59,6 +60,16 @@ type AiKey =
 	| "ai.advice"
 	| "ai.reasons"
 	| AiErrorKey;
+
+// Section « Debug (superuser) » du panneau, réservée au superuser de développement.
+type DebugKey =
+	| "debug.title"
+	| "debug.copy"
+	| "debug.copied"
+	| "debug.rescan"
+	| "debug.systemPrompt"
+	| "debug.messages"
+	| "debug.rawResponse";
 
 export type ContentKey = Exclude<TextKey, RuleId>;
 
@@ -128,6 +139,13 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"ai.error.background_unavailable":
 			"Connexion impossible. Vérifiez votre réseau.",
 		"ai.error.default": "Une erreur est survenue. Réessayez plus tard.",
+		"debug.title": "Debug (superuser)",
+		"debug.copy": "Copier",
+		"debug.copied": "Copié",
+		"debug.rescan": "Relancer sans cache",
+		"debug.systemPrompt": "Prompt système",
+		"debug.messages": "Messages envoyés",
+		"debug.rawResponse": "Réponse brute",
 	},
 	nl: {
 		"level.low": "Laag risico",
@@ -194,6 +212,13 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"ai.error.background_unavailable":
 			"Geen verbinding mogelijk. Controleer je netwerk.",
 		"ai.error.default": "Er is een fout opgetreden. Probeer het later opnieuw.",
+		"debug.title": "Debug (superuser)",
+		"debug.copy": "Kopiëren",
+		"debug.copied": "Gekopieerd",
+		"debug.rescan": "Opnieuw zonder cache",
+		"debug.systemPrompt": "Systeemprompt",
+		"debug.messages": "Verzonden berichten",
+		"debug.rawResponse": "Ruw antwoord",
 	},
 };
 

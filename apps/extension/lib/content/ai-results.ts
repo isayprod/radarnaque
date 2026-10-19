@@ -65,6 +65,16 @@ export const withoutRemaining = (result: AnalysisResult): AnalysisResult => ({
 	remaining: { ...NO_REMAINING },
 });
 
+/**
+ * Le résultat tel qu'il est gardé : sans quota restant (I1) ni bloc `debug` du
+ * superuser, dont les prompts et la réponse brute ne vont jamais dans
+ * `storage.local`. Un résultat repris n'a donc pas de section Debug.
+ */
+export const toStored = ({
+	debug: _,
+	...result
+}: AnalysisResult): AnalysisResult => withoutRemaining(result);
+
 /** Stockage d'une valeur : `storage.defineItem` de WXT, ou un double en test. */
 export interface StorageAreaLike {
 	getValue(): Promise<Record<string, StoredAiEntry>>;
@@ -78,7 +88,7 @@ export interface StorageAreaLike {
  */
 export interface AiResultStore {
 	/**
-	 * Les types valables de l'annonce, sans quota restant ; null si aucun
+	 * Les types valables de l'annonce, sans quota restant ni debug ; null si aucun
 	 * (absent, expiré ou illisible).
 	 */
 	get(site: Site, externalId: string): Promise<StoredAiResults | null>;
@@ -232,8 +242,7 @@ export function createAiResultStore(
 				const results: StoredAiResults = {};
 				for (const kind of KINDS) {
 					const slot = entry[kind];
-					if (slot)
-						results[kind] = { ...slot, result: withoutRemaining(slot.result) };
+					if (slot) results[kind] = { ...slot, result: toStored(slot.result) };
 				}
 				return results;
 			}, null),
@@ -254,7 +263,7 @@ export function createAiResultStore(
 					[key]: {
 						...map[key],
 						v: 1,
-						[kind]: { ...entry, result: withoutRemaining(entry.result) },
+						[kind]: { ...entry, result: toStored(entry.result) },
 					},
 				};
 				for (const [k, value] of Object.entries(map))

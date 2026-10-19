@@ -9,6 +9,7 @@ import { RiskBadge } from "../components/RiskBadge";
 import {
 	type AccessCache,
 	createAccessCache,
+	isDebugCached,
 } from "../lib/content/access-policy";
 import { type AiClient, createAiClient } from "../lib/content/ai-client";
 import {
@@ -27,6 +28,7 @@ import {
 import { createController } from "../lib/content/controller";
 import { createUiFactory } from "../lib/content/ui-context";
 import { resolveContentLocale } from "../lib/content-i18n";
+import { createDebugLog, type DebugLog } from "../lib/debug-log";
 import type { Site } from "../lib/listing/types";
 import { localePref } from "../lib/storage";
 
@@ -35,6 +37,7 @@ function createReactRenderer(
 	ai: AiClient,
 	accessCache: AccessCache,
 	aiResults: AiResultStore,
+	debugLog: DebugLog,
 ): BadgeRenderer {
 	const root = createRoot(container);
 	return {
@@ -47,6 +50,7 @@ function createReactRenderer(
 					ai,
 					accessCache,
 					aiResults,
+					debugLog,
 				}),
 			),
 		unmount: () => root.unmount(),
@@ -101,6 +105,9 @@ export default defineContentScript({
 		const aiResults = createAiResultStore();
 		// M1 : entrées expirées retirées une fois au démarrage ; aucune écriture sinon.
 		void aiResults.prune();
+		// Logs de debug de la page (superuser) : décidés d'après le dernier accès
+		// en cache, relu à chaque log ; l'accès n'est jamais lu pour cela.
+		const debugLog = createDebugLog(() => isDebugCached(accessCache));
 		// Les UI ne s'abonnent pas à l'invalidation (une fuite par montage) : les
 		// `dispose()` ci-dessous les retirent toutes. R7 : pastille et icônes
 		// partagent un CSS chargé une seule fois, sans `<style>` dans la page.
@@ -111,9 +118,10 @@ export default defineContentScript({
 			mounter: createBadgeMounter({
 				createUi,
 				createRenderer: (container) =>
-					createReactRenderer(container, ai, accessCache, aiResults),
+					createReactRenderer(container, ai, accessCache, aiResults, debugLog),
 			}),
 			getLocale,
+			debugLog,
 		});
 		// Icônes des cartes de résultats, à côté de la pastille de fiche.
 		const cards = createCardController({
@@ -128,6 +136,7 @@ export default defineContentScript({
 			}),
 			getLocale,
 			win: window,
+			debugLog,
 		});
 		ctx.addEventListener(window, "wxt:locationchange", () => {
 			void controller.refresh();

@@ -25,7 +25,7 @@ import { aiErrorText, contentText } from "../lib/content-i18n";
 import type { Listing } from "../lib/listing/types";
 import type { ContentAccess } from "../lib/messages";
 import type { RiskReport } from "../lib/rules/score";
-import { sampleAnalysis } from "./helpers";
+import { debugAnalysis, sampleAnalysis, sampleDebug } from "./helpers";
 
 afterEach(cleanup);
 
@@ -746,6 +746,116 @@ describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
 		expect(
 			screen.queryByRole("button", { name: contentText("fr", "ai.runPhotos") }),
 		).toBeNull();
+	});
+});
+
+describe("RiskBadge : section Debug (superuser)", () => {
+	const superuser: ContentAccess = { ...active, unlimited: true, debug: true };
+	const debugTitle = contentText("fr", "debug.title");
+	const findRun = () =>
+		screen.findByRole("button", { name: contentText("fr", "ai.run") });
+
+	test("résultat sans debug : aucune section Debug", async () => {
+		const user = userEvent.setup();
+		ai.access.mockResolvedValue({ ok: true, data: superuser });
+		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await user.click(await findRun());
+		await screen.findByText(sampleAnalysis.summary.fr);
+		expect(screen.queryByText(debugTitle)).toBeNull();
+	});
+
+	test("debug reçu mais accès sans debug (compte ordinaire) : aucune section", async () => {
+		const user = userEvent.setup();
+		ai.scan.mockResolvedValue({ ok: true, data: debugAnalysis });
+		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await user.click(await findRun());
+		await screen.findByText(debugAnalysis.summary.fr);
+		expect(screen.queryByText(debugTitle)).toBeNull();
+	});
+
+	test("superuser, résultat avec debug : section en bas du panneau, modèle et prompt", async () => {
+		const user = userEvent.setup();
+		ai.access.mockResolvedValue({ ok: true, data: superuser });
+		ai.scan.mockResolvedValue({ ok: true, data: debugAnalysis });
+		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await user.click(await findRun());
+		const summary = await screen.findByText(debugTitle);
+		const dialog = screen.getByRole("dialog");
+		expect(dialog.textContent).toContain("fournisseur-test / modele-test");
+		expect(dialog.textContent).toContain("text v2");
+		expect(dialog.textContent).toContain(sampleDebug.systemPrompt);
+		// En bas du panneau, après le résultat IA.
+		expect(dialog.lastElementChild).toBe(summary.closest("details"));
+	});
+
+	test("« Relancer sans cache » : noCache: true, résultat gardé pendant la relance, puis remplacé", async () => {
+		const user = userEvent.setup();
+		ai.access.mockResolvedValue({ ok: true, data: superuser });
+		ai.scan.mockResolvedValueOnce({ ok: true, data: debugAnalysis });
+		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await user.click(await findRun());
+		await screen.findByText(debugTitle);
+
+		let answer!: (value: Awaited<ReturnType<AiClient["scan"]>>) => void;
+		ai.scan.mockReturnValueOnce(
+			new Promise((resolve) => {
+				answer = resolve;
+			}),
+		);
+		await user.click(
+			screen.getByRole("button", { name: contentText("fr", "debug.rescan") }),
+		);
+		expect(ai.scan).toHaveBeenCalledTimes(2);
+		expect(ai.scan.mock.calls[1]?.[0]).toEqual({
+			...ai.scan.mock.calls[0]?.[0],
+			noCache: true,
+		});
+		// Pendant la relance : le résultat reste, seul le bouton indique le chargement.
+		expect(screen.getByText(debugAnalysis.summary.fr)).toBeTruthy();
+		expect(
+			screen.getByRole("button", { name: contentText("fr", "ai.loading") }),
+		).toBeTruthy();
+		expect(toggle().textContent).toContain(contentText("fr", "ai.badgeTag"));
+
+		const fresh: AnalysisResult = {
+			...debugAnalysis,
+			score: 91,
+			summary: { fr: "Nouveau verdict.", nl: "Nieuw oordeel." },
+			debug: { ...sampleDebug, fromCache: false, model: "modele-2" },
+		};
+		await act(async () => answer({ ok: true, data: fresh }));
+		expect(screen.getByText("Nouveau verdict.")).toBeTruthy();
+		expect(screen.queryByText(debugAnalysis.summary.fr)).toBeNull();
+		expect(screen.getByRole("dialog").textContent).toContain("modele-2");
+		expect(
+			screen.getByRole("button", { name: contentText("fr", "debug.rescan") }),
+		).toBeTruthy();
+	});
+
+	test("« Copier » écrit le JSON du debug dans le presse-papiers", async () => {
+		const user = userEvent.setup();
+		ai.access.mockResolvedValue({ ok: true, data: superuser });
+		ai.scan.mockResolvedValue({ ok: true, data: debugAnalysis });
+		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await user.click(await findRun());
+		await screen.findByText(debugTitle);
+		const writeText = vi.spyOn(navigator.clipboard, "writeText");
+		await user.click(
+			screen.getByRole("button", { name: contentText("fr", "debug.copy") }),
+		);
+		expect(writeText).toHaveBeenCalledExactlyOnceWith(
+			JSON.stringify(sampleDebug, null, 2),
+		);
+		expect(
+			await screen.findByRole("button", {
+				name: contentText("fr", "debug.copied"),
+			}),
+		).toBeTruthy();
 	});
 });
 

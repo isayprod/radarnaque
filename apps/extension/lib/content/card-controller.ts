@@ -2,6 +2,7 @@ import type { Locale } from "@radarnaque/shared";
 import { canUse } from "../access";
 import { adapterFor } from "../adapters/registry";
 import type { CardRef, MarketplaceAdapter } from "../adapters/types";
+import type { DebugLog } from "../debug-log";
 import type { Listing, Site } from "../listing/types";
 import {
 	type AccessCache,
@@ -10,7 +11,7 @@ import {
 	isContentAccess,
 	RELOGIN_CODES,
 } from "./access-policy";
-import type { AiClient, ScanState } from "./ai-client";
+import { type AiClient, type ScanState, scanOutcome } from "./ai-client";
 import {
 	type AiResultStore,
 	listingFingerprint,
@@ -65,6 +66,8 @@ export interface CardControllerDeps {
 	scan?: typeof scanCard;
 	fetchPage?: (url: string) => Promise<string>;
 	log?: (msg: string) => void;
+	/** Logs du superuser, passés au scan de la carte ; aucun par défaut. */
+	debugLog?: DebugLog;
 }
 
 interface Tracked {
@@ -239,6 +242,7 @@ export function createCardController(deps: CardControllerDeps): {
 			ai: deps.ai,
 			fetchPage,
 			onListing,
+			debugLog: deps.debugLog,
 		})
 			.then(
 				(response): ScanState =>
@@ -248,6 +252,7 @@ export function createCardController(deps: CardControllerDeps): {
 				(): ScanState => ({ status: "error", code: "background_unavailable" }),
 			)
 			.then((state) => {
+				deps.debugLog?.group("scan reçu", scanOutcome(state));
 				// Gardé 24 h avec l'empreinte de l'annonce analysée (fiche ou carte).
 				if (state.status === "done" && scanned)
 					void deps.aiResults

@@ -1,3 +1,4 @@
+import { isDebug } from "../access";
 import type { ContentAccess } from "../messages";
 
 /** Accès lu : la réponse du service worker, ou le code de l'erreur. */
@@ -81,4 +82,14 @@ export function createAccessCache(
 			floor = nextSeq;
 		},
 	};
+}
+
+/**
+ * Logs de debug de la page : vrai si l'accès déjà en cache est celui d'un
+ * superuser. Ne lit jamais l'accès : sans lecture préalable (panneau, icônes de
+ * cartes), rien n'est journalisé.
+ */
+export function isDebugCached(cache: AccessCache): boolean {
+	const reading = cache.current();
+	return isContentAccess(reading) && isDebug(reading);
 }
