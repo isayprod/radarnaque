@@ -561,6 +561,18 @@ async def test_llm_failure_gives_502_and_returns_the_scan(engine, http, clock):
     assert await _count(engine, ScanResult) == 0 and await _count(engine, Analysis) == 0
 
 
+async def test_llm_timeout_gives_502_timeout_and_returns_the_scan(engine, http, clock):
+    llm = FakeLLM(error=LLMError("timeout", "openai-oauth"))
+    user = await _user(engine)
+    before = await _remaining_total(engine, user, clock())
+    with pytest.raises(ScanError) as info:
+        await _scan_once(engine, user, _scan(), llm, http, clock)
+    assert (info.value.status, info.value.code) == (502, "analysis_failed")
+    assert info.value.details == {"reason": "timeout"}
+    assert (await _scalar(engine, select(ScanFailure))).error_code == "timeout"
+    assert await _remaining_total(engine, user, clock()) == before
+
+
 async def test_invalid_llm_response_gives_502_invalid_response(engine, http, clock):
     llm = FakeLLM(error=LLMError("invalid_response", "openrouter"))
     user = await _user(engine)

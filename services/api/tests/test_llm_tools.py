@@ -426,7 +426,7 @@ async def test_error_event_in_stream_is_transport_without_leak():
     assert len(proxy.bodies) == 2  # aucun événement émis : une nouvelle tentative
 
 
-async def test_round_timeout_is_transport(monkeypatch):
+async def test_round_timeout_is_timeout(monkeypatch):
     class SlowStream(httpx.AsyncByteStream):
         async def __aiter__(self) -> AsyncIterator[bytes]:
             import asyncio
@@ -442,9 +442,60 @@ async def test_round_timeout_is_transport(monkeypatch):
     )
     with pytest.raises(LLMError) as info:
         await _run(proxy)
-    assert info.value.code == "transport"
+    # Spec §11 : un tour au-delà de 90 s donne `timeout` dans les détails, pas `transport`.
+    assert info.value.code == "timeout"
+    assert "délai" in str(info.value)
     _assert_not_chained(info.value)
-    assert len(proxy.bodies) == 2
+    assert len(proxy.bodies) == 2  # aucun événement émis : une nouvelle tentative
+
+
+async def test_round_timeout_after_an_event_is_timeout_without_retry(monkeypatch):
+    head = (FIXTURES / "responses_cut_after_thinking.sse").read_bytes()
+
+    class StallingStream(httpx.AsyncByteStream):
+        async def __aiter__(self) -> AsyncIterator[bytes]:
+            import asyncio
+
+            yield head
+            await asyncio.sleep(5)
+
+    monkeypatch.setattr(client_module, "TIMEOUT_S", 0.05)
+    proxy = Proxy(
+        lambda: httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, stream=StallingStream()
+        )
+    )
+    sink = Recorder()
+    with pytest.raises(LLMError) as info:
+        await _run(proxy, sink=sink)
+    assert info.value.code == "timeout"
+    assert len(proxy.bodies) == 1
+    assert sink.events == [Thinking(0, "Vérif")]
+
+
+async def test_sdk_read_timeout_is_timeout():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("lent", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = OpenAICompatibleClient(_provider(), {}, http_client=http)
+        with pytest.raises(LLMError) as info:
+            await client.analyze(model="gpt-test", system_prompt="SYS", messages=MESSAGES)
+    assert info.value.code == "timeout"
+    _assert_not_chained(info.value)
+
+
+async def test_event_sink_error_propagates_without_retry():
+    class SinkBug(ValueError):
+        pass
+
+    async def failing_sink(event: LLMEvent) -> None:
+        raise SinkBug("récepteur cassé")
+
+    proxy = Proxy("responses_reasoning_final.sse")
+    with pytest.raises(SinkBug):
+        await _run(proxy, sink=failing_sink)  # type: ignore[arg-type]
+    assert len(proxy.bodies) == 1  # ni réponse invalide, ni nouvelle tentative
 
 
 async def test_tokens_summed_across_rounds():
