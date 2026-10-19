@@ -92,6 +92,86 @@ async def test_results_without_valid_url_are_skipped():
     assert [h.title for h in hits] == ["ok"]
 
 
+async def test_malformed_url_is_skipped_not_fatal():
+    payload = {
+        "results": [
+            {"title": "ipv6 cassée", "url": "http://[::1", "score": 9},
+            {"title": "ok", "url": "https://ok.example/", "score": 1},
+        ]
+    }
+    hits = await _backend(lambda r: httpx.Response(200, json=payload)).search("x")
+    assert [h.title for h in hits] == ["ok"]
+
+
+async def test_weird_scores_do_not_break_sorting():
+    # json.loads accepte NaN et les entiers géants ; 1e400 devient inf.
+    body = (
+        b'{"results": ['
+        b'{"title": "nan", "url": "https://a.example/", "score": NaN},'
+        b'{"title": "inf", "url": "https://b.example/", "score": 1e400},'
+        b'{"title": "geant", "url": "https://c.example/", "score": 1' + b"0" * 400 + b"},"
+        b'{"title": "texte", "url": "https://d.example/", "score": "haut"},'
+        b'{"title": "bon", "url": "https://e.example/", "score": 5}'
+        b"]}"
+    )
+    hits = await _backend(lambda r: httpx.Response(200, content=body)).search("x")
+    assert hits[0].title == "bon"  # les autres valent 0, dans l'ordre du moteur
+    assert [h.title for h in hits[1:]] == ["nan", "inf", "geant", "texte"]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://a.example/avec espace",
+        "https://a.example/tab\there",
+        "https://a.example/nul\x00",
+        "https://a.example/del\x7f",
+        "https://a.example/" + "x" * 300,
+    ],
+)
+async def test_bad_urls_are_skipped(url):
+    payload = {
+        "results": [
+            {"title": "mauvaise", "url": url, "score": 9},
+            {"title": "ok", "url": "https://ok.example/" + "y" * 100, "score": 1},
+        ]
+    }
+    hits = await _backend(lambda r: httpx.Response(200, json=payload)).search("x")
+    assert [h.title for h in hits] == ["ok"]
+
+
+async def test_url_of_exactly_300_characters_is_kept():
+    url = "https://a.example/" + "x" * (300 - len("https://a.example/"))
+    payload = {"results": [{"title": "limite", "url": url}]}
+    hits = await _backend(lambda r: httpx.Response(200, json=payload)).search("x")
+    assert [h.url for h in hits] == [url]
+
+
+async def test_empty_results_are_not_cached():
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"results": []})
+
+    backend = _backend(handler)
+    assert await backend.search("x") == []
+    assert await backend.search("x") == []
+    assert calls == 2
+
+
+async def test_unexpected_parsing_error_becomes_unavailable(monkeypatch):
+    import radarnaque_api.search as search
+
+    def boom(body):
+        raise RuntimeError("imprévu")
+
+    monkeypatch.setattr(search, "_parse_hits", boom)
+    with pytest.raises(SearchUnavailable):
+        await _backend(lambda r: httpx.Response(200, json=_results(1))).search("x")
+
+
 async def test_cache_hit_no_second_request():
     calls = 0
     clock = Clock()
