@@ -3,10 +3,15 @@
 Déroulé, dans cet ordre : 1. limite de requêtes, 2. droits, 3. validation de l'annonce,
 4. snapshot masqué, 5. réservation du quota (le `scan_event`), 6. cache, 7. analyse sous verrou
 consultatif. Toute erreur après la réservation enregistre un `scan_failures`, qui rend le scan à
-l'utilisateur : ni un fournisseur en panne ni un bogue du serveur ne consomment son quota."""
+l'utilisateur : ni un fournisseur en panne ni un bogue du serveur ne consomment son quota.
+
+Superuser hors production (`privileges.debug`) : la réponse porte un bloc `debug`, aussi écrit
+dans le logger `radarnaque.debug`, et `noCache` relance l'analyse sans consulter le cache."""
 
 import asyncio
+import json
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -29,7 +34,7 @@ from radarnaque_api.images import (
     is_allowed_url,
 )
 from radarnaque_api.llm.client import LLMClient, LLMError
-from radarnaque_api.llm.payload import build_messages
+from radarnaque_api.llm.payload import build_messages, summarize_messages
 from radarnaque_api.llm.providers import ProviderError
 from radarnaque_api.models import (
     Analysis,
@@ -43,9 +48,19 @@ from radarnaque_api.models import (
     SiteImageHost,
     Subscription,
 )
-from radarnaque_api.schemas import AnalysisResultOut, RemainingOut, RiskLevel, ScanIn
+from radarnaque_api.schemas import (
+    AnalysisResultOut,
+    DebugMessageOut,
+    DebugTimingsOut,
+    PromptVersionDebugOut,
+    RemainingOut,
+    RiskLevel,
+    ScanDebugOut,
+    ScanIn,
+)
 from radarnaque_api.services.hashing import input_hash
 from radarnaque_api.services.scan_store import (
+    ActiveSetup,
     CacheKey,
     active_setup,
     load_analysis,
@@ -62,6 +77,9 @@ CARD_ICONS_FEATURE = "card_icons"
 INTERNAL_FAILURE = "internal"
 
 logger = logging.getLogger(__name__)
+# Logs détaillés du superuser hors production ; son gestionnaire console est posé par
+# `create_app` (jamais en production).
+debug_logger = logging.getLogger("radarnaque.debug")
 
 
 class ScanError(ApiError):
@@ -117,8 +135,24 @@ class _Admission:
     event_id: int
     event_at: datetime
     snapshot_id: int
+    content_hash: str
     image_host_suffixes: list[str]
     cache_ttl: timedelta
+
+
+@dataclass(frozen=True)
+class _Trace:
+    """Ce que le service a fait d'un scan de superuser, pour son bloc `debug`. `messages` est
+    déjà résumé (photos en `[image n : …]`) : aucune donnée base64 ni secret n'y figure."""
+
+    setup: ActiveSetup
+    key: CacheKey
+    system_prompt: str
+    messages: list[dict[str, str]]
+    raw_response: str | None
+    llm_called: bool
+    images_ms: int | None
+    llm_ms: int | None
 
 
 def _invalid_listing(field: str) -> ScanError:
@@ -247,13 +281,14 @@ async def _admit(
     if not privileges.all_features:
         await _check_rights(session, user.id, scan)
     site_id, suffixes = await _validated_site(session, scan)
-    snapshot_id = await upsert_snapshot(session, site_id, scan.listing, now())
+    snapshot_id, digest = await upsert_snapshot(session, site_id, scan.listing, now())
     event_at = now()  # date de l'événement, et de l'analyse qu'il produira (règle R8)
     event_id = await _reserve(session, user, privileges, scan, event_at, rate_limit)
     return _Admission(
         event_id=event_id,
         event_at=event_at,
         snapshot_id=snapshot_id,
+        content_hash=digest,
         image_host_suffixes=suffixes,
         cache_ttl=cache_ttl,
     )
@@ -267,12 +302,20 @@ async def _serve(
     maker: async_sessionmaker[AsyncSession],
     admission: _Admission,
     scan: ScanIn,
+    privileges: Privileges,
     *,
     llm_for: Callable[[str], LLMClient],
     http: httpx.AsyncClient,
     resolve: Resolver,
-) -> None:
-    """Étapes 6 et 7 : relie l'événement à une analyse, en cache ou nouvelle."""
+) -> _Trace | None:
+    """Étapes 6 et 7 : relie l'événement à une analyse, en cache ou nouvelle. Renvoie la trace
+    du scan pour le bloc debug, `None` sans le privilège `debug`.
+
+    `noCache` (superuser hors production seulement) saute les deux lectures du cache : le LLM
+    est rappelé et l'analyse enregistrée par `save_analysis`, qui rafraîchit sur place l'entrée
+    existante (règle R4), sous le même verrou consultatif."""
+    debug = privileges.debug
+    fresh = debug and scan.no_cache
     async with maker() as session:
         setup = await active_setup(session, scan.scan_kind)
         if setup is None:
@@ -283,11 +326,16 @@ async def _serve(
             prompt_version_id=setup.prompt_version_id,
             input_hash=input_hash(scan),
         )
-        cached = await valid_analysis_id(session, key, admission.event_at, admission.cache_ttl)
+        cached = (
+            None
+            if fresh
+            else await valid_analysis_id(session, key, admission.event_at, admission.cache_ttl)
+        )
         if cached is not None:
+            trace = _cached_trace(setup, key, scan, llm_for) if debug else None
             _link(session, admission.event_id, cached)
             await session.commit()
-            return
+            return trace
 
     # Nouvelle connexion : le verrou consultatif, propre à la clé du cache, est libéré par le
     # commit (ou le rollback). Un scan concurrent de la même annonce l'attend, puis trouve
@@ -296,27 +344,83 @@ async def _serve(
         await session.execute(
             select(func.pg_advisory_xact_lock(func.hashtextextended(key.lock_name(), 0)))
         )
-        analysis_id = await valid_analysis_id(session, key, admission.event_at, admission.cache_ttl)
+        analysis_id = (
+            None
+            if fresh
+            else await valid_analysis_id(session, key, admission.event_at, admission.cache_ttl)
+        )
         if analysis_id is None:
             llm = llm_for(setup.provider)
-            images = (
-                await fetch_images(
+            images_ms: int | None = None
+            images: list[str] = []
+            if scan.scan_kind == "image":
+                started = time.perf_counter()
+                images = await fetch_images(
                     [str(url) for url in scan.listing.images],
                     admission.image_host_suffixes,
                     http=http,
                     resolve=resolve,
                     limit=_image_limit(llm),
                 )
-                if scan.scan_kind == "image"
-                else []
-            )
+                images_ms = _elapsed_ms(started)
+            messages = build_messages(scan.listing, scan.rules, images)
+            started = time.perf_counter()
             result = await llm.analyze(
-                model=setup.slug,
-                system_prompt=setup.system_prompt,
-                messages=build_messages(scan.listing, scan.rules, images),
+                model=setup.slug, system_prompt=setup.system_prompt, messages=messages
             )
+            llm_ms = _elapsed_ms(started)
             analysis_id = await save_analysis(session, key, scan, result, admission.event_at)
+            trace = (
+                _Trace(
+                    setup=setup,
+                    key=key,
+                    # Un faux client (tests) peut ne pas renseigner le prompt envoyé.
+                    system_prompt=result.system_prompt
+                    or _final_system_prompt(llm, setup.system_prompt),
+                    messages=summarize_messages(messages),
+                    raw_response=result.raw_text,
+                    llm_called=True,
+                    images_ms=images_ms,
+                    llm_ms=llm_ms,
+                )
+                if debug
+                else None
+            )
+        else:  # analysée par un scan concurrent pendant l'attente du verrou
+            trace = _cached_trace(setup, key, scan, llm_for) if debug else None
         _link(session, admission.event_id, analysis_id)
+    return trace
+
+
+def _elapsed_ms(started: float) -> int:
+    return round((time.perf_counter() - started) * 1000)
+
+
+def _final_system_prompt(llm: LLMClient, system_prompt: str) -> str:
+    """Prompt système tel que le client l'enverrait (schéma ajouté en mode `json_object`). Un
+    client sans `final_system_prompt` (faux client des tests) l'envoie tel quel."""
+    final = getattr(llm, "final_system_prompt", None)
+    return system_prompt if final is None else final(system_prompt)
+
+
+def _cached_trace(
+    setup: ActiveSetup, key: CacheKey, scan: ScanIn, llm_for: Callable[[str], LLMClient]
+) -> _Trace:
+    """Trace d'un scan servi par le cache : les messages qui auraient été envoyés, construits
+    sans appel au LLM ni téléchargement des photos (résumées comme non téléchargées)."""
+    llm = llm_for(setup.provider)
+    pending = min(len(scan.listing.images), _image_limit(llm)) if scan.scan_kind == "image" else 0
+    messages = build_messages(scan.listing, scan.rules, [])
+    return _Trace(
+        setup=setup,
+        key=key,
+        system_prompt=_final_system_prompt(llm, setup.system_prompt),
+        messages=summarize_messages(messages, cached_images=pending),
+        raw_response=None,
+        llm_called=False,
+        images_ms=None,
+        llm_ms=None,
+    )
 
 
 def _image_limit(llm: LLMClient) -> int:
@@ -385,10 +489,66 @@ async def _remaining(
     )
 
 
+def _debug_block(
+    trace: _Trace,
+    admission: _Admission,
+    scan: ScanIn,
+    analysis: Analysis,
+    from_cache: bool,
+    started: float,
+) -> ScanDebugOut:
+    """Bloc debug du superuser : jetons et coût de l'analyse servie, empreintes et identifiants
+    du déroulé, durée totale depuis le début de `run_scan`."""
+    return ScanDebugOut(
+        provider=trace.setup.provider,
+        model=trace.setup.slug,
+        prompt_version=PromptVersionDebugOut(
+            scan_kind=scan.scan_kind, version=trace.setup.prompt_version
+        ),
+        system_prompt=trace.system_prompt,
+        messages=[DebugMessageOut(**message) for message in trace.messages],
+        raw_response=trace.raw_response,
+        llm_called=trace.llm_called,
+        from_cache=from_cache,
+        tokens_in=analysis.tokens_in,
+        tokens_out=analysis.tokens_out,
+        cost_usd_micros=analysis.cost_usd_micros,
+        timings_ms=DebugTimingsOut(
+            images=trace.images_ms, llm=trace.llm_ms, total=_elapsed_ms(started)
+        ),
+        content_hash=admission.content_hash,
+        input_hash=trace.key.input_hash,
+        snapshot_id=admission.snapshot_id,
+        analysis_id=analysis.id,
+    )
+
+
+def _log_debug(scan: ScanIn, debug: ScanDebugOut) -> None:
+    """Un enregistrement par scan de superuser : en-tête, puis le bloc `debug` en JSON indenté.
+    Le bloc ne contient ni secret ni photo en base64 (voir `ScanDebugOut`)."""
+    listing = scan.listing
+    debug_logger.info(
+        "[debug superuser] scan %s %s|%s\n%s",
+        scan.scan_kind,
+        listing.site,
+        listing.external_id,
+        json.dumps(debug.model_dump(mode="json", by_alias=True), ensure_ascii=False, indent=2),
+    )
+
+
 async def _result(
-    engine: AsyncEngine, user: AuthUser, privileges: Privileges, event_id: int, at: datetime
+    engine: AsyncEngine,
+    user: AuthUser,
+    privileges: Privileges,
+    admission: _Admission,
+    scan: ScanIn,
+    at: datetime,
+    *,
+    trace: _Trace | None = None,
+    started: float = 0.0,
 ) -> AnalysisResultOut:
-    """Réponse du scan `event_id`, déjà relié à son analyse.
+    """Réponse du scan de `admission`, déjà relié à son analyse ; avec `trace` (superuser hors
+    production), elle porte le bloc `debug`, `started` donnant le début du scan.
 
     Appelée après le commit du `scan_result` : si elle échoue (base indisponible…), l'erreur
     remonte (500) mais le scan reste décompté et l'analyse conservée. C'est voulu : l'analyse a
@@ -401,7 +561,7 @@ async def _result(
             await session.execute(
                 select(Analysis, from_cache_expr())
                 .join(ScanResult, ScanResult.analysis_id == Analysis.id)
-                .where(ScanResult.scan_event_id == event_id)
+                .where(ScanResult.scan_event_id == admission.event_id)
             )
         ).one()
         texts = await load_analysis(session, analysis.id)
@@ -418,6 +578,9 @@ async def _result(
         reasons=texts.reasons,
         analyzed_at=analysis.created_at,
         remaining=remaining,
+        debug=None
+        if trace is None
+        else _debug_block(trace, admission, scan, analysis, from_cache, started),
     )
 
 
@@ -440,13 +603,17 @@ async def run_scan(
     est le client dédié aux photos (règles R6/R7 : `trust_env=False`, `follow_redirects=False`,
     ni en-têtes, ni cookies, ni authentification partagés), jamais celui du LLM. `resolve`
     remplace la résolution DNS des hôtes d'images (tests)."""
+    started = time.perf_counter()
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as session:
         admission = await _admit(session, user, privileges, scan, now)
 
     failure: Exception | None = None
+    trace: _Trace | None = None
     try:
-        await _serve(maker, admission, scan, llm_for=llm_for, http=http, resolve=resolve)
+        trace = await _serve(
+            maker, admission, scan, privileges, llm_for=llm_for, http=http, resolve=resolve
+        )
     except asyncio.CancelledError:
         # Annulation (client parti, arrêt du serveur) : une `BaseException`, que `except
         # Exception` laisserait passer. Le scan est rendu sous `shield`, pour que l'écriture
@@ -458,4 +625,9 @@ async def run_scan(
     if failure is not None:  # hors du `except` : aucun contexte chaîné à l'erreur rendue
         await _give_back(maker, admission.event_id, failure, now())
 
-    return await _result(engine, user, privileges, admission.event_id, now())
+    result = await _result(
+        engine, user, privileges, admission, scan, now(), trace=trace, started=started
+    )
+    if result.debug is not None:
+        _log_debug(scan, result.debug)
+    return result

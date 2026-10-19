@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -118,12 +118,22 @@ ScanKindCode = Literal["text", "image"]
 TriggerCode = Literal["button", "card"]
 
 
+def _drop_default(schema: dict[str, Any]) -> None:
+    """Retire `default` du schéma JSON d'un champ facultatif (voir `ScanIn.no_cache`)."""
+    schema.pop("default", None)
+
+
 class ScanIn(CamelInModel):
     listing: ListingIn
     rules: RulesIn
     scan_kind: ScanKindCode
     trigger: TriggerCode
     partial: bool = False
+    # Relance sans cache : honorée seulement pour un superuser hors production, ignorée sans
+    # erreur pour tout autre compte. Hors des empreintes du cache (rien n'est envoyé au LLM).
+    # Sans `default` dans le schéma OpenAPI : openapi-typescript rendrait sinon le champ
+    # obligatoire, alors que l'extension ne l'envoie que lorsqu'il est vrai.
+    no_cache: bool = Field(default=False, json_schema_extra=_drop_default)
 
 
 RiskLevel = Literal["low", "medium", "high"]
@@ -147,6 +157,50 @@ class RemainingOut(CamelModel):
     total: int | None
 
 
+class PromptVersionDebugOut(CamelModel):
+    scan_kind: ScanKindCode
+    version: int
+
+
+class DebugMessageOut(CamelModel):
+    """Message envoyé au LLM, en texte : chaque photo y est résumée (`[image n : N octets]`)."""
+
+    role: str
+    content: str
+
+
+class DebugTimingsOut(CamelModel):
+    """Durées en millisecondes ; `None` pour une étape sautée (pas de photo, cache)."""
+
+    images: int | None
+    llm: int | None
+    total: int
+
+
+class ScanDebugOut(CamelModel):
+    """Bloc de débogage du superuser hors production. Jamais de clé d'API, d'en-tête
+    `Authorization`, de jeton ni de photo en base64. `system_prompt` : le texte réellement
+    envoyé (schéma compris en mode `json_object`) ; `raw_response` : la réponse brute du modèle,
+    `None` si le LLM n'a pas été appelé. Les jetons et le coût sont ceux de l'analyse servie."""
+
+    provider: str
+    model: str
+    prompt_version: PromptVersionDebugOut
+    system_prompt: str
+    messages: list[DebugMessageOut]
+    raw_response: str | None
+    llm_called: bool
+    from_cache: bool
+    tokens_in: int
+    tokens_out: int
+    cost_usd_micros: int
+    timings_ms: DebugTimingsOut
+    content_hash: str
+    input_hash: str
+    snapshot_id: int
+    analysis_id: int
+
+
 class AnalysisResultOut(CamelModel):
     analysis_id: int
     score: int
@@ -160,6 +214,8 @@ class AnalysisResultOut(CamelModel):
     reasons: list[AnalysisReasonOut]
     analyzed_at: datetime
     remaining: RemainingOut
+    # Seulement pour un superuser hors production ; `None` (null) pour tout autre compte.
+    debug: ScanDebugOut | None = None
 
 
 class ScanHistoryItemOut(CamelModel):

@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import io
+import json
 import logging
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
@@ -16,8 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from radarnaque_api.auth.privileges import privileges_of
 from radarnaque_api.config import Settings
 from radarnaque_api.errors import ApiError
-from radarnaque_api.llm.client import Bilingual, LLMAnalysis, LLMError, LLMReason, LLMResult
-from radarnaque_api.llm.providers import ProviderError
+from radarnaque_api.llm.client import (
+    Bilingual,
+    LLMAnalysis,
+    LLMError,
+    LLMReason,
+    LLMResult,
+    OpenAICompatibleClient,
+)
+from radarnaque_api.llm.providers import ProviderConfig, ProviderError
 from radarnaque_api.models import (
     Analysis,
     AnalysisReason,
@@ -100,6 +109,7 @@ class FakeLLM:
             tokens_in=100 * n,
             tokens_out=10 * n,
             cost_usd_micros=42 * n,
+            raw_text=f'{{"score": {60 + n}}}',
         )
 
 
@@ -951,3 +961,296 @@ async def test_rate_limit_is_atomic_under_concurrency(engine, http, clock, llm):
     limited = [r for r in results if isinstance(r, ScanError) and r.code == "rate_limited"]
     assert (len(successes), len(limited)) == (1, 3), results
     assert await _count(engine, ScanEvent, ScanEvent.user_id == admin.id) == 30
+
+
+# --- Bloc debug, logs et relance sans cache (superuser hors production) -------------------------
+
+DEBUG_LOGGER = "radarnaque.debug"
+SECRET_KEY = "sk-test-secret"
+LLM_BASE = "https://llm.test/v1"
+
+
+@pytest.fixture
+def debug_log(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """Capture le logger de debug même quand `create_app` lui a retiré la propagation (le
+    gestionnaire de `caplog` n'est attaché qu'à la racine)."""
+    logger = logging.getLogger(DEBUG_LOGGER)
+    caplog.set_level(logging.INFO, logger=DEBUG_LOGGER)
+    # Sans propagation, chaque enregistrement n'est capturé qu'une fois, quel que soit l'état
+    # laissé par une application créée plus tôt dans la session.
+    propagate, logger.propagate = logger.propagate, False
+    logger.addHandler(caplog.handler)
+    try:
+        yield caplog
+    finally:
+        logger.removeHandler(caplog.handler)
+        logger.propagate = propagate
+
+
+def _debug_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.name == DEBUG_LOGGER]
+
+
+def _b64_size(b64: str) -> int:
+    return len(base64.b64decode(b64))
+
+
+async def test_superuser_scan_has_a_debug_block(engine, http, clock, llm):
+    superuser = await _user(engine, role="superuser", plan=None)
+    scan = _scan()
+
+    result = await _scan_once(engine, superuser, scan, llm, http, clock)
+
+    debug = result.debug
+    assert debug is not None
+    assert (debug.provider, debug.model) == ("openrouter", "google/gemini-2.5-flash-lite")
+    assert (debug.prompt_version.scan_kind, debug.prompt_version.version) == ("text", 2)
+    assert debug.system_prompt == llm.calls[0]["system_prompt"]
+    sent = llm.calls[0]["messages"]
+    assert debug.messages[0].model_dump() == {
+        "role": "user",
+        "content": sent[0]["content"][0]["text"],
+    }
+    assert len(debug.messages) == 1
+    assert debug.raw_response == '{"score": 61}'
+    assert debug.llm_called is True and debug.from_cache is False
+    assert (debug.tokens_in, debug.tokens_out, debug.cost_usd_micros) == (100, 10, 42)
+    assert debug.timings_ms.images is None
+    assert isinstance(debug.timings_ms.llm, int) and debug.timings_ms.llm >= 0
+    assert debug.timings_ms.total >= debug.timings_ms.llm
+    analysis = await _scalar(engine, select(Analysis).where(Analysis.id == result.analysis_id))
+    snapshot = await _scalar(
+        engine, select(ListingSnapshot).where(ListingSnapshot.id == analysis.snapshot_id)
+    )
+    assert debug.analysis_id == result.analysis_id
+    assert debug.snapshot_id == snapshot.id
+    assert debug.content_hash == snapshot.content_hash
+    assert debug.input_hash == analysis.input_hash
+    # Sérialisé en camelCase, comme le reste de la réponse.
+    dumped = result.model_dump(mode="json", by_alias=True)["debug"]
+    assert {"promptVersion", "systemPrompt", "rawResponse", "llmCalled", "timingsMs"} <= set(dumped)
+    assert dumped["promptVersion"] == {"scanKind": "text", "version": 2}
+
+
+@pytest.mark.parametrize(("role", "plan"), [("admin", None), ("user", "trial")])
+async def test_no_debug_block_for_admin_or_user(engine, http, clock, llm, role, plan):
+    user = await _user(engine, role=role, plan=plan)
+    result = await _scan_once(engine, user, _scan(), llm, http, clock)
+    assert result.debug is None
+
+
+async def test_no_debug_block_for_a_superuser_in_production(engine, http, clock, llm):
+    superuser = await _user(engine, role="superuser")
+    result = await _scan_once(
+        engine, superuser, _scan(), llm, http, clock, settings=PRODUCTION_SETTINGS
+    )
+    assert result.debug is None
+
+
+async def test_debug_block_summarizes_images_by_size(engine, http, mock, clock, llm):
+    for url in IMAGE_URLS:
+        mock.get(url).respond(200, content=_png(), headers={"content-type": "image/png"})
+    superuser = await _user(engine, role="superuser", plan=None)
+
+    result = await _scan_once(
+        engine, superuser, _scan(images=IMAGE_URLS, scanKind="image"), llm, http, clock
+    )
+
+    parts = llm.calls[0]["messages"][0]["content"]
+    sizes = [_b64_size(p["image_url"]["url"].split("base64,", 1)[1]) for p in parts[1:]]
+    content = result.debug.messages[0].content
+    assert content == "\n".join(
+        [parts[0]["text"], f"[image 1 : {sizes[0]} octets]", f"[image 2 : {sizes[1]} octets]"]
+    )
+    assert "base64" not in result.model_dump_json()
+    assert isinstance(result.debug.timings_ms.images, int)
+    assert (result.debug.prompt_version.scan_kind, result.debug.model) == (
+        "image",
+        "google/gemini-3.1-flash-lite",
+    )
+
+
+async def test_debug_block_from_cache_shows_the_messages_without_calling_the_llm(
+    engine, http, mock, clock, llm
+):
+    routes = [
+        mock.get(url).respond(200, content=_png(), headers={"content-type": "image/png"})
+        for url in IMAGE_URLS
+    ]
+    superuser = await _user(engine, role="superuser", plan=None)
+    scan = _scan(images=IMAGE_URLS, scanKind="image")
+    first = await _scan_once(engine, superuser, scan, llm, http, clock)
+    clock.advance(seconds=1)
+
+    second = await _scan_once(engine, superuser, scan, llm, http, clock)
+
+    assert len(llm.calls) == 1 and second.from_cache is True
+    assert [r.call_count for r in routes] == [1, 1]  # aucune photo retéléchargée
+    debug = second.debug
+    assert debug.llm_called is False and debug.from_cache is True
+    assert debug.raw_response is None
+    assert debug.timings_ms.images is None and debug.timings_ms.llm is None
+    assert debug.system_prompt == first.debug.system_prompt
+    text = llm.calls[0]["messages"][0]["content"][0]["text"]
+    assert debug.messages[0].content == "\n".join(
+        [text, "[image 1 : non téléchargée (cache)]", "[image 2 : non téléchargée (cache)]"]
+    )
+    assert debug.analysis_id == first.analysis_id
+    assert (debug.input_hash, debug.content_hash) == (
+        first.debug.input_hash,
+        first.debug.content_hash,
+    )
+    # Coût de l'analyse servie (celle du premier appel).
+    assert (debug.tokens_in, debug.cost_usd_micros) == (100, 42)
+
+
+async def test_cached_debug_system_prompt_uses_the_client_helper(engine, http, clock, llm):
+    superuser = await _user(engine, role="superuser", plan=None)
+    await _scan_once(engine, superuser, _scan(), llm, http, clock)
+    clock.advance(seconds=1)
+    llm.final_system_prompt = lambda prompt: f"{prompt}\n<schéma>"  # type: ignore[attr-defined]
+
+    cached = await _scan_once(engine, superuser, _scan(), llm, http, clock)
+
+    assert cached.debug.llm_called is False
+    assert cached.debug.system_prompt == f"{llm.calls[0]['system_prompt']}\n<schéma>"
+
+
+async def test_superuser_no_cache_calls_the_llm_again_and_refreshes_in_place(
+    engine, http, clock, llm
+):
+    superuser = await _user(engine, role="superuser", plan=None)
+    first = await _scan_once(engine, superuser, _scan(), llm, http, clock)
+    clock.advance(seconds=1)
+
+    again = await _scan_once(engine, superuser, _scan(noCache=True), llm, http, clock)
+
+    assert len(llm.calls) == 2
+    assert again.analysis_id == first.analysis_id  # rafraîchie sur place (règle R4)
+    assert again.from_cache is False and again.score == 62
+    assert again.analyzed_at == T0 + timedelta(seconds=1)
+    assert again.debug.llm_called is True and again.debug.raw_response == '{"score": 62}'
+    assert await _count(engine, Analysis) == 1
+    aid = first.analysis_id
+    assert await _count(engine, ScanResult, ScanResult.analysis_id == aid) == 2
+
+    clock.advance(seconds=1)
+    third = await _scan_once(engine, superuser, _scan(), llm, http, clock)
+    assert len(llm.calls) == 2 and third.from_cache is True and third.score == 62
+
+
+async def test_no_cache_from_a_user_is_ignored(engine, http, clock, llm):
+    user = await _user(engine)
+    first = await _scan_once(engine, user, _scan(), llm, http, clock)
+    clock.advance(seconds=1)
+
+    second = await _scan_once(engine, user, _scan(noCache=True), llm, http, clock)
+
+    assert len(llm.calls) == 1
+    assert second.from_cache is True and second.analysis_id == first.analysis_id
+    assert second.debug is None
+    assert (first.remaining.total, second.remaining.total) == (2, 1)  # quota normal
+
+
+@pytest.mark.parametrize("role", ["admin", "superuser"])
+async def test_no_cache_is_ignored_without_debug_privileges(engine, http, clock, llm, role):
+    # Admin partout, et superuser en production : pas de relance sans cache.
+    user = await _user(engine, role=role)
+    for _ in range(2):
+        await _scan_once(
+            engine, user, _scan(noCache=True), llm, http, clock, settings=PRODUCTION_SETTINGS
+        )
+        clock.advance(seconds=1)
+    assert len(llm.calls) == 1
+
+
+async def test_superuser_scan_is_logged_with_its_debug_block(engine, http, clock, llm, debug_log):
+    superuser = await _user(engine, role="superuser", plan=None)
+    result = await _scan_once(engine, superuser, _scan(), llm, http, clock)
+
+    [record] = _debug_records(debug_log)
+    assert record.levelno == logging.INFO
+    header, _, body = record.getMessage().partition("\n")
+    assert header == "[debug superuser] scan text 2dehands.be|m123"
+    assert json.loads(body) == result.model_dump(mode="json", by_alias=True)["debug"]
+    assert body.startswith("{\n  ")  # JSON indenté, lisible dans la console
+
+
+async def test_user_scan_is_not_logged(engine, http, clock, llm, debug_log):
+    user = await _user(engine)
+    await _scan_once(engine, user, _scan(), llm, http, clock)
+    await _scan_once(engine, user, _scan(noCache=True), llm, http, clock)
+    assert _debug_records(debug_log) == []
+
+
+async def test_debug_block_and_log_contain_no_secret(engine, http, mock, clock, debug_log):
+    caplog = debug_log
+    caplog.set_level(logging.DEBUG)
+    for url in IMAGE_URLS:
+        mock.get(url).respond(200, content=_png(), headers={"content-type": "image/png"})
+    llm_route = mock.post(f"{LLM_BASE}/chat/completions").respond(
+        200,
+        json={
+            "id": "c1",
+            "object": "chat.completion",
+            "created": 1,
+            "model": "m",
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": json.dumps(
+                            {
+                                "score": 70,
+                                "summary": {"fr": "Résumé", "nl": "Samenvatting"},
+                                "advice": {"fr": "Conseil", "nl": "Advies"},
+                                "reasons": [],
+                            }
+                        ),
+                    },
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        },
+    )
+    provider = ProviderConfig(
+        code="fake",
+        base_url=LLM_BASE,
+        api_key_env="FAKE_LLM_KEY",
+        base_url_env=None,
+        structured_output="json_object",
+        cost_source="none",
+        extra_body={},
+    )
+    # Client HTTP explicite (comme dans test_llm_client) : intercepté par respx.
+    client = OpenAICompatibleClient(
+        provider, {"FAKE_LLM_KEY": SECRET_KEY}, http_client=httpx.AsyncClient()
+    )
+
+    class Provider:
+        def llm_for(self, code: str) -> OpenAICompatibleClient:
+            return client
+
+    superuser = await _user(engine, role="superuser", plan=None)
+    try:
+        result = await _scan_once(
+            engine, superuser, _scan(images=IMAGE_URLS, scanKind="image"), Provider(), http, clock
+        )
+    finally:
+        await client.aclose()
+
+    # Le fournisseur a bien reçu la clé et les photos en base64…
+    request = llm_route.calls.last.request
+    assert request.headers["authorization"] == f"Bearer {SECRET_KEY}"
+    assert b"base64," in request.content
+    # … mais ni la réponse ni les logs ne les contiennent.
+    assert result.debug is not None and result.debug.llm_called is True
+    assert result.debug.system_prompt.startswith("Tu aides")
+    assert "Schéma JSON exact" in result.debug.system_prompt
+    payload = result.model_dump_json(by_alias=True)
+    assert _debug_records(caplog)
+    for secret in (SECRET_KEY, "Bearer", "base64,"):
+        assert secret not in payload
+        assert secret not in caplog.text

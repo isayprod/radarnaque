@@ -56,10 +56,16 @@ class LLMAnalysis(BaseModel):
 
 @dataclass
 class LLMResult:
+    """`raw_text` : contenu de la réponse du modèle, tel que reçu ; `system_prompt` : prompt
+    système réellement envoyé (schéma compris en mode `json_object`). Les deux ne servent qu'au
+    bloc debug du superuser ; les faux clients des tests peuvent les laisser vides."""
+
     analysis: LLMAnalysis
     tokens_in: int
     tokens_out: int
     cost_usd_micros: int
+    raw_text: str = ""
+    system_prompt: str = ""
 
 
 LLMErrorCode = Literal["transport", "invalid_response", "configuration"]
@@ -222,7 +228,9 @@ class OpenAICompatibleClient:
             }
         return {"type": "json_object"}
 
-    def _system_prompt(self, system_prompt: str) -> str:
+    def final_system_prompt(self, system_prompt: str) -> str:
+        """Prompt système tel qu'envoyé au fournisseur : en mode `json_object`, le schéma exact
+        de la réponse y est ajouté. Réutilisé par le bloc debug d'un scan servi par le cache."""
         if self._provider.structured_output == "json_schema":
             return system_prompt
         schema = json.dumps(strict_analysis_schema(), ensure_ascii=False)
@@ -259,6 +267,8 @@ class OpenAICompatibleClient:
             tokens_in=_count(getattr(usage, "prompt_tokens", None)),
             tokens_out=_count(getattr(usage, "completion_tokens", None)),
             cost_usd_micros=self._cost(usage, raw.headers),
+            raw_text=content,
+            system_prompt=request["messages"][0]["content"],
         )
 
     async def analyze(self, *, model: str, system_prompt: str, messages: list[dict]) -> LLMResult:
@@ -267,7 +277,7 @@ class OpenAICompatibleClient:
         request: dict[str, Any] = {
             "model": model,
             "messages": [
-                {"role": "system", "content": self._system_prompt(system_prompt)},
+                {"role": "system", "content": self.final_system_prompt(system_prompt)},
                 *messages,
             ],
             "temperature": TEMPERATURE,

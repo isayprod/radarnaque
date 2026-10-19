@@ -2,7 +2,12 @@ import json
 
 import pytest
 
-from radarnaque_api.llm.payload import FACTS_INTRO, build_messages, mask_contacts
+from radarnaque_api.llm.payload import (
+    FACTS_INTRO,
+    build_messages,
+    mask_contacts,
+    summarize_messages,
+)
 from radarnaque_api.schemas import ListingIn, RulesIn, SellerFactsIn
 
 
@@ -260,4 +265,35 @@ def test_build_messages_images_become_jpeg_data_urls():
     assert parts[1:] == [
         {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,QUJD"}},
         {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,REVG"}},
+    ]
+
+
+# --- Résumé des messages pour le bloc debug ----------------------------------------------------
+
+
+def test_summarize_messages_keeps_text_and_sizes_images():
+    # 8 caractères base64 sans remplissage → 6 octets ; « QUJDRA== » → 4 octets.
+    messages = build_messages(_listing(), RULES, ["QUJDREVG", "QUJDRA=="])
+    summary = summarize_messages(messages)
+
+    text = messages[0]["content"][0]["text"]
+    assert summary == [
+        {"role": "user", "content": f"{text}\n[image 1 : 6 octets]\n[image 2 : 4 octets]"}
+    ]
+    assert "base64" not in json.dumps(summary)
+
+
+def test_summarize_messages_marks_images_not_downloaded_from_cache():
+    messages = build_messages(_listing(), RULES, [])
+    summary = summarize_messages(messages, cached_images=2)
+
+    text = messages[0]["content"][0]["text"]
+    assert summary[0]["content"] == (
+        f"{text}\n[image 1 : non téléchargée (cache)]\n[image 2 : non téléchargée (cache)]"
+    )
+
+
+def test_summarize_messages_accepts_plain_string_content():
+    assert summarize_messages([{"role": "user", "content": "bonjour"}]) == [
+        {"role": "user", "content": "bonjour"}
     ]

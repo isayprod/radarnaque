@@ -59,6 +59,7 @@ class ActiveSetup:
     provider: str
     slug: str
     prompt_version_id: int
+    prompt_version: int  # numéro de version, pour le bloc debug
     system_prompt: str
 
 
@@ -67,7 +68,12 @@ async def active_setup(session: AsyncSession, scan_kind: str) -> ActiveSetup | N
     row = (
         await session.execute(
             select(
-                Model.id, Model.provider, Model.slug, PromptVersion.id, PromptVersion.system_prompt
+                Model.id,
+                Model.provider,
+                Model.slug,
+                PromptVersion.id,
+                PromptVersion.version,
+                PromptVersion.system_prompt,
             )
             .select_from(ScanKind)
             .join(Model, Model.id == ScanKind.active_model_id)
@@ -93,10 +99,11 @@ async def valid_analysis_id(
 
 async def upsert_snapshot(
     session: AsyncSession, site_id: int, listing: ListingIn, at: datetime
-) -> int:
+) -> tuple[int, str]:
     """Annonce, snapshot et images (`INSERT … ON CONFLICT DO NOTHING`, puis relecture), puis
-    commit. Le titre et la description sont masqués **avant** l'empreinte et l'enregistrement
-    (règle R9), comme dans le message envoyé au LLM : aucun contact n'est stocké."""
+    commit. Renvoie l'identifiant du snapshot et son empreinte de contenu. Le titre et la
+    description sont masqués **avant** l'empreinte et l'enregistrement (règle R9), comme dans le
+    message envoyé au LLM : aucun contact n'est stocké."""
     title = mask_contacts(listing.title)
     description = mask_contacts(listing.description)
     await session.execute(
@@ -145,7 +152,7 @@ async def upsert_snapshot(
             ],
         )
     await session.commit()
-    return snapshot_id
+    return snapshot_id, digest
 
 
 async def save_analysis(

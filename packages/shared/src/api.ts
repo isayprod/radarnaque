@@ -171,6 +171,7 @@ export interface components {
              * Format: date-time
              */
             analyzedAt: string;
+            debug?: components["schemas"]["ScanDebugOut"] | null;
             /** Fromcache */
             fromCache: boolean;
             /**
@@ -217,6 +218,28 @@ export interface components {
              * @enum {string}
              */
             plan: "standard" | "premium";
+        };
+        /**
+         * DebugMessageOut
+         * @description Message envoyé au LLM, en texte : chaque photo y est résumée (`[image n : N octets]`).
+         */
+        DebugMessageOut: {
+            /** Content */
+            content: string;
+            /** Role */
+            role: string;
+        };
+        /**
+         * DebugTimingsOut
+         * @description Durées en millisecondes ; `None` pour une étape sautée (pas de photo, cache).
+         */
+        DebugTimingsOut: {
+            /** Images */
+            images: number | null;
+            /** Llm */
+            llm: number | null;
+            /** Total */
+            total: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -314,6 +337,16 @@ export interface components {
              */
             currency: "EUR";
         };
+        /** PromptVersionDebugOut */
+        PromptVersionDebugOut: {
+            /**
+             * Scankind
+             * @enum {string}
+             */
+            scanKind: "text" | "image";
+            /** Version */
+            version: number;
+        };
         /** QuotaOut */
         QuotaOut: {
             /** Limit */
@@ -343,6 +376,45 @@ export interface components {
             signals: components["schemas"]["SignalIn"][];
             /** Version */
             version: number;
+        };
+        /**
+         * ScanDebugOut
+         * @description Bloc de débogage du superuser hors production. Jamais de clé d'API, d'en-tête
+         *     `Authorization`, de jeton ni de photo en base64. `system_prompt` : le texte réellement
+         *     envoyé (schéma compris en mode `json_object`) ; `raw_response` : la réponse brute du modèle,
+         *     `None` si le LLM n'a pas été appelé. Les jetons et le coût sont ceux de l'analyse servie.
+         */
+        ScanDebugOut: {
+            /** Analysisid */
+            analysisId: number;
+            /** Contenthash */
+            contentHash: string;
+            /** Costusdmicros */
+            costUsdMicros: number;
+            /** Fromcache */
+            fromCache: boolean;
+            /** Inputhash */
+            inputHash: string;
+            /** Llmcalled */
+            llmCalled: boolean;
+            /** Messages */
+            messages: components["schemas"]["DebugMessageOut"][];
+            /** Model */
+            model: string;
+            promptVersion: components["schemas"]["PromptVersionDebugOut"];
+            /** Provider */
+            provider: string;
+            /** Rawresponse */
+            rawResponse: string | null;
+            /** Snapshotid */
+            snapshotId: number;
+            /** Systemprompt */
+            systemPrompt: string;
+            timingsMs: components["schemas"]["DebugTimingsOut"];
+            /** Tokensin */
+            tokensIn: number;
+            /** Tokensout */
+            tokensOut: number;
         };
         /**
          * ScanHistoryItemOut
@@ -395,6 +467,8 @@ export interface components {
         /** ScanIn */
         ScanIn: {
             listing: components["schemas"]["ListingIn"];
+            /** Nocache */
+            noCache?: boolean;
             /**
              * Partial
              * @default false

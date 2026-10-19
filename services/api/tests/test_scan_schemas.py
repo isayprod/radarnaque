@@ -149,3 +149,15 @@ def test_scan_kind_and_trigger_are_closed_lists():
         ScanIn.model_validate({**_scan(), "scanKind": "video"})
     with pytest.raises(ValidationError):
         ScanIn.model_validate({**_scan(), "trigger": "auto"})
+
+
+def test_no_cache_is_optional_and_false_by_default():
+    assert ScanIn.model_validate(_scan()).no_cache is False
+    assert ScanIn.model_validate({**_scan(), "noCache": True}).no_cache is True
+
+
+def test_no_cache_is_optional_in_the_openapi_contract():
+    # Sans `default` ni `required` : le type TypeScript généré est `noCache?: boolean`.
+    schema = ScanIn.model_json_schema()
+    assert "noCache" not in schema["required"]
+    assert schema["properties"]["noCache"] == {"title": "Nocache", "type": "boolean"}

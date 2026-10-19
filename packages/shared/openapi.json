@@ -37,6 +37,16 @@
             "title": "Analyzedat",
             "type": "string"
           },
+          "debug": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScanDebugOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "fromCache": {
             "title": "Fromcache",
             "type": "boolean"
@@ -145,6 +155,63 @@
           "interval"
         ],
         "title": "CheckoutIn",
+        "type": "object"
+      },
+      "DebugMessageOut": {
+        "description": "Message envoy\u00e9 au LLM, en texte : chaque photo y est r\u00e9sum\u00e9e (`[image n : N octets]`).",
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "DebugMessageOut",
+        "type": "object"
+      },
+      "DebugTimingsOut": {
+        "description": "Dur\u00e9es en millisecondes ; `None` pour une \u00e9tape saut\u00e9e (pas de photo, cache).",
+        "properties": {
+          "images": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Images"
+          },
+          "llm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "images",
+          "llm",
+          "total"
+        ],
+        "title": "DebugTimingsOut",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -475,6 +542,28 @@
         "title": "PriceIn",
         "type": "object"
       },
+      "PromptVersionDebugOut": {
+        "properties": {
+          "scanKind": {
+            "enum": [
+              "text",
+              "image"
+            ],
+            "title": "Scankind",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scanKind",
+          "version"
+        ],
+        "title": "PromptVersionDebugOut",
+        "type": "object"
+      },
       "QuotaOut": {
         "properties": {
           "limit": {
@@ -577,6 +666,103 @@
           "signals"
         ],
         "title": "RulesIn",
+        "type": "object"
+      },
+      "ScanDebugOut": {
+        "description": "Bloc de d\u00e9bogage du superuser hors production. Jamais de cl\u00e9 d'API, d'en-t\u00eate\n`Authorization`, de jeton ni de photo en base64. `system_prompt` : le texte r\u00e9ellement\nenvoy\u00e9 (sch\u00e9ma compris en mode `json_object`) ; `raw_response` : la r\u00e9ponse brute du mod\u00e8le,\n`None` si le LLM n'a pas \u00e9t\u00e9 appel\u00e9. Les jetons et le co\u00fbt sont ceux de l'analyse servie.",
+        "properties": {
+          "analysisId": {
+            "title": "Analysisid",
+            "type": "integer"
+          },
+          "contentHash": {
+            "title": "Contenthash",
+            "type": "string"
+          },
+          "costUsdMicros": {
+            "title": "Costusdmicros",
+            "type": "integer"
+          },
+          "fromCache": {
+            "title": "Fromcache",
+            "type": "boolean"
+          },
+          "inputHash": {
+            "title": "Inputhash",
+            "type": "string"
+          },
+          "llmCalled": {
+            "title": "Llmcalled",
+            "type": "boolean"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/DebugMessageOut"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "promptVersion": {
+            "$ref": "#/components/schemas/PromptVersionDebugOut"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "rawResponse": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rawresponse"
+          },
+          "snapshotId": {
+            "title": "Snapshotid",
+            "type": "integer"
+          },
+          "systemPrompt": {
+            "title": "Systemprompt",
+            "type": "string"
+          },
+          "timingsMs": {
+            "$ref": "#/components/schemas/DebugTimingsOut"
+          },
+          "tokensIn": {
+            "title": "Tokensin",
+            "type": "integer"
+          },
+          "tokensOut": {
+            "title": "Tokensout",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider",
+          "model",
+          "promptVersion",
+          "systemPrompt",
+          "messages",
+          "rawResponse",
+          "llmCalled",
+          "fromCache",
+          "tokensIn",
+          "tokensOut",
+          "costUsdMicros",
+          "timingsMs",
+          "contentHash",
+          "inputHash",
+          "snapshotId",
+          "analysisId"
+        ],
+        "title": "ScanDebugOut",
         "type": "object"
       },
       "ScanHistoryItemOut": {
@@ -714,6 +900,10 @@
         "properties": {
           "listing": {
             "$ref": "#/components/schemas/ListingIn"
+          },
+          "noCache": {
+            "title": "Nocache",
+            "type": "boolean"
           },
           "partial": {
             "default": false,

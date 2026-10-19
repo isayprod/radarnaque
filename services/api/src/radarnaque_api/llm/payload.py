@@ -117,3 +117,39 @@ def build_messages(listing: ListingIn, rules: RulesIn, images_b64: list[str]) ->
         for b64 in images_b64
     ]
     return [{"role": "user", "content": parts}]
+
+
+def _decoded_size(url: str) -> int:
+    """Taille en octets d'une image `data:…;base64,…`, calculée sans la décoder."""
+    b64 = url.partition("base64,")[2]
+    return len(b64) * 3 // 4 - (len(b64) - len(b64.rstrip("=")))
+
+
+def summarize_messages(messages: list[dict], *, cached_images: int = 0) -> list[dict[str, str]]:
+    """Messages de `build_messages` rendus lisibles pour le bloc debug du superuser : chaque
+    contenu devient une chaîne, le texte tel quel et chaque photo résumée en
+    `[image n : N octets]`, jamais son contenu base64. `cached_images` : photos qui auraient été
+    envoyées mais n'ont pas été téléchargées (scan servi par le cache), ajoutées au dernier
+    message sous la forme `[image n : non téléchargée (cache)]`."""
+    out: list[dict[str, str]] = []
+    count = 0
+    for message in messages:
+        content = message["content"]
+        if isinstance(content, str):
+            lines = [content]
+        else:
+            lines = []
+            for part in content:
+                if part.get("type") == "image_url":
+                    count += 1
+                    size = _decoded_size(part["image_url"]["url"])
+                    lines.append(f"[image {count} : {size} octets]")
+                else:
+                    lines.append(part.get("text", ""))
+        out.append({"role": message["role"], "content": "\n".join(lines)})
+    if cached_images and out:
+        pending = [
+            f"[image {count + n} : non téléchargée (cache)]" for n in range(1, cached_images + 1)
+        ]
+        out[-1]["content"] = "\n".join([out[-1]["content"], *pending])
+    return out
