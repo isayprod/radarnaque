@@ -4,14 +4,9 @@ Remarques relevées pendant les relectures de la phase 3d : recherche web, photo
 
 ## Corrections prévues avant fusion
 
-Ces points ont été relevés en relecture de tâche et laissés pour une vague de corrections, après la relecture finale de la branche. Aucun n'est corrigé à ce jour.
+Ces points ont été relevés en relecture de tâche et laissés pour une vague de corrections, après la relecture finale de la branche. Ceux que la vague finale a corrigés n'y figurent plus.
 
-- **Rendu du scan jamais servi (T7) :** le rendu du scan dépend de `BackgroundTask`, qui n'est exécuté que si le serveur ASGI est en version inférieure à 2.4 (uvicorn n'est pas borné). Piste : une sous-classe de `StreamingResponse` avec `try/finally` sous `shield`, et un test paramétré 2.3 et 2.4.
-- **`_give_back` sans `shield` (T7) :** si le client part pendant l'écriture de `scan_failures`, le scan est décompté sans résultat. Piste : protéger `_give_back` par `shield`.
-- **Test de navigation peu probant (T11) :** l'événement tardif est émis quand `m2` est inactif. Piste : réafficher `m2`, lancer son scan, émettre un événement par l'ancien handle, vérifier que la progression de `m2` reste vide.
 - **Annulation reconnue par un code partagé (T11) :** le code « cancelled » est aussi celui des codes du port. Piste : un indicateur local plus robuste.
-- **« Relancer » muet (T12) :** il ne fait rien si l'accès relu dit 0 analyse restante. Piste : afficher le bouton épuisé ou un message.
-- **Erreur en double (T12) :** l'erreur d'une analyse lancée depuis le panneau s'affiche aussi dans la pastille.
 - **Cohérence de la branche (T10) :** vérifier à la relecture finale que `tsc` est vert et qu'il ne reste ni `scanKind` ni `entries[kind]` côté extension.
 
 ## Déjà vérifié en direct (19 octobre 2026)
@@ -43,6 +38,7 @@ Rien de ceci n'a pu être essayé : `infra/.env` n'a ni clé Groq ni clé OpenRo
   - l'icône qui tourne sur une carte ;
   - la navigation vers une autre annonce pendant l'analyse (Facebook, sans rechargement) ;
   - le service worker tué en cours d'analyse (« Analyse interrompue »).
+- **Version d'uvicorn et de Starlette :** aucune borne nécessaire. Le rendu d'un scan jamais servi ne dépend plus de la version d'ASGI annoncée par le serveur (sous-classe de `StreamingResponse` avec `try/finally` sous `shield`, testée en 2.3 et 2.4). À revoir seulement si Starlette change `StreamingResponse.__call__`.
 - **Prompt `full` v1 sur 10 à 20 annonces réelles :** les scores, l'usage des recherches (pas de recherche inutile, pas d'invention du prix), le comportement sans photo et avec 1 photo (Standard).
 
 ## Plus tard
@@ -56,8 +52,6 @@ Rien de ceci n'a pu être essayé : `infra/.env` n'a ni clé Groq ni clé OpenRo
   - pas de test direct de `plan_max_images` (superuser avec un abonnement réel, plan absent, admin avec Standard) ;
   - pas de test de libération du verrou après déconnexion ou délai, ni de 403 et 429 sur le flux ;
   - `search=None` par défaut est silencieux, et `_scan_args` est un `dict[str, Any]` ;
-  - la tâche d'analyse n'a pas de référence forte (`asyncio.ensure_future` dans `services/scan_stream.py`) : passer à `create_task` avec un ensemble `_background` ;
-  - le message « ce scan n'est pas décompté » est faux une fois le commit fait ;
   - finitions de la tâche 3 : docstring de `LLMResult`, assertion dupliquée, comparaison de `input_hash` (1 et 0), introspection par `co_varnames` dans `test_hashing.py`, docstring de `Privileges.all_features` (« photos ») ;
   - `test_prompt_v2.py` : virgules finales disgracieuses.
 - **Flux et boucle d'outils :**
@@ -72,7 +66,6 @@ Rien de ceci n'a pu être essayé : `infra/.env` n'a ni clé Groq ni clé OpenRo
   - le `SEARXNG_SECRET` d'exemple est accepté en production ;
   - le port 8888 n'est pas vérifié par `check-ports`, et `up -d` n'attend pas la santé (`--wait`) ;
   - durcissement du conteneur : `cap_drop`, `read_only`, `mem_limit` ;
-  - `scripts/e2e-scan.ts` n'appelle pas `reader.cancel()` à la fin d'un flux ;
   - délai de 8 s par phase `httpx`, pas total, et corps non borné (SearXNG est interne) ; le délai total de l'analyse couvre le reste ;
   - éviction FIFO du cache de recherches (conforme au spec) ; tests manquants pour une entité coupée et pour « & » dans un titre.
 - **Extension :**
