@@ -3,16 +3,17 @@ import { browser } from "wxt/browser";
 import type { Listing } from "./listing/types";
 import type { Signal } from "./rules/rules";
 
-export type ScanKind = "text" | "image";
 export type ScanTrigger = "button" | "card";
 
-/** Demande de scan envoyée par le content script au service worker. */
+/**
+ * Demande de scan : le message de départ du port `scan/stream`, du content script au
+ * service worker. Le serveur fait toujours une analyse `full` (photos et recherche web).
+ */
 export interface ScanRequest {
 	/** Complète, identité du vendeur comprise : le service worker la retire avant l'API. */
 	listing: Listing;
 	signals: Signal[];
 	rulesVersion: number;
-	scanKind: ScanKind;
 	trigger: ScanTrigger;
 	partial: boolean;
 	/** Superuser hors production : relance sans cache. Ignoré par le serveur pour les autres. */
@@ -20,10 +21,11 @@ export interface ScanRequest {
 }
 
 /**
- * Droits de la page pour le content script. `remaining.*` vaut `null` sans plafond
- * (admin, ou quota absent du plan) : on n'affiche jamais « 0 » dans ce cas. `debug`
- * n'est vrai que pour le superuser de développement (rôle renvoyé par `/api/me`) ;
- * les autres états n'en ont pas et valent `false` (voir `isDebug`).
+ * Droits de la page pour le content script. `remaining.scans` vaut `null` sans plafond
+ * (admin, superuser, ou quota absent du plan) : on n'affiche jamais « 0 » dans ce cas.
+ * `maxImages` : photos envoyées au plus par analyse, selon le plan. `debug` n'est vrai
+ * que pour le superuser de développement (rôle renvoyé par `/api/me`) ; les autres
+ * états n'en ont pas et valent `false` (voir `isDebug`).
  */
 export type ContentAccess =
 	| { status: "signedOut" }
@@ -33,11 +35,8 @@ export type ContentAccess =
 			features: string[];
 			unlimited: boolean;
 			debug: boolean;
-			remaining: {
-				text: number | null;
-				image: number | null;
-				total: number | null;
-			};
+			maxImages: number;
+			remaining: { scans: number | null };
 	  };
 
 export type BgRequest =
@@ -48,13 +47,15 @@ export type BgRequest =
 	| { type: "content/access" }
 	/** Superuser : drapeau des logs de debug de la page, sans appel réseau hors session. */
 	| { type: "content/debug" }
-	| { type: "scan/run"; scan: ScanRequest }
 	| { type: "ui/open-popup" };
 
-/** Seuls messages qu'un content script peut envoyer : jamais `auth/*`. */
+/**
+ * Seuls messages qu'un content script peut envoyer : jamais `auth/*`. Le scan passe par
+ * le port `scan/stream` (`SCAN_PORT`), soumis au même contrôle de l'émetteur.
+ */
 export const CONTENT_SCRIPT_MESSAGES: ReadonlySet<BgRequest["type"]> = new Set<
 	BgRequest["type"]
->(["content/access", "content/debug", "scan/run", "ui/open-popup"]);
+>(["content/access", "content/debug", "ui/open-popup"]);
 
 export type BgResponse<T> =
 	| { ok: true; data: T }

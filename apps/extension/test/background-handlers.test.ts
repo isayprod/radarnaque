@@ -2,7 +2,11 @@ import type { AnalysisResult, Me, ScanIn } from "@radarnaque/shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing/fake-browser";
 import { adapterFor } from "../lib/adapters/registry";
-import { ApiRequestError, createApiClient } from "../lib/api-client";
+import {
+	type ApiClient,
+	ApiRequestError,
+	createApiClient,
+} from "../lib/api-client";
 import { AuthError } from "../lib/auth-client";
 import {
 	createHandlers,
@@ -12,18 +16,26 @@ import {
 	handleExternal,
 } from "../lib/background-handlers";
 import { clearAiResults, createAiResultStore } from "../lib/content/ai-results";
+import { createDebugState } from "../lib/debug-state";
 import {
 	type BgRequest,
 	CONTENT_SCRIPT_MESSAGES,
 	type ScanRequest,
 } from "../lib/messages";
+import { createScanPortListener } from "../lib/scan-port";
+import type { SseMessage } from "../lib/sse";
 import { sessionToken } from "../lib/storage";
 import {
 	errorResponse,
+	fakePort,
 	fetchSequence,
 	jsonResponse,
 	makeJwt,
 	sampleAnalysis,
+	sse,
+	sseEvent,
+	sseMessages,
+	sseResponse,
 	superuserMe,
 	trialMe,
 } from "./helpers";
@@ -43,9 +55,9 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}) {
 	const jwt = { get: vi.fn<() => Promise<string>>(), invalidate: vi.fn() };
 	const api = {
 		getMe: vi.fn<() => Promise<Me>>(async () => trialMe),
-		scan: vi.fn<(body: ScanIn) => Promise<AnalysisResult>>(
-			async () => sampleAnalysis,
-		),
+		scanStream: vi.fn<
+			(body: ScanIn, signal: AbortSignal) => Promise<AsyncIterable<SseMessage>>
+		>(async () => sseMessages(sse("result", sampleAnalysis))),
 	};
 	const openPopup = vi.fn<() => Promise<void>>(async () => {});
 	const clear = vi.fn<() => Promise<void>>(async () => {});
@@ -60,6 +72,33 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}) {
 		...overrides,
 	};
 	return { deps, auth, jwt, api, openPopup, clearAiResults: clear };
+}
+
+/**
+ * Handlers et port `scan/stream` avec un même état de debug, comme dans
+ * `entrypoints/background.ts`. `scan` lance un scan par le port et rend le dernier
+ * message posté à l'onglet.
+ */
+function wire(deps: HandlerDeps, scanApi: Pick<ApiClient, "scanStream">) {
+	const debug = createDebugState({
+		sessionToken: deps.sessionToken,
+		getMe: () => deps.api.getMe(),
+		debugLog: deps.debugLog,
+		devBuild: deps.devBuild,
+	});
+	const handle = createHandlers({ ...deps, debug });
+	const listener = createScanPortListener({
+		api: scanApi,
+		allowSender: () => true,
+		debug,
+	});
+	async function scan(request: unknown) {
+		const tab = fakePort();
+		listener(tab.port);
+		tab.send(request);
+		return tab.closed();
+	}
+	return { handle, scan };
 }
 
 beforeEach(() => {
@@ -274,10 +313,11 @@ describe("background handlers", () => {
 			ok: true,
 			data: {
 				status: "active",
-				features: ["card_icons", "image_scan"],
+				features: ["card_icons"],
 				unlimited: false,
 				debug: false,
-				remaining: { text: 3, image: 3, total: 3 },
+				maxImages: 4,
+				remaining: { scans: 3 },
 			},
 		});
 	});
@@ -333,7 +373,6 @@ function scanRequest(overrides: Partial<ScanRequest> = {}): ScanRequest {
 		},
 		signals: [{ id: "no_reviews", weight: 10, severity: "warning" }],
 		rulesVersion: 2,
-		scanKind: "text",
 		trigger: "button",
 		partial: false,
 		...overrides,
@@ -341,62 +380,16 @@ function scanRequest(overrides: Partial<ScanRequest> = {}): ScanRequest {
 }
 
 describe("scan and popup handlers", () => {
-	test("scan/run: success → ok(result), body sent without seller identity", async () => {
+	test("scan/run n'existe plus : unknown_message, sans appel réseau", async () => {
 		const { deps, api } = makeDeps();
 		expect(
-			await createHandlers(deps)({ type: "scan/run", scan: scanRequest() }),
-		).toEqual({ ok: true, data: sampleAnalysis });
-		expect(api.scan).toHaveBeenCalledTimes(1);
-		const body = api.scan.mock.calls[0]?.[0];
-		expect(body?.listing.seller).toEqual({ reviewCount: 4 });
-		expect(body?.rules).toEqual({
-			version: 2,
-			signals: [{ id: "no_reviews", weight: 10, severity: "warning" }],
-		});
-	});
-
-	test("scan/run: API and auth errors are mapped to their code", async () => {
-		const { deps, api } = makeDeps();
-		const handle = createHandlers(deps);
-		const run = () => handle({ type: "scan/run", scan: scanRequest() });
-		api.scan.mockRejectedValueOnce(
-			new ApiRequestError(502, {
-				error: { code: "analysis_failed", message: "", details: {} },
-			}),
-		);
-		expect(await run()).toEqual({
-			ok: false,
-			error: { code: "analysis_failed" },
-		});
-		api.scan.mockRejectedValueOnce(new AuthError("session_expired"));
-		expect(await run()).toEqual({
-			ok: false,
-			error: { code: "session_expired" },
-		});
-		api.scan.mockRejectedValueOnce(new AuthError("network"));
-		expect(await run()).toEqual({ ok: false, error: { code: "network" } });
-	});
-
-	test("scan/run: empty title → invalid_listing without network call", async () => {
-		const { deps, api } = makeDeps();
-		const scan = scanRequest();
-		scan.listing.title = "   ";
-		expect(await createHandlers(deps)({ type: "scan/run", scan })).toEqual({
-			ok: false,
-			error: { code: "invalid_listing" },
-		});
-		expect(api.scan).not.toHaveBeenCalled();
-	});
-
-	test("scan/run: malformed request → invalid_listing without network call", async () => {
-		const { deps, api } = makeDeps();
-		const handle = createHandlers(deps);
-		for (const scan of [undefined, null, "scan", 3, {}, { listing: null }]) {
-			expect(
-				await handle({ type: "scan/run", scan } as unknown as BgRequest),
-			).toEqual({ ok: false, error: { code: "invalid_listing" } });
-		}
-		expect(api.scan).not.toHaveBeenCalled();
+			await createHandlers(deps)({
+				type: "scan/run",
+				scan: scanRequest(),
+			} as unknown as BgRequest),
+		).toEqual({ ok: false, error: { code: "unknown_message" } });
+		expect(api.scanStream).not.toHaveBeenCalled();
+		expect(api.getMe).not.toHaveBeenCalled();
 	});
 
 	test("ui/open-popup opens the popup; a rejection → popup_unavailable", async () => {
@@ -456,9 +449,12 @@ const debugAnalysis: AnalysisResult = {
 		promptVersion: { scanKind: "text", version: 1 },
 		provider: "fournisseur-test",
 		rawResponse: "{}",
+		reasoning: "",
+		rounds: 1,
+		searches: [],
 		snapshotId: 7,
 		systemPrompt: "Tu analyses une annonce.",
-		timingsMs: { images: null, llm: 900, total: 950 },
+		timingsMs: { images: null, llm: 900, search: null, total: 950 },
 		tokensIn: 100,
 		tokensOut: 20,
 	},
@@ -552,13 +548,14 @@ describe("build de production (devBuild: false, R5)", () => {
 		expect(api.getMe).not.toHaveBeenCalled();
 	});
 
-	test("scan/run d'un compte connecté : aucune lecture paresseuse de me", async () => {
+	test("scan par le port d'un compte connecté : aucune lecture paresseuse de me", async () => {
 		await sessionToken.setValue("session-abc");
 		const { deps, api } = makeDeps({ devBuild: false });
-		expect(
-			await createHandlers(deps)({ type: "scan/run", scan: scanRequest() }),
-		).toEqual({ ok: true, data: sampleAnalysis });
-		expect(api.scan).toHaveBeenCalledTimes(1);
+		expect(await wire(deps, api).scan(scanRequest())).toEqual({
+			type: "result",
+			result: sampleAnalysis,
+		});
+		expect(api.scanStream).toHaveBeenCalledTimes(1);
 		expect(api.getMe).not.toHaveBeenCalled();
 	});
 });
@@ -569,8 +566,13 @@ describe("superuser debug logs", () => {
 		const sink = fakeConsole();
 		const { deps, api } = makeDeps({ debugLog: sink });
 		api.getMe.mockResolvedValue(superuserMe);
-		api.scan.mockResolvedValue(debugAnalysis);
-		const handle = createHandlers(deps);
+		api.scanStream.mockImplementation(async () =>
+			sseMessages(
+				sse("thinking", { part: 1, text: "Je compare les prix." }),
+				sse("result", debugAnalysis),
+			),
+		);
+		const { handle, scan } = wire(deps, api);
 
 		expect(await handle({ type: "content/access" })).toMatchObject({
 			ok: true,
@@ -578,23 +580,25 @@ describe("superuser debug logs", () => {
 		});
 		expect(sink.groupCollapsed).not.toHaveBeenCalled();
 
-		expect(
-			await handle({
-				type: "scan/run",
-				scan: scanRequest({ noCache: true }),
-			}),
-		).toEqual({ ok: true, data: debugAnalysis });
-		expect(api.scan.mock.calls[0]?.[0]).toMatchObject({ noCache: true });
+		expect(await scan(scanRequest({ noCache: true }))).toEqual({
+			type: "result",
+			result: debugAnalysis,
+		});
+		expect(api.scanStream.mock.calls[0]?.[0]).toMatchObject({ noCache: true });
 
-		const body = api.scan.mock.calls[0]?.[0];
+		const body = api.scanStream.mock.calls[0]?.[0];
 		expect(groups(sink)).toEqual([
 			{ title: "[Radarnaque debug] scan envoyé", data: body },
+			{
+				title: "[Radarnaque debug] scan événement",
+				data: { type: "thinking", part: 1, text: "Je compare les prix." },
+			},
 			{
 				title: "[Radarnaque debug] scan reçu",
 				data: { outcome: "ok", result: debugAnalysis },
 			},
 		]);
-		expect(sink.groupEnd).toHaveBeenCalledTimes(2);
+		expect(sink.groupEnd).toHaveBeenCalledTimes(3);
 		// Le corps envoyé est déjà nettoyé : pas d'identité du vendeur.
 		expect(written(sink)).not.toContain("Jean");
 		expect(written(sink)).not.toContain("/u/jean");
@@ -605,16 +609,16 @@ describe("superuser debug logs", () => {
 		const sink = fakeConsole();
 		const { deps, api } = makeDeps({ debugLog: sink });
 		api.getMe.mockResolvedValue(superuserMe);
-		api.scan.mockRejectedValueOnce(
+		api.scanStream.mockRejectedValueOnce(
 			new ApiRequestError(502, {
 				error: { code: "analysis_failed", message: "secret", details: {} },
 			}),
 		);
-		const handle = createHandlers(deps);
+		const { handle, scan } = wire(deps, api);
 		await handle({ type: "auth/state" });
-		expect(await handle({ type: "scan/run", scan: scanRequest() })).toEqual({
-			ok: false,
-			error: { code: "analysis_failed" },
+		expect(await scan(scanRequest())).toEqual({
+			type: "error",
+			code: "analysis_failed",
 		});
 		expect(groups(sink).map((g) => g.title)).toEqual([
 			"[Radarnaque debug] scan envoyé",
@@ -632,11 +636,11 @@ describe("superuser debug logs", () => {
 			const sink = fakeConsole();
 			const { deps, api } = makeDeps({ debugLog: sink });
 			api.getMe.mockResolvedValue(me);
-			const handle = createHandlers(deps);
+			const { handle, scan } = wire(deps, api);
 			await handle({ type: "content/access" });
-			await handle({ type: "scan/run", scan: scanRequest() });
-			api.scan.mockRejectedValueOnce(new AuthError("network"));
-			await handle({ type: "scan/run", scan: scanRequest() });
+			await scan(scanRequest());
+			api.scanStream.mockRejectedValueOnce(new AuthError("network"));
+			await scan(scanRequest());
 			expect(sink.groupCollapsed).not.toHaveBeenCalled();
 			expect(sink.log).not.toHaveBeenCalled();
 			expect(sink.groupEnd).not.toHaveBeenCalled();
@@ -645,10 +649,10 @@ describe("superuser debug logs", () => {
 		// Sans session : aucun `me`, donc aucun log non plus.
 		await sessionToken.setValue(null);
 		const sink = fakeConsole();
-		const { deps } = makeDeps({ debugLog: sink });
-		const handle = createHandlers(deps);
+		const { deps, api } = makeDeps({ debugLog: sink });
+		const { handle, scan } = wire(deps, api);
 		await handle({ type: "content/access" });
-		await handle({ type: "scan/run", scan: scanRequest() });
+		await scan(scanRequest());
 		expect(sink.groupCollapsed).not.toHaveBeenCalled();
 	});
 
@@ -656,19 +660,19 @@ describe("superuser debug logs", () => {
 		await sessionToken.setValue("session-abc");
 		const sink = fakeConsole();
 		const { deps, api } = makeDeps({ debugLog: sink });
-		const handle = createHandlers(deps);
+		const { handle, scan } = wire(deps, api);
 
 		api.getMe.mockResolvedValue(superuserMe);
 		await handle({ type: "content/access" });
 		api.getMe.mockResolvedValue(trialMe);
 		await handle({ type: "content/access" });
-		await handle({ type: "scan/run", scan: scanRequest() });
+		await scan(scanRequest());
 		expect(sink.groupCollapsed).not.toHaveBeenCalled();
 
 		api.getMe.mockResolvedValue(superuserMe);
 		await handle({ type: "auth/state" });
 		await handle({ type: "auth/sign-out" });
-		await handle({ type: "scan/run", scan: scanRequest() });
+		await scan(scanRequest());
 		expect(sink.groupCollapsed).not.toHaveBeenCalled();
 	});
 
@@ -678,8 +682,11 @@ describe("superuser debug logs", () => {
 		await sessionToken.setValue(SESSION);
 		const fetchFn = fetchSequence(
 			jsonResponse(200, superuserMe),
-			jsonResponse(200, debugAnalysis),
-			jsonResponse(200, debugAnalysis),
+			sseResponse(sseEvent("result", debugAnalysis)),
+			sseResponse(
+				sseEvent("stage", { stage: "analyzing", count: 0 }),
+				sseEvent("result", debugAnalysis),
+			),
 			errorResponse(502, "analysis_failed"),
 		);
 		const jwt = {
@@ -693,19 +700,19 @@ describe("superuser debug logs", () => {
 		});
 		const sink = fakeConsole();
 		const { deps } = makeDeps({ api, jwt, debugLog: sink });
-		const handle = createHandlers(deps);
+		const { handle, scan } = wire(deps, api);
 
 		await handle({ type: "content/access" });
-		await handle({ type: "scan/run", scan: scanRequest() });
-		await handle({ type: "scan/run", scan: scanRequest({ noCache: true }) });
-		await handle({ type: "scan/run", scan: scanRequest() });
+		await scan(scanRequest());
+		await scan(scanRequest({ noCache: true }));
+		await scan(scanRequest());
 
 		// Le JWT est bien parti dans l'en-tête Authorization…
 		expect(
 			new Headers(fetchFn.mock.calls[1]?.[1]?.headers).get("authorization"),
 		).toBe(`Bearer ${JWT}`);
 		// …mais n'apparaît dans aucun argument reçu par la console.
-		expect(sink.groupCollapsed).toHaveBeenCalledTimes(6);
+		expect(sink.groupCollapsed).toHaveBeenCalledTimes(7);
 		const out = written(sink);
 		for (const secret of [
 			JWT,
@@ -731,11 +738,11 @@ describe("superuser debug logs : lié au jeton de session (R3)", () => {
 		return { promise, resolve };
 	}
 
-	test("superuser vu, puis nouveau jeton (compte ordinaire) par handleExternal → scan/run ne journalise rien", async () => {
+	test("superuser vu, puis nouveau jeton (compte ordinaire) par handleExternal → le scan ne journalise rien", async () => {
 		await sessionToken.setValue("session-su");
 		const sink = fakeConsole();
 		const { deps, api, jwt } = makeDeps({ debugLog: sink });
-		const handle = createHandlers(deps);
+		const { handle, scan } = wire(deps, api);
 		api.getMe.mockResolvedValue(superuserMe);
 		await handle({ type: "content/access" });
 
@@ -747,8 +754,8 @@ describe("superuser debug logs : lié au jeton de session (R3)", () => {
 			),
 		).toEqual({ ok: true });
 		api.getMe.mockResolvedValue(trialMe);
-		await handle({ type: "scan/run", scan: scanRequest() });
-		await handle({ type: "scan/run", scan: scanRequest() });
+		await scan(scanRequest());
+		await scan(scanRequest());
 
 		expect(sink.groupCollapsed).not.toHaveBeenCalled();
 		// Une seule relecture paresseuse de `me` pour le nouveau jeton.
@@ -776,18 +783,18 @@ describe("superuser debug logs : lié au jeton de session (R3)", () => {
 		});
 		const sink = fakeConsole();
 		const { deps } = makeDeps({ api, jwt, debugLog: sink });
-		const handle = createHandlers(deps);
+		const { handle, scan } = wire(deps, api);
 
 		await handle({ type: "content/access" });
-		expect(await handle({ type: "scan/run", scan: scanRequest() })).toEqual({
-			ok: false,
-			error: { code: "session_expired" },
+		expect(await scan(scanRequest())).toEqual({
+			type: "error",
+			code: "session_expired",
 		});
 		// L'envoi a eu lieu avec la session ; l'erreur arrive après sa suppression.
 		expect(groups(sink).map((g) => g.title)).toEqual([
 			"[Radarnaque debug] scan envoyé",
 		]);
-		await handle({ type: "scan/run", scan: scanRequest() });
+		await scan(scanRequest());
 		expect(sink.groupCollapsed).toHaveBeenCalledTimes(1);
 	});
 
@@ -796,13 +803,13 @@ describe("superuser debug logs : lié au jeton de session (R3)", () => {
 		const sink = fakeConsole();
 		const { deps, api } = makeDeps({ debugLog: sink });
 		api.getMe.mockResolvedValue(superuserMe);
-		api.scan.mockImplementationOnce(async () => {
+		api.scanStream.mockImplementationOnce(async () => {
 			await sessionToken.setValue("session-autre");
-			return debugAnalysis;
+			return sseMessages(sse("result", debugAnalysis));
 		});
-		const handle = createHandlers(deps);
+		const { handle, scan } = wire(deps, api);
 		await handle({ type: "content/access" });
-		await handle({ type: "scan/run", scan: scanRequest() });
+		await scan(scanRequest());
 		expect(groups(sink).map((g) => g.title)).toEqual([
 			"[Radarnaque debug] scan envoyé",
 		]);
@@ -812,7 +819,7 @@ describe("superuser debug logs : lié au jeton de session (R3)", () => {
 		await sessionToken.setValue("session-old");
 		const sink = fakeConsole();
 		const { deps, api } = makeDeps({ debugLog: sink });
-		const handle = createHandlers(deps);
+		const { handle, scan } = wire(deps, api);
 		const late = deferred<Me>();
 		api.getMe.mockReturnValueOnce(late.promise);
 
@@ -825,7 +832,7 @@ describe("superuser debug logs : lié au jeton de session (R3)", () => {
 		await pending;
 
 		api.getMe.mockResolvedValue(trialMe);
-		await handle({ type: "scan/run", scan: scanRequest() });
+		await scan(scanRequest());
 		expect(sink.groupCollapsed).not.toHaveBeenCalled();
 		// Le résultat tardif a été jeté : `me` est relu pour la nouvelle session.
 		expect(api.getMe).toHaveBeenCalledTimes(2);
@@ -836,10 +843,10 @@ describe("superuser debug logs : lié au jeton de session (R3)", () => {
 		const sink = fakeConsole();
 		const { deps, api } = makeDeps({ debugLog: sink });
 		api.getMe.mockResolvedValue(superuserMe);
-		const handle = createHandlers(deps);
+		const { scan } = wire(deps, api);
 
-		await handle({ type: "scan/run", scan: scanRequest() });
-		await handle({ type: "scan/run", scan: scanRequest() });
+		await scan(scanRequest());
+		await scan(scanRequest());
 
 		expect(api.getMe).toHaveBeenCalledTimes(1);
 		expect(groups(sink).map((g) => g.title)).toEqual([
@@ -854,13 +861,13 @@ describe("superuser debug logs : lié au jeton de session (R3)", () => {
 		await sessionToken.setValue("session-abc");
 		const sink = fakeConsole();
 		const { deps, api } = makeDeps({ debugLog: sink });
-		const handle = createHandlers(deps);
+		const { scan } = wire(deps, api);
 
-		await handle({ type: "scan/run", scan: scanRequest() });
-		await handle({ type: "scan/run", scan: scanRequest() });
+		await scan(scanRequest());
+		await scan(scanRequest());
 
 		expect(api.getMe).toHaveBeenCalledTimes(1);
-		expect(api.scan).toHaveBeenCalledTimes(2);
+		expect(api.scanStream).toHaveBeenCalledTimes(2);
 		expect(sink.groupCollapsed).not.toHaveBeenCalled();
 	});
 
@@ -873,10 +880,10 @@ describe("superuser debug logs : lié au jeton de session (R3)", () => {
 				error: { code: "auth_unavailable", message: "", details: {} },
 			}),
 		);
-		const handle = createHandlers(deps);
-		expect(await handle({ type: "scan/run", scan: scanRequest() })).toEqual({
-			ok: true,
-			data: sampleAnalysis,
+		const { scan } = wire(deps, api);
+		expect(await scan(scanRequest())).toEqual({
+			type: "result",
+			result: sampleAnalysis,
 		});
 		expect(sink.groupCollapsed).not.toHaveBeenCalled();
 	});
@@ -884,7 +891,7 @@ describe("superuser debug logs : lié au jeton de session (R3)", () => {
 	test("sans session : aucun getMe paresseux", async () => {
 		const sink = fakeConsole();
 		const { deps, api } = makeDeps({ debugLog: sink });
-		await createHandlers(deps)({ type: "scan/run", scan: scanRequest() });
+		await wire(deps, api).scan(scanRequest());
 		expect(api.getMe).not.toHaveBeenCalled();
 		expect(sink.groupCollapsed).not.toHaveBeenCalled();
 	});
@@ -902,12 +909,13 @@ describe("superuser debug logs : lié au jeton de session (R3)", () => {
 			const sink = fakeConsole();
 			const { deps, api } = makeDeps({ debugLog: sink });
 			api.getMe.mockResolvedValue(me);
-			const handle = createHandlers(deps);
+			const { handle, scan } = wire(deps, api);
 			await handle({ type: "content/access" });
-			for (const scan of malformed) {
-				expect(
-					await handle({ type: "scan/run", scan } as unknown as BgRequest),
-				).toEqual({ ok: false, error: { code: "invalid_listing" } });
+			for (const request of malformed) {
+				expect(await scan(request)).toEqual({
+					type: "error",
+					code: "invalid_listing",
+				});
 			}
 			expect(groups(sink)).toEqual(
 				Array.from({ length: expected }, () => ({
@@ -915,7 +923,7 @@ describe("superuser debug logs : lié au jeton de session (R3)", () => {
 					data: { code: "invalid_listing" },
 				})),
 			);
-			expect(api.scan).not.toHaveBeenCalled();
+			expect(api.scanStream).not.toHaveBeenCalled();
 		}
 	});
 });
@@ -951,11 +959,10 @@ describe("sender check", () => {
 		};
 	}
 
-	test("the content script allow-list is exactly the four content messages", () => {
+	test("the content script allow-list is exactly the three content messages", () => {
 		expect([...CONTENT_SCRIPT_MESSAGES].sort()).toEqual([
 			"content/access",
 			"content/debug",
-			"scan/run",
 			"ui/open-popup",
 		]);
 	});

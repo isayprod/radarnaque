@@ -7,6 +7,7 @@ import type {
 import { AuthError } from "./auth-client";
 import { PUBLIC_URL } from "./config";
 import type { JwtProvider } from "./jwt-provider";
+import { readSse, type SseMessage } from "./sse";
 
 /** Erreur de l'API autre qu'un 401 (y compris 503 `auth_unavailable`). */
 export class ApiRequestError extends Error {
@@ -32,6 +33,15 @@ export interface ApiClient {
 	getMe(): Promise<Me>;
 	/** `POST /api/scans` : le corps doit sortir de `toScanIn` (identité retirée, bornes). */
 	scan(body: ScanIn): Promise<AnalysisResult>;
+	/**
+	 * `POST /api/scans/stream` : même corps que `scan`. Un refus avant le flux (401 après
+	 * renouvellement, 402, 403, 422, 429) lève comme `scan` ; sinon, les événements SSE
+	 * du flux. `signal` annule la requête et la lecture.
+	 */
+	scanStream(
+		body: ScanIn,
+		signal: AbortSignal,
+	): Promise<AsyncIterable<SseMessage>>;
 }
 
 async function errorBody(res: Response): Promise<ApiErrorBody> {
@@ -42,10 +52,11 @@ async function errorBody(res: Response): Promise<ApiErrorBody> {
 	};
 }
 
-/** Méthode et corps JSON d'une requête ; les en-têtes sont fixés par `send`. */
+/** Méthode, corps JSON et signal d'une requête ; les en-têtes sont fixés par `send`. */
 interface SendInit {
 	method?: "GET" | "POST";
 	body?: string;
+	signal?: AbortSignal;
 }
 
 export function createApiClient({
@@ -87,8 +98,9 @@ export function createApiClient({
 	/**
 	 * Un 401 déclenche **un** renouvellement du JWT ; un second 401 déconnecte.
 	 * Les 5xx (dont 503 `auth_unavailable`) ne touchent jamais à la session.
+	 * Toute autre réponse en erreur lève `ApiRequestError`.
 	 */
-	async function requestJson<T>(path: string, init?: SendInit): Promise<T> {
+	async function request(path: string, init?: SendInit): Promise<Response> {
 		let res = await send(path, init);
 		if (res.status === 401) {
 			jwt.invalidate();
@@ -96,7 +108,11 @@ export function createApiClient({
 			if (res.status === 401) return sessionExpired();
 		}
 		if (!res.ok) throw new ApiRequestError(res.status, await errorBody(res));
-		return (await res.json()) as T;
+		return res;
+	}
+
+	async function requestJson<T>(path: string, init?: SendInit): Promise<T> {
+		return (await (await request(path, init)).json()) as T;
 	}
 
 	return {
@@ -106,5 +122,14 @@ export function createApiClient({
 				method: "POST",
 				body: JSON.stringify(body),
 			}),
+		async scanStream(body, signal) {
+			const res = await request("/api/scans/stream", {
+				method: "POST",
+				body: JSON.stringify(body),
+				signal,
+			});
+			// Sans corps : un flux vide, donc interrompu pour l'appelant.
+			return readSse(res.body ?? new Blob().stream());
+		},
 	};
 }

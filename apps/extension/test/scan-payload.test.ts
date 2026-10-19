@@ -25,7 +25,6 @@ function request(overrides: Partial<ScanRequest> = {}): ScanRequest {
 		listing: listing(),
 		signals: [],
 		rulesVersion: 2,
-		scanKind: "text",
 		trigger: "button",
 		partial: false,
 		...overrides,
@@ -249,7 +248,7 @@ describe("toScanIn", () => {
 		expect(body.listing.description).toBe("  état  ");
 	});
 
-	test("rules, scanKind, trigger and partial come from the request", () => {
+	test("rules, trigger and partial come from the request; no scanKind is sent", () => {
 		const signal: Signal = {
 			id: "price_anomaly",
 			weight: 20,
@@ -260,9 +259,10 @@ describe("toScanIn", () => {
 			request({
 				signals: [signal],
 				rulesVersion: 7,
-				scanKind: "image",
 				trigger: "card",
 				partial: true,
+				// Un ancien content script pourrait encore l'envoyer : jamais recopié.
+				...({ scanKind: "image" } as Partial<ScanRequest>),
 			}),
 		);
 		expect(body.rules).toEqual({
@@ -276,7 +276,7 @@ describe("toScanIn", () => {
 				},
 			],
 		});
-		expect(body.scanKind).toBe("image");
+		expect(body).not.toHaveProperty("scanKind");
 		expect(body.trigger).toBe("card");
 		expect(body.partial).toBe(true);
 	});

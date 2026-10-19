@@ -1,24 +1,32 @@
 import type { Me } from "@radarnaque/shared";
-import type { ContentAccess, ScanKind } from "./messages";
+import type { ContentAccess } from "./messages";
 
-export type AccessFeature = "text" | "image" | "cards";
+/** `ai` : l'analyse IA (`full`) ; `cards` : les icônes des cartes de la liste. */
+export type AccessFeature = "ai" | "cards";
 
-/** Fonctionnalité du plan (`Me.features`) qui ouvre chaque usage ; le texte est inclus partout. */
+/** Fonctionnalité du plan (`Me.features`) qui ouvre chaque usage ; l'analyse IA est incluse partout. */
 const REQUIRED_FEATURE: Record<AccessFeature, string | null> = {
-	text: null,
-	image: "image_scan",
+	ai: null,
 	cards: "card_icons",
 };
 
-function remainingOf(me: Me, kind: ScanKind): number | null {
-	return me.quotas.find((q) => q.scanKind === kind)?.remaining ?? null;
+/**
+ * Scans restants : le quota `full`, limité par le plafond total ; `null` si le plan
+ * n'a ni l'un ni l'autre.
+ */
+function remainingScans(me: Me): number | null {
+	const limits = [
+		me.quotas.find((q) => q.scanKind === "full")?.remaining,
+		me.totalCap?.remaining,
+	].filter((n): n is number => typeof n === "number");
+	return limits.length > 0 ? Math.min(...limits) : null;
 }
 
 /**
  * Droits de la page déduits de `GET /api/me`. Sans plan actif : `noSubscription`, sauf
  * pour un admin (`unlimited`), que le serveur laisse scanner même sans abonnement.
- * Le superuser de développement est illimité comme un admin et a en plus `debug` ;
- * l'API ne renvoie ce rôle que hors production (sinon `user`).
+ * Le superuser de développement (vu en Premium par l'API) est illimité comme un admin
+ * et a en plus `debug` ; l'API ne renvoie ce rôle que hors production (sinon `user`).
  */
 export function accessOf(me: Me): ContentAccess {
 	const superuser = me.role === "superuser";
@@ -29,14 +37,9 @@ export function accessOf(me: Me): ContentAccess {
 		features: me.features,
 		unlimited,
 		debug: superuser,
+		maxImages: me.maxImages,
 		// Admin ou superuser : aucun quota affiché, même si l'API en renvoie.
-		remaining: unlimited
-			? { text: null, image: null, total: null }
-			: {
-					text: remainingOf(me, "text"),
-					image: remainingOf(me, "image"),
-					total: me.totalCap?.remaining ?? null,
-				},
+		remaining: { scans: unlimited ? null : remainingScans(me) },
 	};
 }
 

@@ -1,6 +1,5 @@
 import type { AnalysisResult, Locale } from "@radarnaque/shared";
 import { useId } from "react";
-import { canUse } from "../lib/access";
 // Erreurs qui demandent une reconnexion (RELOGIN_CODES) : on propose le bouton « Se connecter ».
 import { RELOGIN_CODES } from "../lib/content/access-policy";
 import type { ScanState } from "../lib/content/ai-client";
@@ -18,6 +17,15 @@ const PRICING_CODES = new Set([
 
 const BUTTON_CLASS =
 	"inline-flex cursor-pointer items-center justify-center rounded-[6px] border border-slate-300 bg-white px-3 py-1.5 text-[13px] leading-[1.4] font-semibold text-slate-900 shadow-sm hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700 disabled:cursor-default disabled:bg-slate-100 disabled:text-slate-500";
+
+/**
+ * Provisoire, jusqu'à la section IA à scan unique (phase 3d) : l'ancien droit aux
+ * photos, que `canUse` ne connaît plus.
+ */
+function canScanPhotos(access: ContentAccess): boolean {
+	if (access.status !== "active") return false;
+	return access.unlimited || access.features.includes("image_scan");
+}
 
 const LINK_CLASS =
 	"font-semibold text-slate-900 underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700";
@@ -76,7 +84,7 @@ function ShownBody(props: AiSectionProps & { shown: ShownResult }) {
 		props.hasPhotos &&
 		access !== "loading" &&
 		!("error" in access) &&
-		canUse(access, "image");
+		canScanPhotos(access);
 	return (
 		<div className="flex flex-col gap-3">
 			<ResultView locale={locale} kind={shown.kind} result={shown.result} />
@@ -108,7 +116,7 @@ function AccessBody(props: AiSectionProps) {
 	if (access.status === "noSubscription") {
 		return <ErrorNotice {...props} code="no_active_subscription" />;
 	}
-	const photos = canUse(access, "image") && props.hasPhotos;
+	const photos = canScanPhotos(access) && props.hasPhotos;
 	return (
 		<div className="flex flex-col gap-3">
 			<ScanBlock {...props} kind="text" state={props.text} />
