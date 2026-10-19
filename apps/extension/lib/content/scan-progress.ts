@@ -57,27 +57,44 @@ export function addEvent(
 /** Espaces resserrés, sauts de ligne compris. */
 const squeeze = (s: string) => s.replace(/\s+/g, " ").trim();
 
+/** Phrases d'un texte : coupées aux sauts de ligne et après `.`, `!`, `?` ou `…`. */
+const SENTENCE_BREAK = /\n|(?<=[.!?…])\s+/;
+
 /**
- * Titre d'un résumé de réflexion : le premier segment `**…**` non vide, sinon la
- * dernière phrase non vide, sans les `**` restants. Le résumé arrive cumulé : un `**`
- * ouvrant sans fermant est un titre en cours, rendu tel qu'il est déjà arrivé. Le
- * texte reste celui du modèle, espaces resserrés.
+ * Titre et corps d'un résumé de réflexion. Le titre est le premier segment `**…**`
+ * non vide, sinon la dernière phrase non vide ; le corps est le reste du texte, sans
+ * le titre ni les `**` restants (sauts de ligne gardés). Le résumé arrive cumulé : un
+ * `**` ouvrant sans fermant est un titre en cours, rendu tel qu'il est déjà arrivé.
+ * Le texte reste celui du modèle ; le titre a ses espaces resserrés.
  */
-export function thinkingTitle(text: string): string {
+export function thinkingParts(text: string): { title: string; body: string } {
 	// Entre deux `**` : les morceaux d'indice impair. Le dernier, s'il est impair,
 	// n'a pas encore de marqueur fermant.
 	const parts = text.split("**");
 	for (let i = 1; i < parts.length; i += 2) {
 		const title = squeeze(parts[i] ?? "");
-		if (title) return title;
+		if (title) {
+			const body = parts
+				.filter((_, j) => j !== i)
+				.join("")
+				.trim();
+			return { title, body };
+		}
 	}
 	const sentences = parts
 		.join("")
-		.split(/\n|(?<=[.!?…])\s+/)
+		.split(SENTENCE_BREAK)
 		.map(squeeze)
 		.filter(Boolean);
-	return sentences.at(-1) ?? "";
+	return {
+		title: sentences.at(-1) ?? "",
+		body: sentences.slice(0, -1).join(" "),
+	};
 }
+
+/** Titre d'un résumé de réflexion (voir `thinkingParts`) : la ligne d'état. */
+export const thinkingTitle = (text: string): string =>
+	thinkingParts(text).title;
 
 /** Remplit `{nom}` en une passe : une requête qui contient `{…}` reste telle quelle. */
 const fill = (template: string, params: Record<string, string | number>) =>

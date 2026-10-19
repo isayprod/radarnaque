@@ -631,10 +631,19 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 			/>,
 		);
 		const button = launch();
-		expect(button.hasAttribute("disabled")).toBe(true);
-		expect(button.getAttribute("title")).toBe("Plus d'analyses IA ce mois-ci");
+		// Grisé mais focusable : la raison est lue avec le bouton.
+		expect(button.hasAttribute("disabled")).toBe(false);
+		expect(button.getAttribute("aria-disabled")).toBe("true");
+		expect(button.getAttribute("title")).toBe("Plus d'analyses IA disponibles");
+		const reason = document.getElementById(
+			button.getAttribute("aria-describedby") ?? "",
+		);
+		expect(reason?.textContent).toBe("Plus d'analyses IA disponibles");
+		button.focus();
+		expect(document.activeElement).toBe(button);
 		await user.click(button);
 		expect(ai.scan).not.toHaveBeenCalled();
+		expect(ai.access).not.toHaveBeenCalled();
 		cleanup();
 
 		// Accès inconnu au clic : lu, puis grisé sans analyse.
@@ -642,9 +651,86 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
 		await user.click(launch());
 		await vi.waitFor(() =>
-			expect(launch().hasAttribute("disabled")).toBe(true),
+			expect(launch().getAttribute("aria-disabled")).toBe("true"),
 		);
 		expect(ai.scan).not.toHaveBeenCalled();
+	});
+
+	test("analysis_failed lancée depuis la pastille : son texte, annoncé, et le bouton de lancement", async () => {
+		const user = userEvent.setup();
+		scanReply.mockResolvedValueOnce({
+			ok: false,
+			error: { code: "analysis_failed" },
+		});
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		await user.click(launch());
+		const text = aiErrorText("fr", "analysis_failed");
+		expect(await screen.findByText(text)).toBeTruthy();
+		expect(screen.queryByRole("dialog")).toBeNull();
+		await vi.waitFor(() => expect(announced()).toBe(text), { timeout: 3_000 });
+		// Pas « Relancer » : le bouton de lancement, qui relance l'analyse.
+		expect(screen.queryByRole("button", { name: "Relancer" })).toBeNull();
+		await user.click(launch());
+		expect(ai.scan).toHaveBeenCalledTimes(2);
+	});
+
+	test("quota_exhausted lancée depuis la pastille : son texte, sans bouton (quota relu à 0)", async () => {
+		const user = userEvent.setup();
+		scanReply.mockResolvedValueOnce({
+			ok: false,
+			error: { code: "quota_exhausted" },
+		});
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { ...active, remaining: { scans: 0 } },
+		}));
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		await user.click(launch());
+		expect(
+			await screen.findByText(aiErrorText("fr", "quota_exhausted")),
+		).toBeTruthy();
+		// L'accès relu après le scan dit 0 : le message suffit.
+		await vi.waitFor(() => expect(ai.access).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(queryLaunch()).toBeNull());
+	});
+
+	test("connexion impossible depuis la pastille : le panneau s'ouvre avec le texte de repli", async () => {
+		const user = userEvent.setup();
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { status: "signedOut" },
+		}));
+		ai.openLogin.mockResolvedValue({
+			ok: false,
+			error: { code: "popup_unavailable" },
+		});
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await user.click(launch());
+		const fallback = contentText("fr", "ai.loginFallback");
+		expect(await screen.findByText(fallback)).toBeTruthy();
+		expect(screen.getByRole("dialog")).toBeTruthy();
+
+		// Déjà su impossible : le panneau rouvre dès le clic.
+		await user.click(toggle());
+		expect(screen.queryByRole("dialog")).toBeNull();
+		await user.click(launch());
+		expect(await screen.findByText(fallback)).toBeTruthy();
 	});
 
 	test("sans abonnement : un lien vers les formules, dans la langue active", () => {

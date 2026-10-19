@@ -351,7 +351,7 @@ describe("AiSection : erreurs", () => {
 		setup({ ai: { status: "error", code: "quota_exhausted" } });
 		expect(
 			screen.getByText(
-				"Vous avez utilisé toutes vos analyses de ce type pour cette période.",
+				"Vous avez utilisé toutes vos analyses IA pour cette période.",
 			),
 		).not.toBeNull();
 		const link = screen.getByRole("link", { name: "Voir les formules" });
