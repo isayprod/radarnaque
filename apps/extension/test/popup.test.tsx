@@ -14,7 +14,7 @@ import App from "../entrypoints/popup/App";
 import { detectLocale, dictionaries, t } from "../lib/i18n";
 import type { BgRequest, BgResponse } from "../lib/messages";
 import { localePref, pendingSignIn, sessionToken } from "../lib/storage";
-import { trialMe } from "./helpers";
+import { superuserMe, trialMe } from "./helpers";
 
 const { sendToBackground } = vi.hoisted(() => ({
 	sendToBackground: vi.fn<(req: BgRequest) => Promise<BgResponse<unknown>>>(),
@@ -521,6 +521,21 @@ describe("popup", () => {
 		expect(await screen.findByText("Standard")).toBeTruthy();
 		expect(within(rowOf("Analyses texte")).getByText("130")).toBeTruthy();
 		expect(screen.queryByText("Scans d'essai restants")).toBeNull();
+	});
+
+	test("account view: superuser shows « Superuser (dev) » in FR and NL, no quota rows", async () => {
+		background({ "auth/state": () => signedIn(superuserMe) });
+		const { unmount } = render(<App />);
+		expect(await screen.findByText("Superuser (dev)")).toBeTruthy();
+		expect(screen.queryByText("Administrateur · illimité")).toBeNull();
+		expect(screen.queryByRole("listitem")).toBeNull();
+		unmount();
+
+		await localePref.setValue("nl");
+		render(<App />);
+		expect(await screen.findByText("Superuser (dev)")).toBeTruthy();
+		expect(screen.queryByText("Beheerder · onbeperkt")).toBeNull();
+		expect(t("nl", "plan.superuser")).toBe("Superuser (dev)");
 	});
 
 	test("account view: premium-like (no total cap) shows the two per-kind rows", async () => {

@@ -21,7 +21,10 @@ import { sessionToken } from "../lib/storage";
 import {
 	errorResponse,
 	fetchSequence,
+	jsonResponse,
+	makeJwt,
 	sampleAnalysis,
+	superuserMe,
 	trialMe,
 } from "./helpers";
 
@@ -272,6 +275,7 @@ describe("background handlers", () => {
 				status: "active",
 				features: ["card_icons", "image_scan"],
 				unlimited: false,
+				debug: false,
 				remaining: { text: 3, image: 3, total: 3 },
 			},
 		});
@@ -407,6 +411,211 @@ describe("scan and popup handlers", () => {
 			ok: false,
 			error: { code: "popup_unavailable" },
 		});
+	});
+});
+
+/** Faux `console` : tout ce qui y est écrit est inspecté par les tests. */
+function fakeConsole() {
+	return {
+		groupCollapsed: vi.fn<(...args: unknown[]) => void>(),
+		log: vi.fn<(...args: unknown[]) => void>(),
+		groupEnd: vi.fn<(...args: unknown[]) => void>(),
+	};
+}
+
+/** Tous les arguments reçus par le faux `console`, sérialisés. */
+function written(sink: ReturnType<typeof fakeConsole>): string {
+	const calls = [
+		...sink.groupCollapsed.mock.calls,
+		...sink.log.mock.calls,
+		...sink.groupEnd.mock.calls,
+	];
+	return JSON.stringify(calls);
+}
+
+/** Titres et données des groupes écrits, dans l'ordre. */
+function groups(sink: ReturnType<typeof fakeConsole>) {
+	return sink.groupCollapsed.mock.calls.map(([title], i) => ({
+		title,
+		data: sink.log.mock.calls[i]?.[0],
+	}));
+}
+
+const debugAnalysis: AnalysisResult = {
+	...sampleAnalysis,
+	debug: {
+		analysisId: 42,
+		contentHash: "c-hash",
+		costUsdMicros: 120,
+		fromCache: false,
+		inputHash: "i-hash",
+		llmCalled: true,
+		messages: [{ role: "user", content: "Annonce : Vélo" }],
+		model: "modele-test",
+		promptVersion: { scanKind: "text", version: 1 },
+		provider: "fournisseur-test",
+		rawResponse: "{}",
+		snapshotId: 7,
+		systemPrompt: "Tu analyses une annonce.",
+		timingsMs: { images: null, llm: 900, total: 950 },
+		tokensIn: 100,
+		tokensOut: 20,
+	},
+};
+
+describe("superuser debug logs", () => {
+	test("superuser : envoi, réception (avec debug) et noCache passent dans les logs", async () => {
+		await sessionToken.setValue("session-abc");
+		const sink = fakeConsole();
+		const { deps, api } = makeDeps({ debugLog: sink });
+		api.getMe.mockResolvedValue(superuserMe);
+		api.scan.mockResolvedValue(debugAnalysis);
+		const handle = createHandlers(deps);
+
+		expect(await handle({ type: "content/access" })).toMatchObject({
+			ok: true,
+			data: { status: "active", debug: true },
+		});
+		expect(sink.groupCollapsed).not.toHaveBeenCalled();
+
+		expect(
+			await handle({
+				type: "scan/run",
+				scan: scanRequest({ noCache: true }),
+			}),
+		).toEqual({ ok: true, data: debugAnalysis });
+		expect(api.scan.mock.calls[0]?.[0]).toMatchObject({ noCache: true });
+
+		const body = api.scan.mock.calls[0]?.[0];
+		expect(groups(sink)).toEqual([
+			{ title: "[Radarnaque debug] scan envoyé", data: body },
+			{
+				title: "[Radarnaque debug] scan reçu",
+				data: { status: "ok", result: debugAnalysis },
+			},
+		]);
+		expect(sink.groupEnd).toHaveBeenCalledTimes(2);
+		// Le corps envoyé est déjà nettoyé : pas d'identité du vendeur.
+		expect(written(sink)).not.toContain("Jean");
+		expect(written(sink)).not.toContain("/u/jean");
+	});
+
+	test("superuser : une erreur de scan est journalisée avec son code seul", async () => {
+		await sessionToken.setValue("session-abc");
+		const sink = fakeConsole();
+		const { deps, api } = makeDeps({ debugLog: sink });
+		api.getMe.mockResolvedValue(superuserMe);
+		api.scan.mockRejectedValueOnce(
+			new ApiRequestError(502, {
+				error: { code: "analysis_failed", message: "secret", details: {} },
+			}),
+		);
+		const handle = createHandlers(deps);
+		await handle({ type: "auth/state" });
+		expect(await handle({ type: "scan/run", scan: scanRequest() })).toEqual({
+			ok: false,
+			error: { code: "analysis_failed" },
+		});
+		expect(groups(sink).map((g) => g.title)).toEqual([
+			"[Radarnaque debug] scan envoyé",
+			"[Radarnaque debug] scan en erreur",
+		]);
+		expect(groups(sink)[1]?.data).toEqual({ code: "analysis_failed" });
+	});
+
+	test("compte ordinaire, admin ou sans session : aucun log de debug", async () => {
+		for (const me of [
+			trialMe,
+			{ ...trialMe, role: "admin" as const, unlimited: true },
+		]) {
+			await sessionToken.setValue("session-abc");
+			const sink = fakeConsole();
+			const { deps, api } = makeDeps({ debugLog: sink });
+			api.getMe.mockResolvedValue(me);
+			const handle = createHandlers(deps);
+			await handle({ type: "content/access" });
+			await handle({ type: "scan/run", scan: scanRequest() });
+			api.scan.mockRejectedValueOnce(new AuthError("network"));
+			await handle({ type: "scan/run", scan: scanRequest() });
+			expect(sink.groupCollapsed).not.toHaveBeenCalled();
+			expect(sink.log).not.toHaveBeenCalled();
+			expect(sink.groupEnd).not.toHaveBeenCalled();
+		}
+
+		// Sans session : aucun `me`, donc aucun log non plus.
+		await sessionToken.setValue(null);
+		const sink = fakeConsole();
+		const { deps } = makeDeps({ debugLog: sink });
+		const handle = createHandlers(deps);
+		await handle({ type: "content/access" });
+		await handle({ type: "scan/run", scan: scanRequest() });
+		expect(sink.groupCollapsed).not.toHaveBeenCalled();
+	});
+
+	test("les logs s'arrêtent dès que le dernier me n'est plus superuser, et à la déconnexion", async () => {
+		await sessionToken.setValue("session-abc");
+		const sink = fakeConsole();
+		const { deps, api } = makeDeps({ debugLog: sink });
+		const handle = createHandlers(deps);
+
+		api.getMe.mockResolvedValue(superuserMe);
+		await handle({ type: "content/access" });
+		api.getMe.mockResolvedValue(trialMe);
+		await handle({ type: "content/access" });
+		await handle({ type: "scan/run", scan: scanRequest() });
+		expect(sink.groupCollapsed).not.toHaveBeenCalled();
+
+		api.getMe.mockResolvedValue(superuserMe);
+		await handle({ type: "auth/state" });
+		await handle({ type: "auth/sign-out" });
+		await handle({ type: "scan/run", scan: scanRequest() });
+		expect(sink.groupCollapsed).not.toHaveBeenCalled();
+	});
+
+	test("le log du service worker ne contient jamais le JWT ni le jeton de session", async () => {
+		const SESSION = "session-token-tres-secret";
+		const JWT = makeJwt(Math.floor(Date.now() / 1000) + 600, "user-su");
+		await sessionToken.setValue(SESSION);
+		const fetchFn = fetchSequence(
+			jsonResponse(200, superuserMe),
+			jsonResponse(200, debugAnalysis),
+			jsonResponse(200, debugAnalysis),
+			errorResponse(502, "analysis_failed"),
+		);
+		const jwt = {
+			get: vi.fn<() => Promise<string>>(async () => JWT),
+			invalidate: vi.fn(),
+		};
+		const api = createApiClient({
+			jwt,
+			fetch: fetchFn,
+			onUnauthenticated: async () => {},
+		});
+		const sink = fakeConsole();
+		const { deps } = makeDeps({ api, jwt, debugLog: sink });
+		const handle = createHandlers(deps);
+
+		await handle({ type: "content/access" });
+		await handle({ type: "scan/run", scan: scanRequest() });
+		await handle({ type: "scan/run", scan: scanRequest({ noCache: true }) });
+		await handle({ type: "scan/run", scan: scanRequest() });
+
+		// Le JWT est bien parti dans l'en-tête Authorization…
+		expect(
+			new Headers(fetchFn.mock.calls[1]?.[1]?.headers).get("authorization"),
+		).toBe(`Bearer ${JWT}`);
+		// …mais n'apparaît dans aucun argument reçu par la console.
+		expect(sink.groupCollapsed).toHaveBeenCalledTimes(6);
+		const out = written(sink);
+		for (const secret of [
+			JWT,
+			...JWT.split("."),
+			SESSION,
+			"Bearer",
+			"authorization",
+		]) {
+			expect(out).not.toContain(secret);
+		}
 	});
 });
 

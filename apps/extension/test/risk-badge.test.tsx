@@ -46,6 +46,7 @@ const active: ContentAccess = {
 	status: "active",
 	features: [],
 	unlimited: false,
+	debug: false,
 	remaining: { text: 3, image: null, total: null },
 };
 

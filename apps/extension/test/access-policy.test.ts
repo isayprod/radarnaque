@@ -12,6 +12,7 @@ const active: ContentAccess = {
 	status: "active",
 	features: ["card_icons"],
 	unlimited: false,
+	debug: false,
 	remaining: { text: 3, image: null, total: null },
 };
 

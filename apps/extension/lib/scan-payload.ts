@@ -140,7 +140,7 @@ export function toScanIn(req: ScanRequest): ScanIn {
 		listing.postedAt = cut(l.postedAt, BOUNDS.postedAt);
 	}
 
-	return {
+	const body: ScanIn = {
 		listing,
 		rules: {
 			version: req.rulesVersion,
@@ -150,4 +150,7 @@ export function toScanIn(req: ScanRequest): ScanIn {
 		trigger: req.trigger,
 		partial: req.partial,
 	};
+	// Seulement s'il est demandé : le corps d'un scan ordinaire ne change pas.
+	if (req.noCache === true) body.noCache = true;
+	return body;
 }

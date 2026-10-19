@@ -28,6 +28,7 @@ const fr = {
 	"plan.premium": "Premium",
 	"plan.none": "Aucun abonnement actif",
 	"plan.unlimited": "Administrateur · illimité",
+	"plan.superuser": "Superuser (dev)",
 
 	"scan.text": "Analyses texte",
 	"scan.image": "Analyses avec photos",
@@ -71,6 +72,7 @@ const nl: Record<MessageKey, string> = {
 	"plan.premium": "Premium",
 	"plan.none": "Geen actief abonnement",
 	"plan.unlimited": "Beheerder · onbeperkt",
+	"plan.superuser": "Superuser (dev)",
 
 	"scan.text": "Tekstanalyses",
 	"scan.image": "Analyses met foto's",
