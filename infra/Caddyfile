@@ -10,7 +10,10 @@
 }
 
 {$SITE_ADDRESS:radarnaque.mostconsult.be} {
-	encode zstd gzip
+	# Compression, sauf pour le flux de l'analyse : un encodeur garderait les événements en
+	# tampon.
+	@compressible not path /api/scans/stream
+	encode @compressible zstd gzip
 
 	header {
 		X-Content-Type-Options nosniff
@@ -39,6 +42,17 @@
 	@internal path /api/internal /api/internal/*
 	handle @internal {
 		respond 404
+	}
+
+	# Analyse en flux (SSE, POST /api/scans/stream) : chaque événement part aussitôt, sans
+	# tampon (flush_interval -1). Déclaré à part de /api/* (chemin plus précis, servi d'abord).
+	handle /api/scans/stream {
+		request_body {
+			max_size 1MB
+		}
+		reverse_proxy api:8000 {
+			flush_interval -1
+		}
 	}
 
 	handle /api/* {

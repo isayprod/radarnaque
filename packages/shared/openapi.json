@@ -189,8 +189,48 @@
         "title": "DebugMessageOut",
         "type": "object"
       },
+      "DebugSearchOut": {
+        "description": "Une recherche lanc\u00e9e par le mod\u00e8le, r\u00e9ussie ou non : la requ\u00eate masqu\u00e9e, la sortie\nexacte rendue au mod\u00e8le et sa dur\u00e9e en millisecondes.",
+        "properties": {
+          "aspect": {
+            "enum": [
+              "model",
+              "price",
+              "scam",
+              "other"
+            ],
+            "title": "Aspect",
+            "type": "string"
+          },
+          "ms": {
+            "title": "Ms",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "output": {
+            "title": "Output",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "aspect",
+          "ok",
+          "output",
+          "ms"
+        ],
+        "title": "DebugSearchOut",
+        "type": "object"
+      },
       "DebugTimingsOut": {
-        "description": "Dur\u00e9es en millisecondes ; `None` pour une \u00e9tape saut\u00e9e (pas de photo, cache).",
+        "description": "Dur\u00e9es en millisecondes ; `None` pour une \u00e9tape saut\u00e9e (pas de photo, cache, aucune\nrecherche). `search` : somme des recherches, d\u00e9j\u00e0 comprise dans `llm`.",
         "properties": {
           "images": {
             "anyOf": [
@@ -214,6 +254,17 @@
             ],
             "title": "Llm"
           },
+          "search": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search"
+          },
           "total": {
             "title": "Total",
             "type": "integer"
@@ -222,6 +273,7 @@
         "required": [
           "images",
           "llm",
+          "search",
           "total"
         ],
         "title": "DebugTimingsOut",
@@ -719,6 +771,21 @@
             ],
             "title": "Rawresponse"
           },
+          "reasoning": {
+            "title": "Reasoning",
+            "type": "string"
+          },
+          "rounds": {
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "searches": {
+            "items": {
+              "$ref": "#/components/schemas/DebugSearchOut"
+            },
+            "title": "Searches",
+            "type": "array"
+          },
           "snapshotId": {
             "title": "Snapshotid",
             "type": "integer"
@@ -752,6 +819,9 @@
           "tokensOut",
           "costUsdMicros",
           "timingsMs",
+          "rounds",
+          "searches",
+          "reasoning",
           "contentHash",
           "inputHash",
           "snapshotId",
@@ -1432,6 +1502,38 @@
           }
         },
         "summary": "History"
+      }
+    },
+    "/api/scans/stream": {
+      "post": {
+        "description": "M\u00eame scan que `POST /api/scans`, en Server-Sent Events (spec \u00a78.3). L'admission se fait\navant toute r\u00e9ponse : un refus (401, 402, 403, 422, 429) reste une erreur JSON.",
+        "operationId": "create_scan_stream_api_scans_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Scan Stream"
       }
     }
   }

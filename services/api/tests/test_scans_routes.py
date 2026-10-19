@@ -22,6 +22,8 @@ from radarnaque_api.llm.events import EventSink
 from radarnaque_api.llm.providers import ProviderError
 from radarnaque_api.llm.tools import WebSearchTool
 from radarnaque_api.main import create_app
+from radarnaque_api.search import SearchHit
+from radarnaque_api.services import scans as scans_service
 
 PROVIDER_SECRET = "provider-secret-body-9c41"
 
@@ -140,6 +142,47 @@ async def test_scan_returns_camel_case_result_then_from_cache(client, bearer, us
     assert again.json()["fromCache"] is True
     assert again.json()["analysisId"] == data["analysisId"]
     assert llm.calls == 1
+
+
+class _SearchingLLM(FakeLLM):
+    """Faux client qui fait une recherche web par l'outil reçu (le moteur de `app.state`)."""
+
+    async def analyze(self, *, tools: WebSearchTool | None = None, **kw) -> LLMResult:
+        assert tools is not None
+        await tools.run('{"query": "velo de course prix", "aspect": "price"}')
+        result = await super().analyze(**kw)
+        result.searches = tools.records
+        return result
+
+
+class _OneHitBackend:
+    async def search(self, query: str) -> list[SearchHit]:
+        return [SearchHit(title="Vélo", url="https://exemple.be/velo", snippet="Prix")]
+
+
+async def test_scan_without_stream_has_web_searches_and_images(
+    app, client, bearer, user, monkeypatch
+):
+    """`POST /api/scans` passe par le même code que le flux : moteur de recherche de
+    l'application, photos, et réponse `AnalysisResultOut` complète."""
+
+    async def fake_fetch(urls, suffixes, *, http, resolve, limit):
+        return ["aW1n"] * min(limit, len(urls))
+
+    monkeypatch.setattr(scans_service, "fetch_images", fake_fetch)
+    fake = _SearchingLLM()
+    app.state.llm_for = fake.llm_for
+    app.state.search = _OneHitBackend()
+    uid = await user()
+    images = ["https://images.2dehands.com/api/a.jpg", "https://images.2dehands.com/api/b.jpg"]
+
+    r = await client.post("/api/scans", json=_body(images=images), headers=bearer(uid))
+
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/json"
+    data = r.json()
+    assert data["imagesAnalyzed"] == 2
+    assert data["webSearches"] == [{"query": "velo de course prix", "aspect": "price"}]
 
 
 async def test_scan_rejects_seller_identity(client, bearer, user, llm):
