@@ -172,6 +172,24 @@ export function createHandlers(
 		}
 	}
 
+	/**
+	 * Drapeau des logs de debug de la page : le mécanisme des logs du service worker
+	 * (`debugFor` lié au jeton courant, `me` lu au besoin par `ensureDebugKnown`).
+	 * Sans session : faux, sans appel réseau.
+	 */
+	async function contentDebug(): Promise<BgResponse<boolean>> {
+		await ensureDebugKnown();
+		let token: string | null;
+		try {
+			token = await sessionToken.getValue();
+		} catch {
+			return ok(false);
+		}
+		return ok(
+			token !== null && debugFor?.token === token && debugFor.debug === true,
+		);
+	}
+
 	async function state(): Promise<BgResponse<AuthState>> {
 		const me = await trackedMe();
 		return ok(me ? { status: "signedIn", me } : { status: "signedOut" });
@@ -239,6 +257,8 @@ export function createHandlers(
 				return state();
 			case "content/access":
 				return contentAccess();
+			case "content/debug":
+				return contentDebug();
 			case "scan/run":
 				return runScan(req.scan);
 			case "ui/open-popup":

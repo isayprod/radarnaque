@@ -41,6 +41,11 @@ interface Slots {
 	 * reste en place, seul le bouton de la section Debug l'indique.
 	 */
 	rescanning: Partial<Record<ScanKind, true>>;
+	/**
+	 * Code d'erreur de la dernière relance sans cache, par type : le résultat
+	 * affiché reste en place et l'erreur s'affiche dans la section Debug.
+	 */
+	rescanError: Partial<Record<ScanKind, string>>;
 	loginUnavailable: boolean;
 }
 
@@ -70,6 +75,7 @@ const freshSlots = (key: string, access: AccessState | null): Slots => ({
 	image: IDLE,
 	doneFingerprint: {},
 	rescanning: {},
+	rescanError: {},
 	loginUnavailable: false,
 });
 
@@ -116,12 +122,14 @@ export interface AiScan {
 	scan(kind: ScanKind): void;
 	/**
 	 * Superuser : relance le scan `kind` avec `noCache: true`. Le résultat
-	 * affiché reste en place pendant la relance (`rescanning`), puis il est
-	 * remplacé par la réponse, résultat ou erreur.
+	 * affiché reste en place pendant la relance (`rescanning`) ; il est remplacé
+	 * par un nouveau résultat, ou gardé en cas d'erreur (`rescanError`).
 	 */
 	rescan(kind: ScanKind): void;
 	/** Types dont une relance sans cache est en cours. */
 	rescanning: Partial<Record<ScanKind, true>>;
+	/** Code d'erreur de la dernière relance, par type ; effacé à la suivante. */
+	rescanError: Partial<Record<ScanKind, string>>;
 	login(): void;
 }
 
@@ -217,7 +225,36 @@ export function useAiScan(
 						: others;
 				// Un nouvel état pour ce type met fin à sa relance sans cache.
 				const { [kind]: __, ...rescanning } = prev.rescanning;
-				return { ...prev, [kind]: state, doneFingerprint, rescanning };
+				const { [kind]: ___, ...rescanError } = prev.rescanError;
+				return {
+					...prev,
+					[kind]: state,
+					doneFingerprint,
+					rescanning,
+					rescanError,
+				};
+			});
+		},
+		[],
+	);
+
+	/**
+	 * Relance sans cache de `kind` : `running` l'indique en cours ; `error` est
+	 * le code de son échec, ou null (relance commencée : erreur précédente effacée).
+	 */
+	const setRescan = useCallback(
+		(scope: Scope, kind: ScanKind, running: boolean, error: string | null) => {
+			if (!mountedRef.current || scopeRef.current !== scope) return;
+			setSlots((prev) => {
+				if (prev.key !== scope.key) return prev;
+				const { [kind]: _, ...rescanning } = prev.rescanning;
+				const { [kind]: __, ...rescanError } = prev.rescanError;
+				return {
+					...prev,
+					rescanning: running ? { ...rescanning, [kind]: true } : rescanning,
+					rescanError:
+						error === null ? rescanError : { ...rescanError, [kind]: error },
+				};
 			});
 		},
 		[],
@@ -311,12 +348,7 @@ export function useAiScan(
 			if (noCache) {
 				// Relance : le résultat affiché reste en place (pas de retour à
 				// l'analyse locale), seul le bouton de la section Debug change.
-				if (mountedRef.current && scopeRef.current === scope)
-					setSlots((prev) =>
-						prev.key === scope.key
-							? { ...prev, rescanning: { ...prev.rescanning, [kind]: true } }
-							: prev,
-					);
+				setRescan(scope, kind, true, null);
 			} else setKind(scope, kind, { status: "loading" });
 			debugLog?.group("scan demandé", request);
 			const finish = (state: ScanState) => {
@@ -333,8 +365,12 @@ export function useAiScan(
 							storedAt: Date.now(),
 						})
 						.catch(() => {});
-				// Annonce modifiée depuis le clic : le rendu suivant le remet à `idle`.
-				setKind(scope, kind, state, analysed);
+				// Relance en échec : le résultat affiché reste, l'erreur va à la
+				// section Debug. Sinon (annonce modifiée depuis le clic), le rendu
+				// suivant remet l'état à `idle`.
+				if (noCache && state.status === "error")
+					setRescan(scope, kind, false, state.code);
+				else setKind(scope, kind, state, analysed);
 				// R8 : session expirée, l'accès en cache ne vaut plus, pour les
 				// icônes de cartes aussi.
 				if (state.status === "error" && RELOGIN_CODES.has(state.code))
@@ -353,7 +389,7 @@ export function useAiScan(
 				() => finish({ status: "error", code: "background_unavailable" }),
 			);
 		},
-		[client, setKind, readAccess, cache, aiResults, debugLog],
+		[client, setKind, setRescan, readAccess, cache, aiResults, debugLog],
 	);
 
 	const scan = useCallback((kind: ScanKind) => run(kind, false), [run]);
@@ -379,6 +415,7 @@ export function useAiScan(
 		scan,
 		rescan,
 		rescanning: slots.rescanning,
+		rescanError: slots.rescanError,
 		login,
 	};
 }

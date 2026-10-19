@@ -96,8 +96,10 @@ export function createController(deps: ControllerDeps): {
 	/** URL dont l'échec d'extraction a déjà été journalisé. */
 	let loggedFailure: string | null = null;
 	/**
-	 * Clé (`mountedKey`) dont l'extraction a déjà été passée aux logs de debug :
-	 * un log par changement, pas un à chaque passage de 250 ms.
+	 * Clé (`mountedKey`) dont l'extraction a déjà été écrite dans les logs de
+	 * debug : un log par changement, pas un à chaque passage de 250 ms. Elle n'est
+	 * retenue que si le logger écrit : activé plus tard (accès lu, drapeau du
+	 * service worker), le passage suivant journalise l'annonce affichée.
 	 */
 	let debugKey: string | null = null;
 	/** URL pour laquelle une pastille perdue a déjà été remontée (une fois au plus). */
@@ -153,7 +155,7 @@ export function createController(deps: ControllerDeps): {
 			return;
 		const view: BadgeView = { report, listing: result.listing };
 		const key = mountedKey(view, locale);
-		if (key !== debugKey) {
+		if (key !== debugKey && deps.debugLog?.enabled()) {
 			debugKey = key;
 			deps.debugLog?.group("annonce extraite", {
 				listing: result.listing,

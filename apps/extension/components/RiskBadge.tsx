@@ -20,7 +20,7 @@ import type { Severity, Signal } from "../lib/rules/rules";
 import type { RiskReport } from "../lib/rules/score";
 import { AiErrorBoundary } from "./AiErrorBoundary";
 import { AiSection } from "./AiSection";
-import { DebugSection } from "./DebugSection";
+import { DebugBoundary, DebugSection } from "./DebugSection";
 import { LEVEL_KEY, LEVEL_STYLE, SEVERITY_STYLE } from "./risk-styles";
 
 const SEVERITY_ORDER: Record<Severity, number> = {
@@ -242,12 +242,18 @@ export function RiskBadge({
 							pricingUrl={scan.pricingUrl}
 						/>
 						{debug && (
-							<DebugSection
-								locale={locale}
-								debug={debug.data}
-								rescanning={scan.rescanning[debug.kind] === true}
-								onRescan={() => scan.rescan(debug.kind)}
-							/>
+							// Nouvelle tentative de rendu pour chaque nouveau bloc debug.
+							<DebugBoundary
+								key={`${listing.site}|${listing.externalId}|${debug.kind}|${debug.data.analysisId}|${debug.data.inputHash}`}
+							>
+								<DebugSection
+									locale={locale}
+									debug={debug.data}
+									rescanning={scan.rescanning[debug.kind] === true}
+									onRescan={() => scan.rescan(debug.kind)}
+									error={scan.rescanError[debug.kind]}
+								/>
+							</DebugBoundary>
 						)}
 					</AiErrorBoundary>
 					{!shown && (

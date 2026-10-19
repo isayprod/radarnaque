@@ -836,6 +836,45 @@ describe("RiskBadge : section Debug (superuser)", () => {
 		).toBeTruthy();
 	});
 
+	test("relance en erreur : le verdict reste, l'erreur s'affiche dans la section Debug", async () => {
+		const user = userEvent.setup();
+		ai.access.mockResolvedValue({ ok: true, data: superuser });
+		ai.scan
+			.mockResolvedValueOnce({ ok: true, data: debugAnalysis })
+			.mockResolvedValueOnce({ ok: false, error: { code: "rate_limited" } });
+		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await user.click(await findRun());
+		await screen.findByText(debugTitle);
+		await user.click(
+			screen.getByRole("button", { name: contentText("fr", "debug.rescan") }),
+		);
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			aiErrorText("fr", "rate_limited"),
+		);
+		expect(screen.getByText(debugAnalysis.summary.fr)).toBeTruthy();
+		expect(screen.getByText(debugTitle)).toBeTruthy();
+	});
+
+	test("debug malformé : la section Debug disparaît seule, le verdict IA reste", async () => {
+		const user = userEvent.setup();
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		ai.access.mockResolvedValue({ ok: true, data: superuser });
+		const broken = {
+			...debugAnalysis,
+			debug: { ...sampleDebug, messages: null },
+		} as unknown as AnalysisResult;
+		ai.scan.mockResolvedValue({ ok: true, data: broken });
+		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
+		await user.click(toggle());
+		await user.click(await findRun());
+		await screen.findByText(debugAnalysis.summary.fr);
+		expect(screen.queryByText(debugTitle)).toBeNull();
+		// Pas l'erreur générique de la section IA : seul le debug est masqué.
+		expect(screen.queryByText(aiErrorText("fr", "default"))).toBeNull();
+		expect(toggle().textContent).toContain(contentText("fr", "ai.badgeTag"));
+	});
+
 	test("« Copier » écrit le JSON du debug dans le presse-papiers", async () => {
 		const user = userEvent.setup();
 		ai.access.mockResolvedValue({ ok: true, data: superuser });

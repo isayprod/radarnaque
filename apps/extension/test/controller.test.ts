@@ -283,6 +283,33 @@ describe("createController — logs de debug (superuser)", () => {
 		);
 	});
 
+	test("logger coupé au premier passage, puis activé : la clé n'est pas consommée, 2 logs une seule fois", async () => {
+		const doc = loadFixture("twh/listing-fixed.html");
+		const { sink, groups } = fakeSink();
+		let on = false;
+		const t = setup(
+			doc,
+			FIXED_URL,
+			undefined,
+			createDebugLog(() => on, sink),
+		);
+		await t.controller.refresh();
+		expect(sink.groupCollapsed).not.toHaveBeenCalled();
+
+		// Drapeau passé à vrai : content.ts demande un passage.
+		on = true;
+		await t.controller.refresh();
+		expect(groups().map((g) => g.title)).toEqual([
+			"[Radarnaque debug] annonce extraite",
+			"[Radarnaque debug] analyse locale",
+		]);
+		// Seconde notification (après un scan, retour sur l'onglet) : pas de doublon.
+		await t.controller.refresh();
+		await t.controller.refresh();
+		expect(groups()).toHaveLength(2);
+		expect(t.ops.map((o) => o.op)).toEqual(["mount"]);
+	});
+
 	test("utilisateur standard : aucun log de debug", async () => {
 		const doc = loadFixture("twh/listing-fixed.html");
 		const { sink } = fakeSink();

@@ -463,6 +463,82 @@ const debugAnalysis: AnalysisResult = {
 	},
 };
 
+describe("content/debug", () => {
+	test("superuser : vrai, avec une seule lecture paresseuse de me", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps, api } = makeDeps();
+		api.getMe.mockResolvedValue(superuserMe);
+		const handle = createHandlers(deps);
+		expect(await handle({ type: "content/debug" })).toEqual({
+			ok: true,
+			data: true,
+		});
+		expect(await handle({ type: "content/debug" })).toEqual({
+			ok: true,
+			data: true,
+		});
+		expect(api.getMe).toHaveBeenCalledTimes(1);
+	});
+
+	test("me déjà lu (content/access) : aucune nouvelle lecture", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps, api } = makeDeps();
+		api.getMe.mockResolvedValue(superuserMe);
+		const handle = createHandlers(deps);
+		await handle({ type: "content/access" });
+		expect(await handle({ type: "content/debug" })).toEqual({
+			ok: true,
+			data: true,
+		});
+		expect(api.getMe).toHaveBeenCalledTimes(1);
+	});
+
+	test("compte ordinaire : faux", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps } = makeDeps();
+		expect(await createHandlers(deps)({ type: "content/debug" })).toEqual({
+			ok: true,
+			data: false,
+		});
+	});
+
+	test("sans session : faux, sans appel à getMe", async () => {
+		const { deps, api } = makeDeps();
+		expect(await createHandlers(deps)({ type: "content/debug" })).toEqual({
+			ok: true,
+			data: false,
+		});
+		expect(api.getMe).not.toHaveBeenCalled();
+	});
+
+	test("jeton changé depuis la lecture de me : faux jusqu'à la relecture", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps, api } = makeDeps();
+		api.getMe.mockResolvedValueOnce(superuserMe).mockResolvedValue(trialMe);
+		const handle = createHandlers(deps);
+		expect(await handle({ type: "content/debug" })).toEqual({
+			ok: true,
+			data: true,
+		});
+		await sessionToken.setValue("session-other");
+		expect(await handle({ type: "content/debug" })).toEqual({
+			ok: true,
+			data: false,
+		});
+		expect(api.getMe).toHaveBeenCalledTimes(2);
+	});
+
+	test("échec de la lecture de me : faux", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps, api } = makeDeps();
+		api.getMe.mockRejectedValue(new AuthError("network"));
+		expect(await createHandlers(deps)({ type: "content/debug" })).toEqual({
+			ok: true,
+			data: false,
+		});
+	});
+});
+
 describe("superuser debug logs", () => {
 	test("superuser : envoi, réception (avec debug) et noCache passent dans les logs", async () => {
 		await sessionToken.setValue("session-abc");
@@ -851,9 +927,10 @@ describe("sender check", () => {
 		};
 	}
 
-	test("the content script allow-list is exactly the three content messages", () => {
+	test("the content script allow-list is exactly the four content messages", () => {
 		expect([...CONTENT_SCRIPT_MESSAGES].sort()).toEqual([
 			"content/access",
+			"content/debug",
 			"scan/run",
 			"ui/open-popup",
 		]);
@@ -887,6 +964,11 @@ describe("sender check", () => {
 			),
 		).toEqual({ ok: true, data: "handled" });
 		expect(handle).toHaveBeenCalledTimes(2);
+		expect(await guard({ type: "content/debug" }, listingPage)).toEqual({
+			ok: true,
+			data: "handled",
+		});
+		expect(handle).toHaveBeenLastCalledWith({ type: "content/debug" });
 	});
 
 	test("a content script on a supported site may not send auth messages", async () => {

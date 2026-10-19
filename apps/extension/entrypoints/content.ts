@@ -26,10 +26,12 @@ import {
 	createCardMounter,
 } from "../lib/content/card-mounter";
 import { createController } from "../lib/content/controller";
+import { createDebugFlag } from "../lib/content/debug-flag";
 import { createUiFactory } from "../lib/content/ui-context";
 import { resolveContentLocale } from "../lib/content-i18n";
 import { createDebugLog, type DebugLog } from "../lib/debug-log";
 import type { Site } from "../lib/listing/types";
+import { sendToBackground } from "../lib/messages";
 import { localePref } from "../lib/storage";
 
 function createReactRenderer(
@@ -105,9 +107,17 @@ export default defineContentScript({
 		const aiResults = createAiResultStore();
 		// M1 : entrées expirées retirées une fois au démarrage ; aucune écriture sinon.
 		void aiResults.prune();
-		// Logs de debug de la page (superuser) : décidés d'après le dernier accès
-		// en cache, relu à chaque log ; l'accès n'est jamais lu pour cela.
-		const debugLog = createDebugLog(() => isDebugCached(accessCache));
+		// Logs de debug de la page (superuser) : l'accès déjà en cache, ou le
+		// drapeau du service worker (`content/debug`, sans appel réseau hors
+		// session). Le drapeau passé à vrai demande un passage du contrôleur de
+		// fiche, qui journalise alors l'annonce affichée (une fois par clé).
+		const debugFlag = createDebugFlag(
+			() => sendToBackground<boolean>({ type: "content/debug" }),
+			() => void controller.refresh(),
+		);
+		const debugLog = createDebugLog(
+			() => isDebugCached(accessCache) || debugFlag.current(),
+		);
 		// Les UI ne s'abonnent pas à l'invalidation (une fuite par montage) : les
 		// `dispose()` ci-dessous les retirent toutes. R7 : pastille et icônes
 		// partagent un CSS chargé une seule fois, sans `<style>` dans la page.
@@ -139,9 +149,12 @@ export default defineContentScript({
 			debugLog,
 		});
 		ctx.addEventListener(window, "wxt:locationchange", () => {
+			debugFlag.read();
 			void controller.refresh();
 			void cards.refresh();
 		});
+		// Retour sur l'onglet (connexion faite dans la popup) : drapeau relu s'il est faux.
+		ctx.addEventListener(window, "focus", () => debugFlag.readIfOff());
 		// Langue changée dans la popup : nouveau rendu de la pastille et des icônes.
 		const unwatchLocale = localePref.watch(() => {
 			void controller.refresh();
@@ -154,5 +167,6 @@ export default defineContentScript({
 		});
 		void controller.refresh();
 		void cards.refresh();
+		debugFlag.read();
 	},
 });

@@ -831,7 +831,7 @@ describe("useAiScan : relance sans cache (superuser)", () => {
 		expect(t.result.current.rescanning.text).toBeFalsy();
 	});
 
-	test("relance en erreur : l'erreur remplace le résultat, comme un scan ordinaire", async () => {
+	test("relance en erreur : le résultat reste, l'erreur est gardée à part, effacée à la relance suivante", async () => {
 		const t = setup();
 		act(() => t.result.current.scan("text"));
 		t.scans[0]?.resolve(ok(debugAnalysis));
@@ -840,10 +840,39 @@ describe("useAiScan : relance sans cache (superuser)", () => {
 		t.scans[1]?.resolve(fail("rate_limited"));
 		await settle();
 		expect(t.result.current.text).toEqual({
-			status: "error",
-			code: "rate_limited",
+			status: "done",
+			result: debugAnalysis,
 		});
+		expect(t.result.current.rescanError.text).toBe("rate_limited");
 		expect(t.result.current.rescanning.text).toBeFalsy();
+
+		act(() => t.result.current.rescan("text"));
+		expect(t.result.current.rescanError.text).toBeUndefined();
+		t.scans[2]?.resolve(ok(debugAnalysis));
+		await settle();
+		expect(t.result.current.rescanError.text).toBeUndefined();
+	});
+
+	test("relance en erreur de session : l'accès en cache est invalidé, le résultat reste", async () => {
+		const t = setup();
+		act(() => t.result.current.loadAccess());
+		t.accesses[0]?.resolve(ok({ ...active, debug: true }));
+		await settle();
+		act(() => t.result.current.scan("text"));
+		t.scans[0]?.resolve(ok(debugAnalysis));
+		await settle();
+		t.accesses[1]?.resolve(ok({ ...active, debug: true }));
+		await settle();
+		expect(t.cache.current()).not.toBeNull();
+
+		act(() => t.result.current.rescan("text"));
+		t.scans[1]?.resolve(fail("session_expired"));
+		await settle();
+		expect(t.result.current.text.status).toBe("done");
+		expect(t.result.current.rescanError.text).toBe("session_expired");
+		// R8 : cache vidé, l'accès est relu.
+		expect(t.cache.current()).toBeNull();
+		expect(t.client.access).toHaveBeenCalledTimes(3);
 	});
 });
 

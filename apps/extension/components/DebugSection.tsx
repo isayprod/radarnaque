@@ -1,6 +1,13 @@
 import type { AnalysisResult, Locale } from "@radarnaque/shared";
-import { Fragment, useEffect, useRef, useState } from "react";
-import { contentText } from "../lib/content-i18n";
+import {
+	Component,
+	Fragment,
+	type ReactNode,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
+import { aiErrorText, contentText } from "../lib/content-i18n";
 
 /** Bloc `debug` d'une réponse de scan (superuser hors production). */
 export type ScanDebug = NonNullable<AnalysisResult["debug"]>;
@@ -76,16 +83,27 @@ export function DebugSection({
 	debug,
 	rescanning,
 	onRescan,
+	error,
 }: {
 	locale: Locale;
 	debug: ScanDebug;
 	/** Relance sans cache en cours : le bouton l'indique et se désactive. */
 	rescanning: boolean;
 	onRescan(): void;
+	/** Code d'erreur de la dernière relance ; le résultat affiché est l'ancien. */
+	error?: string;
 }) {
 	const [copied, setCopied] = useState(false);
 	const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-	useEffect(() => () => clearTimeout(timer.current), []);
+	// Faux après le démontage : une copie terminée ensuite ne fait plus rien.
+	const mountedRef = useRef(false);
+	useEffect(() => {
+		mountedRef.current = true;
+		return () => {
+			mountedRef.current = false;
+			clearTimeout(timer.current);
+		};
+	}, []);
 
 	const copy = () => {
 		let pending: Promise<void>;
@@ -97,6 +115,7 @@ export function DebugSection({
 		}
 		pending.then(
 			() => {
+				if (!mountedRef.current) return;
 				setCopied(true);
 				clearTimeout(timer.current);
 				timer.current = setTimeout(() => setCopied(false), COPIED_MS);
@@ -133,6 +152,11 @@ export function DebugSection({
 				title={contentText(locale, "debug.rawResponse")}
 				text={debug.rawResponse ?? "—"}
 			/>
+			{error !== undefined && (
+				<p role="alert" className="m-0 mt-2 font-sans text-[12px] text-red-800">
+					{aiErrorText(locale, error)}
+				</p>
+			)}
 			<div className="mt-2 flex flex-wrap gap-2">
 				<button type="button" onClick={copy} className={BUTTON_CLASS}>
 					{contentText(locale, copied ? "debug.copied" : "debug.copy")}
@@ -149,4 +173,27 @@ export function DebugSection({
 			</div>
 		</details>
 	);
+}
+
+/**
+ * Isole la section Debug : un bloc `debug` malformé ne doit jamais masquer le
+ * verdict IA. En cas d'erreur de rendu, la section disparaît, sans message.
+ */
+export class DebugBoundary extends Component<
+	{ children: ReactNode },
+	{ failed: boolean }
+> {
+	override state = { failed: false };
+
+	static getDerivedStateFromError() {
+		return { failed: true };
+	}
+
+	override componentDidCatch(error: unknown) {
+		console.debug(`radarnaque: section Debug indisponible (${String(error)})`);
+	}
+
+	override render() {
+		return this.state.failed ? null : this.props.children;
+	}
 }
