@@ -1,6 +1,6 @@
 # Production : docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --build
-# Seul Caddy publie des ports (80 et 443) ; postgres, auth (3000) et api (8000) restent sur
-# le réseau interne. Nom de projet distinct de la stack de dev (volumes séparés).
+# Seul Caddy publie des ports (80 et 443) ; postgres, auth (3000), api (8000) et searxng (8080)
+# restent sur le réseau interne. Nom de projet distinct de la stack de dev (volumes séparés).
 name: radarnaque
 
 x-auth-env: &auth-env
@@ -105,6 +105,10 @@ services:
       OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
       OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      # Recherche web des analyses : `none` retire l'outil. Pas de depends_on sur searxng : un
+      # moteur en panne ne fait pas échouer l'analyse (l'outil répond « Recherche indisponible »).
+      SEARCH_BACKEND: ${SEARCH_BACKEND:-searxng}
+      SEARXNG_URL: http://searxng:8080
     depends_on:
       migrate-api:
         condition: service_completed_successfully
@@ -114,6 +118,22 @@ services:
         - python
         - -c
         - "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # Moteur de recherche web de l'API (outil web_search). Sans port publié : seule l'API le joint,
+  # d'où le limiteur désactivé dans searxng/settings.yml. Pas de volume : le cache est dans l'API.
+  searxng:
+    image: searxng/searxng:2026.10.4-d48c4b555
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?SEARXNG_SECRET manquante}
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz"]
       interval: 10s
       timeout: 5s
       retries: 5

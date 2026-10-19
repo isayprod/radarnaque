@@ -6,7 +6,9 @@ Prérequis : Node 24, pnpm 10.26.1, Docker, uv.
 
 En dev, tout passe par une seule origine, `http://localhost:8080` (Caddy, dans Docker) :
 `/auth/*` → service auth (hôte, port 3000), `/api/*` → API (hôte, port 8000), le reste →
-`apps/site/dist`. Seuls Postgres et Caddy tournent dans Docker, liés à `127.0.0.1`.
+`apps/site/dist`. Seuls Postgres, Caddy et SearXNG (le moteur de recherche web des analyses,
+`http://127.0.0.1:8888`, configuré par `infra/searxng/settings.yml`) tournent dans Docker, liés à
+`127.0.0.1`.
 
 ### 1. Configuration
 
@@ -46,7 +48,7 @@ pnpm dev
 Une seule commande, un seul terminal. Elle vérifie d'abord que les ports 3000, 8000 et
 3100 sont libres (sinon elle s'arrête en nommant le port et la commande
 `lsof -nP -iTCP:<port> -sTCP:LISTEN` pour trouver le processus). Elle démarre ensuite
-Postgres et Caddy (Docker, `http://localhost:8080`), puis, avec des logs préfixés et
+Postgres, Caddy (Docker, `http://localhost:8080`) et SearXNG (sans attendre sa réponse), puis, avec des logs préfixés et
 colorés :
 
 - `[auth]` : migrations Better Auth, puis service auth (port 3000) ;
@@ -56,7 +58,7 @@ colorés :
 - `[ext]` : wxt, qui ouvre un Chrome avec l'extension (`Opened browser`).
 
 Un seul Ctrl+C arrête les 4 processus ; si l'un d'eux s'arrête en erreur, les autres sont
-arrêtés aussi et la commande sort avec un code non nul. Postgres et Caddy restent lancés ;
+arrêtés aussi et la commande sort avec un code non nul. Postgres, Caddy et SearXNG restent lancés ;
 `pnpm dev:stop` les arrête (les données Postgres sont conservées).
 
 Le service auth doit appliquer les migrations Better Auth (schéma `auth`) **avant**
@@ -67,7 +69,7 @@ Alternative : lancer les services séparément, chacun dans son terminal.
 
 ```sh
 pnpm db:up                                                   # Postgres, schémas auth et app
-docker compose -f infra/docker-compose.dev.yml up -d caddy   # http://localhost:8080
+docker compose -f infra/docker-compose.dev.yml up -d caddy searxng   # http://localhost:8080 et :8888
 pnpm dev:auth    # terminal 1 : migrations Better Auth, puis service auth (port 3000)
 pnpm dev:api     # terminal 2 : alembic upgrade head, puis API (port 8000)
 pnpm dev:site    # terminal 3 : vite build --watch vers apps/site/dist
@@ -169,12 +171,15 @@ fournisseur `stub` de `providers.toml` n'a pas de `base_url_env`, l'API appelle 
 `http://localhost:20199/v1`, même si le faux fournisseur est lancé sur un autre port.
 
 `pnpm e2e:scan` reprend la connexion de `pnpm e2e:login` (compte neuf, donc essai neuf de 3
-scans à chaque exécution), puis envoie deux fois le même scan texte, sans photo : le premier
-appelle le LLM (`fromCache: false`), le second est servi depuis le cache (`fromCache: true`,
-même analyse) et `remaining.total` baisse de 1 à chaque scan. Il affiche
+scans à chaque exécution), puis envoie deux fois le même scan, sans photo, par la route en flux
+`POST /api/scans/stream` (chaque événement `stage`, `thinking`, `search`, `search_done` est
+affiché à son arrivée ; `pnpm e2e:scan -- --no-stream` utilise l'ancienne route `POST /api/scans`) :
+le premier appelle le LLM (`fromCache: false`, étape `analyzing`), le second est servi depuis le
+cache (`fromCache: true`, étape `cache`, même analyse) et `remaining.scans` baisse de 1 à chaque
+scan. Il affiche
 `E2E SCAN OK (provider=<p>, model=<m>, score=<n>)` ; sinon il nomme l'étape en échec
 (connexion, modèle actif, premier scan, second scan, cache ou quota) et sort avec le code 1.
-Le modèle affiché est le modèle actif du type `text`, lu avec `radarnaque-llm list` ;
+Le modèle affiché est le modèle actif du type `full`, lu avec `radarnaque-llm list` ;
 `E2E_PROVIDER` et `E2E_MODEL` permettent de l'imposer, à condition de définir les deux : avec
 une seule des deux, le modèle est lu avec `radarnaque-llm list`. Il fonctionne avec n'importe
 quel fournisseur ; le score 42 n'est vérifié qu'avec `stub`.
@@ -532,8 +537,8 @@ Ajouter un fournisseur compatible OpenAI (`POST <base_url>/chat/completions`) :
 Production : un serveur (Allemagne) avec Docker et Docker Compose, un enregistrement DNS
 `radarnaque.mostconsult.be` qui pointe vers lui, et les ports 80 et 443 ouverts (Let's
 Encrypt valide le certificat par le port 80). Caddy est le seul service qui publie des
-ports ; postgres, auth (3000) et api (8000) restent sur le réseau interne de la
-composition. Les routes sont celles du dev : `/auth/*` → auth, `/api/*` → api, le reste →
+ports ; postgres, auth (3000), api (8000) et searxng (8080) restent sur le réseau interne de
+la composition (`SEARXNG_SECRET` est obligatoire dans `infra/.env`). Les routes sont celles du dev : `/auth/*` → auth, `/api/*` → api, le reste →
 le site compilé (`apps/site`), construit dans l'image Caddy.
 
 ### 1. Configuration
