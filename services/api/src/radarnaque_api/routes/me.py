@@ -8,10 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from radarnaque_api.auth.deps import current_user
 from radarnaque_api.auth.privileges import privileges_of
 from radarnaque_api.db import get_session
-from radarnaque_api.models import AuthUser, Feature, PlanFeature
+from radarnaque_api.models import AuthUser, Feature
 from radarnaque_api.schemas import MeOut, QuotaOut
 from radarnaque_api.services.subscriptions import bootstrap_trial, get_active_subscription
-from radarnaque_api.services.usage import compute_usage, plan_max_images
+from radarnaque_api.services.usage import compute_usage, plan_features, plan_max_images
 
 router = APIRouter()
 
@@ -32,23 +32,17 @@ async def me(
     # n'a de quota affiché.
     if privileges.unlimited:
         if privileges.plan_override is not None:
-            features = (
-                await session.execute(
-                    select(PlanFeature.feature)
-                    .where(PlanFeature.plan == privileges.plan_override)
-                    .order_by(PlanFeature.feature)
-                )
-            ).scalars()
+            features = await plan_features(session, privileges.plan_override)
         else:
-            features = (
-                await session.execute(select(Feature.code).order_by(Feature.code))
-            ).scalars()
+            features = list(
+                (await session.execute(select(Feature.code).order_by(Feature.code))).scalars()
+            )
         return MeOut(
             user_id=user.id,
             email=user.email,
             role="superuser" if privileges.debug else "admin",
             plan=privileges.plan_override or (sub.plan if sub else None),
-            features=list(features),
+            features=features,
             unlimited=True,
             max_images=await plan_max_images(session, sub.plan if sub else None, privileges),
             period_start=None,
@@ -79,19 +73,12 @@ async def me(
         )
 
     usage = await compute_usage(session, sub, datetime.now(UTC))
-    features = (
-        await session.execute(
-            select(PlanFeature.feature)
-            .where(PlanFeature.plan == sub.plan)
-            .order_by(PlanFeature.feature)
-        )
-    ).scalars()
     return MeOut(
         user_id=user.id,
         email=user.email,
         role=role,
         plan=sub.plan,
-        features=list(features),
+        features=await plan_features(session, sub.plan),
         unlimited=False,
         max_images=await plan_max_images(session, sub.plan, privileges),
         period_start=usage.period_start,

@@ -4,6 +4,7 @@ signaux des règles locales et photos éventuelles."""
 import json
 import re
 from collections.abc import Mapping
+from datetime import date
 from typing import Any
 
 from radarnaque_api.schemas import ListingIn, RulesIn
@@ -81,7 +82,7 @@ def masked_contacts(masked_description: str) -> int:
     return masked_description.count(PHONE_MASK) + masked_description.count(EMAIL_MASK)
 
 
-def _facts(listing: ListingIn, rules: RulesIn) -> dict[str, Any]:
+def _facts(listing: ListingIn, rules: RulesIn, images_sent: int, today: date) -> dict[str, Any]:
     description = mask_contacts(listing.description)
     return {
         "site": listing.site,
@@ -95,6 +96,8 @@ def _facts(listing: ListingIn, rules: RulesIn) -> dict[str, Any]:
         "postedAt": listing.posted_at,
         "location": _pick(listing.location, _LOCATION_FIELDS),
         "imageCount": len(listing.images),
+        "imagesSent": images_sent,
+        "today": today.isoformat(),
         "seller": _seller(listing.seller),
         "signals": [_pick(signal, _SIGNAL_FIELDS) for signal in rules.signals],
     }
@@ -107,10 +110,21 @@ def _canonical_block(facts: dict[str, Any]) -> str:
     return text.replace("<", "\\u003c").replace(">", "\\u003e")
 
 
-def build_messages(listing: ListingIn, rules: RulesIn, images_b64: list[str]) -> list[dict]:
-    """Un seul message « user » : le bloc de faits délimité, puis une part `image_url` par photo
-    (JPEG en base64, déjà réduit par le téléchargeur)."""
-    text = f"{FACTS_INTRO}\n<annonce>\n{_canonical_block(_facts(listing, rules))}\n</annonce>"
+def build_messages(
+    listing: ListingIn,
+    rules: RulesIn,
+    images_b64: list[str],
+    *,
+    today: date,
+    images_sent: int | None = None,
+) -> list[dict]:
+    """Un seul message « user » : le bloc de faits délimité (dont `imagesSent`, le nombre de
+    photos jointes, et `today`, la date du jour), puis une part `image_url` par photo (JPEG en
+    base64, déjà réduit par le téléchargeur). `images_sent` ne sert qu'à décrire des photos non
+    téléchargées (bloc debug d'un scan servi par le cache) ; par défaut, celles de `images_b64`."""
+    sent = len(images_b64) if images_sent is None else images_sent
+    facts = _facts(listing, rules, sent, today)
+    text = f"{FACTS_INTRO}\n<annonce>\n{_canonical_block(facts)}\n</annonce>"
     parts: list[dict] = [{"type": "text", "text": text}]
     parts += [
         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}

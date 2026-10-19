@@ -11,14 +11,8 @@ async def test_seeded_offer(db):
     )
     assert q.all() == [
         ("premium", "full", 300),
-        ("premium", "image", 100),
-        ("premium", "text", 1000),
         ("standard", "full", 150),
-        ("standard", "image", 0),
-        ("standard", "text", 150),
         ("trial", "full", 3),
-        ("trial", "image", 3),
-        ("trial", "text", 3),
     ]
     caps = dict((await db.execute(text("select code, total_scan_cap from app.plans"))).all())
     assert caps == {"trial": 3, "standard": None, "premium": None}
@@ -44,9 +38,7 @@ async def test_seeded_offer(db):
     ).all()
     assert feats == [
         ("premium", "card_icons"),
-        ("premium", "image_scan"),
         ("trial", "card_icons"),
-        ("trial", "image_scan"),
     ]
 
 
@@ -56,7 +48,7 @@ async def test_seeded_reference_data(db):
 
     assert await codes("billing_intervals") == {"month", "year"}
     assert await codes("currencies") == {"EUR"}
-    assert await codes("features") == {"card_icons", "image_scan"}
+    assert await codes("features") == {"card_icons"}
     assert await codes("quota_periods") == {"subscription_month", "lifetime"}
     assert await codes("subscription_statuses") == {"active", "canceled", "past_due", "expired"}
     assert await codes("billing_providers") == {"manual", "stripe"}

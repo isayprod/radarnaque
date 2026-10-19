@@ -114,6 +114,7 @@ class RulesIn(CamelInModel):
     signals: list[SignalIn] = Field(max_length=20)
 
 
+# `text` et `image` n'existent plus que dans l'historique : le client ne choisit plus le type.
 ScanKindCode = Literal["text", "image", "full"]
 TriggerCode = Literal["button", "card"]
 
@@ -126,7 +127,6 @@ def _drop_default(schema: dict[str, Any]) -> None:
 class ScanIn(CamelInModel):
     listing: ListingIn
     rules: RulesIn
-    scan_kind: ScanKindCode
     trigger: TriggerCode
     partial: bool = False
     # Relance sans cache : honorée seulement pour un superuser hors production, ignorée sans
@@ -150,11 +150,9 @@ class AnalysisReasonOut(CamelModel):
 
 
 class RemainingOut(CamelModel):
-    """Scans restants après celui-ci ; `None` : illimité (admin) ou sans plafond."""
+    """Scans restants après celui-ci ; `None` : illimité (admin, superuser hors production)."""
 
-    text: int | None
-    image: int | None
-    total: int | None
+    scans: int | None
 
 
 class PromptVersionDebugOut(CamelModel):
@@ -201,6 +199,16 @@ class ScanDebugOut(CamelModel):
     analysis_id: int
 
 
+WebSearchAspect = Literal["model", "price", "scam", "other"]
+
+
+class WebSearchOut(CamelModel):
+    """Une recherche web faite pour l'analyse (requête déjà masquée de toute donnée perso)."""
+
+    query: str
+    aspect: WebSearchAspect
+
+
 class AnalysisResultOut(CamelModel):
     analysis_id: int
     score: int
@@ -212,6 +220,10 @@ class AnalysisResultOut(CamelModel):
     summary: LocalizedTextOut
     advice: LocalizedTextOut
     reasons: list[AnalysisReasonOut]
+    # Photos réellement envoyées au modèle (0 pour une annonce sans photo).
+    images_analyzed: int
+    # Recherches web de l'analyse, dans l'ordre, y compris quand elle est servie depuis le cache.
+    web_searches: list[WebSearchOut]
     analyzed_at: datetime
     remaining: RemainingOut
     # Seulement pour un superuser hors production ; `None` (null) pour tout autre compte.

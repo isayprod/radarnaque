@@ -15,6 +15,7 @@ from radarnaque_api.models import (
     AnalysisReason,
     AnalysisReasonText,
     AnalysisText,
+    AnalysisWebSearch,
     Listing,
     ListingSnapshot,
     Model,
@@ -22,7 +23,13 @@ from radarnaque_api.models import (
     ScanKind,
     SnapshotImage,
 )
-from radarnaque_api.schemas import AnalysisReasonOut, ListingIn, LocalizedTextOut, ScanIn
+from radarnaque_api.schemas import (
+    AnalysisReasonOut,
+    ListingIn,
+    LocalizedTextOut,
+    ScanIn,
+    WebSearchOut,
+)
 from radarnaque_api.services.hashing import content_hash
 
 
@@ -156,11 +163,18 @@ async def upsert_snapshot(
 
 
 async def save_analysis(
-    session: AsyncSession, key: CacheKey, scan: ScanIn, result: LLMResult, at: datetime
+    session: AsyncSession,
+    key: CacheKey,
+    scan: ScanIn,
+    result: LLMResult,
+    at: datetime,
+    *,
+    images_analyzed: int,
 ) -> int:
     """Insère l'analyse de `key`, ou rafraîchit sur place l'entrée expirée qui détient déjà la
-    clé (règle R4) : sa ligne est mise à jour, ses textes et raisons remplacés, et les anciens
-    `scan_results` continuent d'y pointer. `created_at` est la date de l'événement qui la
+    clé (règle R4) : sa ligne est mise à jour, ses textes, raisons et recherches web remplacés,
+    et les anciens `scan_results` continuent d'y pointer. `images_analyzed` : photos réellement
+    envoyées au modèle. `created_at` est la date de l'événement qui la
     produit (règle R8). À appeler sous le verrou consultatif de la clé ; ne valide pas."""
     analysis = result.analysis
     values = {
@@ -168,6 +182,7 @@ async def save_analysis(
         "score": analysis.score,
         "professional": analysis.professional,
         "partial": scan.partial,
+        "images_analyzed": images_analyzed,
         "tokens_in": result.tokens_in,
         "tokens_out": result.tokens_out,
         "cost_usd_micros": result.cost_usd_micros,
@@ -196,6 +211,9 @@ async def save_analysis(
     )
     await session.execute(delete(AnalysisReason).where(AnalysisReason.analysis_id == analysis_id))
     await session.execute(delete(AnalysisText).where(AnalysisText.analysis_id == analysis_id))
+    await session.execute(
+        delete(AnalysisWebSearch).where(AnalysisWebSearch.analysis_id == analysis_id)
+    )
 
     await session.execute(
         insert(AnalysisText),
@@ -224,6 +242,19 @@ async def save_analysis(
                 {"reason_id": reason_id, "locale": "nl", "text": reason.nl},
             ],
         )
+    if result.searches:
+        await session.execute(
+            insert(AnalysisWebSearch),
+            [
+                {
+                    "analysis_id": analysis_id,
+                    "position": position,
+                    "query": search.query,
+                    "aspect": search.aspect,
+                }
+                for position, search in enumerate(result.searches)
+            ],
+        )
     return analysis_id
 
 
@@ -232,10 +263,12 @@ class AnalysisTexts:
     summary: LocalizedTextOut
     advice: LocalizedTextOut
     reasons: list[AnalysisReasonOut]
+    web_searches: list[WebSearchOut]
 
 
 async def load_analysis(session: AsyncSession, analysis_id: int) -> AnalysisTexts:
-    """Résumé, conseil et raisons (dans l'ordre) d'une analyse, en français et en néerlandais."""
+    """Résumé, conseil, raisons et recherches web (dans l'ordre) d'une analyse ; textes en français
+    et en néerlandais."""
     texts = {
         text.locale: text
         for text in await session.scalars(
@@ -253,6 +286,11 @@ async def load_analysis(session: AsyncSession, analysis_id: int) -> AnalysisText
         .where(AnalysisReason.analysis_id == analysis_id)
         .order_by(AnalysisReason.position)
     )
+    searches = await session.execute(
+        select(AnalysisWebSearch.query, AnalysisWebSearch.aspect)
+        .where(AnalysisWebSearch.analysis_id == analysis_id)
+        .order_by(AnalysisWebSearch.position)
+    )
     reasons: dict[int, tuple[str, dict[str, str]]] = {}
     for reason_id, severity, locale, reason_text in rows:
         reasons.setdefault(reason_id, (severity, {}))[1][locale] = reason_text
@@ -263,4 +301,5 @@ async def load_analysis(session: AsyncSession, analysis_id: int) -> AnalysisText
             AnalysisReasonOut(severity=severity, text=LocalizedTextOut(**by_locale))
             for severity, by_locale in reasons.values()
         ],
+        web_searches=[WebSearchOut(query=query, aspect=aspect) for query, aspect in searches],
     )

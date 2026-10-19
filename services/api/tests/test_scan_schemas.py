@@ -26,7 +26,6 @@ def _scan(**listing_overrides) -> dict:
     return {
         "listing": {**_listing(), **listing_overrides},
         "rules": {"version": 1, "signals": []},
-        "scanKind": "text",
         "trigger": "button",
     }
 
@@ -144,9 +143,15 @@ def test_signal_and_rules_limits():
         RulesIn.model_validate({"version": 0, "signals": []})
 
 
-def test_scan_kind_and_trigger_are_closed_lists():
-    with pytest.raises(ValidationError):
-        ScanIn.model_validate({**_scan(), "scanKind": "video"})
+def test_scan_in_rejects_scan_kind():
+    # Le type de scan n'est plus un choix du client (`extra="forbid"`).
+    for kind in ("text", "image", "full"):
+        with pytest.raises(ValidationError) as info:
+            ScanIn.model_validate({**_scan(), "scanKind": kind})
+        assert info.value.errors()[0]["type"] == "extra_forbidden"
+
+
+def test_trigger_is_a_closed_list():
     with pytest.raises(ValidationError):
         ScanIn.model_validate({**_scan(), "trigger": "auto"})
 

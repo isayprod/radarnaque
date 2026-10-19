@@ -7,7 +7,7 @@ import json
 import math
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cache
 from typing import Annotated, Any, Literal, Protocol
 
@@ -54,11 +54,21 @@ class LLMAnalysis(BaseModel):
     reasons: list[LLMReason] = Field(max_length=5)
 
 
+@dataclass(frozen=True)
+class SearchRecord:
+    """Une recherche web faite par le modèle : la requête (déjà masquée) et son aspect
+    (`model`, `price`, `scam` ou `other`)."""
+
+    query: str
+    aspect: str
+
+
 @dataclass
 class LLMResult:
     """`raw_text` : contenu de la réponse du modèle, tel que reçu ; `system_prompt` : prompt
-    système réellement envoyé (schéma compris en mode `json_object`). Les deux ne servent qu'au
-    bloc debug du superuser ; les faux clients des tests peuvent les laisser vides."""
+        système réellement envoyé (schéma compris en mode `json_object`). Les deux ne servent qu'au
+        bloc debug du superuser ; les faux clients des tests peuvent les laisser vides. `searches` :
+    recherches web faites, dans l'ordre ; vide pour un client sans l'outil."""
 
     analysis: LLMAnalysis
     tokens_in: int
@@ -66,6 +76,7 @@ class LLMResult:
     cost_usd_micros: int
     raw_text: str = ""
     system_prompt: str = ""
+    searches: list[SearchRecord] = field(default_factory=list)
 
 
 LLMErrorCode = Literal["transport", "invalid_response", "configuration"]

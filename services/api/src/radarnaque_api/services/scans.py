@@ -5,6 +5,9 @@ Déroulé, dans cet ordre : 1. limite de requêtes, 2. droits, 3. validation de 
 consultatif. Toute erreur après la réservation enregistre un `scan_failures`, qui rend le scan à
 l'utilisateur : ni un fournisseur en panne ni un bogue du serveur ne consomment son quota.
 
+Un seul type de scan, `full` : les photos (selon l'offre) et la recherche web servent toute
+annonce. Le nombre de photos envoyées entre dans la clé du cache.
+
 Superuser hors production (`privileges.debug`) : la réponse porte un bloc `debug`, aussi écrit
 dans le logger `radarnaque.debug`, et `noCache` relance l'analyse sans consulter le cache."""
 
@@ -14,7 +17,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, NoReturn
 
 import httpx
@@ -40,7 +43,6 @@ from radarnaque_api.models import (
     Analysis,
     AppSettings,
     AuthUser,
-    PlanFeature,
     ScanEvent,
     ScanFailure,
     ScanResult,
@@ -69,10 +71,10 @@ from radarnaque_api.services.scan_store import (
     valid_analysis_id,
 )
 from radarnaque_api.services.subscriptions import get_active_subscription
-from radarnaque_api.services.usage import compute_usage
+from radarnaque_api.services.usage import compute_usage, plan_features, plan_max_images
 
 RATE_WINDOW = timedelta(minutes=1)
-IMAGE_SCAN_FEATURE = "image_scan"
+SCAN_KIND = "full"  # type de scan unique ; `text` et `image` ne survivent que dans l'historique
 CARD_ICONS_FEATURE = "card_icons"
 INTERNAL_FAILURE = "internal"
 
@@ -138,6 +140,7 @@ class _Admission:
     content_hash: str
     image_host_suffixes: list[str]
     cache_ttl: timedelta
+    max_images: int  # photos au plus, selon l'offre (avant la limite du fournisseur)
 
 
 @dataclass(frozen=True)
@@ -169,33 +172,24 @@ async def _check_rate_limit(session: AsyncSession, user_id: str, limit: int, at:
         raise ScanError(429, "rate_limited", "Trop de scans en une minute, réessayez plus tard.")
 
 
-async def _check_rights(session: AsyncSession, user_id: str, scan: ScanIn) -> None:
-    sub = await get_active_subscription(session, user_id)
+async def _check_rights(session: AsyncSession, sub: Subscription | None, scan: ScanIn) -> None:
+    """Abonnement actif exigé ; les icônes des cartes (`trigger="card"`) sont une fonctionnalité de
+    l'offre. Les photos, elles, dépendent de l'offre (`plans.max_images`), pas d'un droit."""
     if sub is None:
         raise ScanError(402, "no_active_subscription", "Aucun abonnement actif.")
-    features = set(
-        await session.scalars(select(PlanFeature.feature).where(PlanFeature.plan == sub.plan))
-    )
-    required = (
-        (IMAGE_SCAN_FEATURE, scan.scan_kind == "image"),
-        (CARD_ICONS_FEATURE, scan.trigger == "card"),
-    )
-    for feature, needed in required:
-        if needed and feature not in features:
-            raise ScanError(
-                403,
-                "feature_not_in_plan",
-                "Fonctionnalité absente de l'offre.",
-                {"feature": feature},
-            )
+    if scan.trigger == "card" and CARD_ICONS_FEATURE not in await plan_features(session, sub.plan):
+        raise ScanError(
+            403,
+            "feature_not_in_plan",
+            "Fonctionnalité absente de l'offre.",
+            {"feature": CARD_ICONS_FEATURE},
+        )
 
 
 async def _validated_site(session: AsyncSession, scan: ScanIn) -> tuple[int, list[str]]:
-    """Identifiant du site et suffixes d'hôtes d'images autorisés ; chaque image est vérifiée.
-    Un scan « image » sans aucune photo est refusé ici, avant toute réservation du quota."""
+    """Identifiant du site et suffixes d'hôtes d'images autorisés ; chaque image est vérifiée,
+    même celles qui ne seront pas envoyées (avant toute réservation du quota)."""
     listing = scan.listing
-    if scan.scan_kind == "image" and not listing.images:
-        raise _invalid_listing("listing.images")
     site_id = await session.scalar(select(Site.id).where(Site.domain == listing.site))
     if site_id is None:
         raise _invalid_listing("listing.site")
@@ -242,18 +236,18 @@ async def _reserve(
         if sub is None:
             raise ScanError(402, "no_active_subscription", "Aucun abonnement actif.")
         usage = await compute_usage(session, sub, at)
-        kind = usage.per_kind.get(scan.scan_kind)
+        kind = usage.per_kind.get(SCAN_KIND)
         if kind is None or kind.remaining <= 0:  # `remaining` tient déjà compte du plafond
             raise ScanError(
                 402,
                 "quota_exhausted",
                 "Quota de scans atteint.",
-                {"plan": sub.plan, "scanKind": scan.scan_kind},
+                {"plan": sub.plan, "scanKind": SCAN_KIND},
             )
     event_id = (
         await session.execute(
             insert(ScanEvent)
-            .values(user_id=user.id, scan_kind=scan.scan_kind, trigger=scan.trigger, created_at=at)
+            .values(user_id=user.id, scan_kind=SCAN_KIND, trigger=scan.trigger, created_at=at)
             .returning(ScanEvent.id)
         )
     ).scalar_one()
@@ -277,9 +271,12 @@ async def _admit(
     if privileges.rate_limited:
         await _check_rate_limit(session, user.id, rate_limit, now())
     # Toutes les fonctionnalités vont de pair avec l'absence de quota (admin, superuser hors
-    # production) : ni l'offre ni l'abonnement ne sont alors consultés.
+    # production) : ni l'offre ni l'abonnement ne sont alors consultés ; leurs photos viennent de
+    # `plan_max_images` (Premium pour le superuser, le maximum pour l'admin).
+    sub = None if privileges.all_features else await get_active_subscription(session, user.id)
     if not privileges.all_features:
-        await _check_rights(session, user.id, scan)
+        await _check_rights(session, sub, scan)
+    max_images = await plan_max_images(session, sub.plan if sub else None, privileges)
     site_id, suffixes = await _validated_site(session, scan)
     snapshot_id, digest = await upsert_snapshot(session, site_id, scan.listing, now())
     event_at = now()  # date de l'événement, et de l'analyse qu'il produira (règle R8)
@@ -291,6 +288,7 @@ async def _admit(
         content_hash=digest,
         image_host_suffixes=suffixes,
         cache_ttl=cache_ttl,
+        max_images=max_images,
     )
 
 
@@ -317,14 +315,18 @@ async def _serve(
     debug = privileges.debug
     fresh = debug and scan.no_cache
     async with maker() as session:
-        setup = await active_setup(session, scan.scan_kind)
+        setup = await active_setup(session, SCAN_KIND)
         if setup is None:
             raise _NotConfigured
+        # Le fournisseur borne les photos, donc la clé du cache : il est résolu avant la lecture
+        # du cache. Un fournisseur devenu inconnu ne fait pas échouer un succès du cache.
+        client = _client_for(llm_for, setup.provider)
+        photos = _photos_to_send(admission, scan, client)
         key = CacheKey(
             snapshot_id=admission.snapshot_id,
             model_id=setup.model_id,
             prompt_version_id=setup.prompt_version_id,
-            input_hash=input_hash(scan),
+            input_hash=input_hash(scan, photos),
         )
         cached = (
             None
@@ -332,7 +334,7 @@ async def _serve(
             else await valid_analysis_id(session, key, admission.event_at, admission.cache_ttl)
         )
         if cached is not None:
-            trace = _cached_trace(setup, key, scan, llm_for) if debug else None
+            trace = _cached_trace(setup, key, scan, client, admission, photos) if debug else None
             _link(session, admission.event_id, cached)
             await session.commit()
             return trace
@@ -350,26 +352,30 @@ async def _serve(
             else await valid_analysis_id(session, key, admission.event_at, admission.cache_ttl)
         )
         if analysis_id is None:
-            llm = llm_for(setup.provider)
+            if isinstance(client, ProviderError):
+                raise client
+            llm = client
             images_ms: int | None = None
             images: list[str] = []
-            if scan.scan_kind == "image":
+            if photos:
                 started = time.perf_counter()
                 images = await fetch_images(
                     [str(url) for url in scan.listing.images],
                     admission.image_host_suffixes,
                     http=http,
                     resolve=resolve,
-                    limit=_image_limit(llm),
+                    limit=photos,
                 )
                 images_ms = _elapsed_ms(started)
-            messages = build_messages(scan.listing, scan.rules, images)
+            messages = build_messages(scan.listing, scan.rules, images, today=_today(admission))
             started = time.perf_counter()
             result = await llm.analyze(
                 model=setup.slug, system_prompt=setup.system_prompt, messages=messages
             )
             llm_ms = _elapsed_ms(started)
-            analysis_id = await save_analysis(session, key, scan, result, admission.event_at)
+            analysis_id = await save_analysis(
+                session, key, scan, result, admission.event_at, images_analyzed=len(images)
+            )
             trace = (
                 _Trace(
                     setup=setup,
@@ -387,7 +393,7 @@ async def _serve(
                 else None
             )
         else:  # analysée par un scan concurrent pendant l'attente du verrou
-            trace = _cached_trace(setup, key, scan, llm_for) if debug else None
+            trace = _cached_trace(setup, key, scan, client, admission, photos) if debug else None
         _link(session, admission.event_id, analysis_id)
     return trace
 
@@ -403,27 +409,51 @@ def _final_system_prompt(llm: LLMClient, system_prompt: str) -> str:
     return system_prompt if final is None else final(system_prompt)
 
 
+def _client_for(llm_for: Callable[[str], LLMClient], provider: str) -> LLMClient | ProviderError:
+    """Client du fournisseur, ou l'erreur si le fournisseur est inconnu : rien n'échoue tant que
+    l'appel au LLM n'est pas nécessaire (un succès du cache reste un succès)."""
+    try:
+        return llm_for(provider)
+    except ProviderError as exc:
+        return exc
+
+
+def _photos_to_send(admission: _Admission, scan: ScanIn, client: LLMClient | ProviderError) -> int:
+    """Photos envoyées au modèle : au plus celles de l'offre, du fournisseur (la limite globale
+    si le fournisseur est inconnu) et de l'annonce. Entre dans la clé du cache."""
+    provider_limit = MAX_IMAGES if isinstance(client, ProviderError) else _image_limit(client)
+    return min(admission.max_images, provider_limit, len(scan.listing.images))
+
+
+def _today(admission: _Admission) -> date:
+    """Date du jour (UTC) du moment de l'événement, donnée au modèle (hors des empreintes)."""
+    return admission.event_at.astimezone(UTC).date()
+
+
 def _cached_trace(
-    setup: ActiveSetup, key: CacheKey, scan: ScanIn, llm_for: Callable[[str], LLMClient]
+    setup: ActiveSetup,
+    key: CacheKey,
+    scan: ScanIn,
+    client: LLMClient | ProviderError,
+    admission: _Admission,
+    photos: int,
 ) -> _Trace:
     """Trace d'un scan servi par le cache : les messages qui auraient été envoyés, construits
     sans appel au LLM ni téléchargement des photos (résumées comme non téléchargées). Un
-    fournisseur devenu inconnu (`ProviderError`) ne fait pas échouer ce succès du cache : la
-    limite globale des photos et le prompt système brut sont repris."""
-    try:
-        llm: LLMClient | None = llm_for(setup.provider)
-    except ProviderError:
-        llm = None
-    image_limit = MAX_IMAGES if llm is None else _image_limit(llm)
-    pending = min(len(scan.listing.images), image_limit) if scan.scan_kind == "image" else 0
-    messages = build_messages(scan.listing, scan.rules, [])
+    fournisseur devenu inconnu ne fait pas échouer ce succès du cache : le prompt système brut
+    est repris."""
+    messages = build_messages(
+        scan.listing, scan.rules, [], today=_today(admission), images_sent=photos
+    )
     return _Trace(
         setup=setup,
         key=key,
         system_prompt=(
-            setup.system_prompt if llm is None else _final_system_prompt(llm, setup.system_prompt)
+            setup.system_prompt
+            if isinstance(client, ProviderError)
+            else _final_system_prompt(client, setup.system_prompt)
         ),
-        messages=summarize_messages(messages, cached_images=pending),
+        messages=summarize_messages(messages, cached_images=photos),
         raw_response=None,
         llm_called=False,
         images_ms=None,
@@ -487,14 +517,10 @@ async def _remaining(
 ) -> RemainingOut:
     sub = None if privileges.unlimited else await get_active_subscription(session, user.id)
     if sub is None:  # compte illimité
-        return RemainingOut(text=None, image=None, total=None)
+        return RemainingOut(scans=None)
     usage = await compute_usage(session, sub, at)
-    per_kind = {kind: q.remaining for kind, q in usage.per_kind.items()}
-    return RemainingOut(
-        text=per_kind.get("text"),
-        image=per_kind.get("image"),
-        total=None if usage.total is None else usage.total.remaining,
-    )
+    full = usage.per_kind.get(SCAN_KIND)
+    return RemainingOut(scans=None if full is None else full.remaining)
 
 
 def _debug_block(
@@ -511,7 +537,7 @@ def _debug_block(
         provider=trace.setup.provider,
         model=trace.setup.slug,
         prompt_version=PromptVersionDebugOut(
-            scan_kind=scan.scan_kind, version=trace.setup.prompt_version
+            scan_kind=SCAN_KIND, version=trace.setup.prompt_version
         ),
         system_prompt=trace.system_prompt,
         messages=[DebugMessageOut(**message) for message in trace.messages],
@@ -537,7 +563,7 @@ def _log_debug(scan: ScanIn, debug: ScanDebugOut) -> None:
     listing = scan.listing
     debug_logger.info(
         "[debug superuser] scan %s %s|%s\n%s",
-        scan.scan_kind,
+        SCAN_KIND,
         listing.site,
         listing.external_id,
         json.dumps(debug.model_dump(mode="json", by_alias=True), ensure_ascii=False, indent=2),
@@ -584,6 +610,8 @@ async def _result(
         summary=texts.summary,
         advice=texts.advice,
         reasons=texts.reasons,
+        images_analyzed=analysis.images_analyzed,
+        web_searches=texts.web_searches,
         analyzed_at=analysis.created_at,
         remaining=remaining,
         debug=None
