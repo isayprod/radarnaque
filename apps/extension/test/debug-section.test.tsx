@@ -7,7 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { DebugSection } from "../components/DebugSection";
-import { contentText } from "../lib/content-i18n";
+import { aiErrorText, contentText } from "../lib/content-i18n";
 import { sampleDebug } from "./helpers";
 
 afterEach(() => {
@@ -167,6 +167,33 @@ describe("DebugSection", () => {
 			fireEvent.click(screen.getByRole("button", { name: "Copier" })),
 		).not.toThrow();
 		await act(async () => {});
+	});
+
+	test("erreur de la dernière relance : une ligne avec le texte de l'erreur", () => {
+		renderSection({ error: "rate_limited" });
+		expect(screen.getByRole("alert").textContent).toBe(
+			aiErrorText("fr", "rate_limited"),
+		);
+	});
+
+	test("sans erreur : aucune ligne d'alerte", () => {
+		renderSection();
+		expect(screen.queryByRole("alert")).toBeNull();
+	});
+
+	test("démontée avant la fin de la copie : ni « Copié », ni minuterie", async () => {
+		vi.useFakeTimers();
+		let done!: () => void;
+		writeText.mockReturnValue(
+			new Promise<void>((resolve) => {
+				done = resolve;
+			}),
+		);
+		const { unmount } = renderSection();
+		fireEvent.click(screen.getByRole("button", { name: "Copier" }));
+		unmount();
+		await act(async () => done());
+		expect(vi.getTimerCount()).toBe(0);
 	});
 
 	test("textes en néerlandais", () => {

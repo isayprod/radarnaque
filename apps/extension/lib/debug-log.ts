@@ -4,6 +4,11 @@ export type DebugSink = Pick<Console, "groupCollapsed" | "log" | "groupEnd">;
 export interface DebugLog {
 	/** Écrit un groupe replié `[Radarnaque debug] <title>` contenant `data` en objet. */
 	group(title: string, data: unknown): void;
+	/**
+	 * Vrai si un groupe écrit maintenant le serait : l'appelant qui déduplique ses
+	 * logs ne marque une entrée comme journalisée que dans ce cas. Ne lève jamais.
+	 */
+	enabled(): boolean;
 }
 
 /**
@@ -16,6 +21,13 @@ export function createDebugLog(
 	sink: DebugSink = console,
 ): DebugLog {
 	return {
+		enabled() {
+			try {
+				return enabled();
+			} catch {
+				return false;
+			}
+		},
 		group(title, data) {
 			try {
 				if (!enabled()) return;

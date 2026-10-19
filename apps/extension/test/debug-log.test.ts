@@ -55,4 +55,17 @@ describe("createDebugLog", () => {
 			}, sink).group("scan reçu", {}),
 		).not.toThrow();
 	});
+
+	test("enabled() rend le prédicat, et faux s'il lève", () => {
+		let on = false;
+		const log = createDebugLog(() => on, fakeSink());
+		expect(log.enabled()).toBe(false);
+		on = true;
+		expect(log.enabled()).toBe(true);
+		expect(
+			createDebugLog(() => {
+				throw new Error("boom");
+			}, fakeSink()).enabled(),
+		).toBe(false);
+	});
 });

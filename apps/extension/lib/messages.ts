@@ -46,13 +46,15 @@ export type BgRequest =
 	| { type: "auth/state" }
 	| { type: "auth/sign-out" }
 	| { type: "content/access" }
+	/** Superuser : drapeau des logs de debug de la page, sans appel réseau hors session. */
+	| { type: "content/debug" }
 	| { type: "scan/run"; scan: ScanRequest }
 	| { type: "ui/open-popup" };
 
 /** Seuls messages qu'un content script peut envoyer : jamais `auth/*`. */
 export const CONTENT_SCRIPT_MESSAGES: ReadonlySet<BgRequest["type"]> = new Set<
 	BgRequest["type"]
->(["content/access", "scan/run", "ui/open-popup"]);
+>(["content/access", "content/debug", "scan/run", "ui/open-popup"]);
 
 export type BgResponse<T> =
 	| { ok: true; data: T }
