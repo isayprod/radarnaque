@@ -44,6 +44,12 @@ export interface HandlerDeps {
 	 * tests). Rien n'y est écrit si le dernier `me` lu n'est pas superuser.
 	 */
 	debugLog?: DebugSink;
+	/**
+	 * Build de dev (`import.meta.env.DEV`). R5 : faux en production, `content/debug`
+	 * répond faux et `scan/run` ne lit jamais `me` pour le debug (aucun échange de
+	 * JWT ni `/api/me` de plus par réveil du service worker).
+	 */
+	devBuild: boolean;
 }
 
 export interface ExternalDeps {
@@ -178,6 +184,8 @@ export function createHandlers(
 	 * Sans session : faux, sans appel réseau.
 	 */
 	async function contentDebug(): Promise<BgResponse<boolean>> {
+		// R5 : build de production, aucune lecture (ni stockage ni réseau).
+		if (!deps.devBuild) return ok(false);
 		await ensureDebugKnown();
 		let token: string | null;
 		try {
@@ -205,7 +213,9 @@ export function createHandlers(
 	 * est vérifiée avant `toScanIn`, qui retire l'identité du vendeur et applique les bornes.
 	 */
 	async function runScan(scan: unknown): Promise<BgResponse<AnalysisResult>> {
-		await ensureDebugKnown();
+		// R5 : lecture paresseuse de `me` en dev seulement. En production, les logs
+		// restent liés à un `me` superuser déjà lu pour une autre raison.
+		if (deps.devBuild) await ensureDebugKnown();
 		const listing = (scan as { listing?: unknown } | null)?.listing;
 		if (typeof scan !== "object" || typeof listing !== "object" || !listing) {
 			await logGroup("scan en erreur", { code: "invalid_listing" });

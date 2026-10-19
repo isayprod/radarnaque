@@ -40,6 +40,8 @@ export default defineBackground(() => {
 		api,
 		openPopup: () => browser.action.openPopup(),
 		clearAiResults,
+		// R5 : plomberie du superuser (content/debug, lecture paresseuse de me) en dev seulement.
+		devBuild: import.meta.env.DEV,
 	});
 
 	// Messages internes : tout depuis les pages de l'extension (popup) ; depuis un

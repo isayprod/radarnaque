@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { createDebugFlag } from "../lib/content/debug-flag";
+import { createDebugFlag, disabledDebugFlag } from "../lib/content/debug-flag";
 import type { BgResponse } from "../lib/messages";
 
 /** Promesse résolue de l'extérieur. */
@@ -93,5 +93,14 @@ describe("createDebugFlag", () => {
 			await flush();
 		}
 		expect(t.onRise).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe("disabledDebugFlag (build de production, R5)", () => {
+	test("toujours faux ; read et readIfOff ne font rien", () => {
+		expect(disabledDebugFlag.current()).toBe(false);
+		disabledDebugFlag.read();
+		disabledDebugFlag.readIfOff();
+		expect(disabledDebugFlag.current()).toBe(false);
 	});
 });
