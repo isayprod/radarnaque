@@ -285,9 +285,12 @@ Ollama n'a pas de clé ; le coût enregistré est nul.
 
 ## Tester les analyses IA dans l'extension
 
-Le panneau de la pastille a une section « Analyse IA », et les pages de résultats ont une
-icône « R » sur chaque carte. Les deux passent par le service worker, qui appelle l'API :
-contrairement à la pastille (voir « 6. Tester sur les vrais sites »), la stack doit tourner.
+La pastille a un bouton « Analyser avec l'IA », le panneau une section « Analyse IA », et les
+pages de résultats une icône « R » sur chaque carte. Les trois passent par le service worker, qui
+appelle l'API en flux (`POST /api/scans/stream`) : contrairement à la pastille seule (voir
+« 6. Tester sur les vrais sites »), la stack doit tourner. Il n'y a qu'un seul type d'analyse :
+elle joint toujours les photos de l'annonce (4 en essai et en Premium, 1 en Standard) et le
+modèle peut chercher sur le web (SearXNG, démarré par `pnpm dev`).
 
 ### Prérequis
 
@@ -303,25 +306,30 @@ contrairement à la pastille (voir « 6. Tester sur les vrais sites »), la stac
 
 1. Ouvrir une annonce, par exemple `https://www.2ememain.be/v/…` ou
    `https://www.facebook.com/marketplace/item/…`.
-2. Cliquer sur la pastille pour ouvrir le panneau, puis sur « Lancer une analyse IA ».
+2. Cliquer sur « Analyser avec l'IA », dans la pastille, ou ouvrir le panneau puis cliquer sur
+   « Lancer une analyse IA ». Pendant l'analyse, la pastille s'élargit : une icône qui tourne et
+   une ligne de texte qui suit l'analyse en direct (photos, titres de réflexion du modèle,
+   recherches web et leurs domaines, rédaction). Le panneau montre le déroulé complet.
 3. Le résultat montre le niveau de risque et le score, un résumé, un conseil, les raisons
-   (« Pourquoi ») et « Analyses restantes : n », qui baisse à chaque analyse. Un admin
-   n'a pas de compteur.
+   (« Pourquoi »), le déroulé replié sous « Comment l'IA a analysé » et « Analyses restantes : n »,
+   qui baisse à chaque analyse. Un admin n'a pas de compteur.
 4. Cliquer une seconde fois sur « Lancer une analyse IA » pour la même annonce : le résultat
    est identique et la mention « Résultat déjà disponible : servi depuis le cache » apparaît.
    Le compteur baisse quand même d'une unité.
-5. Le bouton « Analyse avec photos » n'apparaît que pour un compte en essai, premium ou admin,
-   et seulement si l'annonce a des photos. Sans photo, il n'est jamais proposé.
-6. Sans être connecté, le panneau propose « Se connecter » ; sans abonnement actif, il
-   l'indique et renvoie vers les formules.
+5. Une annonce sans photo est analysée quand même : le résultat indique « Analysée sans photo ».
+6. Sans être connecté, le bouton de la pastille ouvre la popup de connexion et le panneau propose
+   « Se connecter » ; sans abonnement actif, il l'indique et renvoie vers les formules. Quota
+   épuisé, le bouton est grisé (« Plus d'analyses IA disponibles »).
+7. Si le flux est coupé (service worker arrêté, réseau), la pastille affiche « Analyse
+   interrompue » avec « Relancer » ; le scan est rendu à l'utilisateur.
 
 ### Quand un résultat IA existe
 
 - **La pastille passe sur l'IA.** Elle affiche le score de l'analyse IA, suivi de la mention
   « IA ». Le panneau ne montre plus que l'analyse IA : la liste des signaux locaux disparaît.
   Tant qu'aucun résultat n'existe (ou pendant un premier scan), l'analyse locale reste affichée.
-- **Le résultat est gardé 24 h dans le navigateur**, par annonce, avec une place pour le texte
-  et une place pour les photos. Revenir sur l'annonce l'affiche
+- **Le résultat est gardé 24 h dans le navigateur**, avec une seule place par annonce (une
+  entrée à l'ancienne forme, texte et photos, est ignorée). Revenir sur l'annonce l'affiche
   tout de suite, sans nouveau scan. Si le titre, la description, le prix ou
   le type de prix change, la page revient à l'analyse locale.
 - **Le résultat partiel d'une carte** (Facebook, voir « Limites à connaître ») ne remplace
@@ -519,7 +527,9 @@ Ajouter un fournisseur compatible OpenAI (`POST <base_url>/chat/completions`) :
    `temperature` et `max_tokens`) retire des paramètres d'appel qu'il refuse (voir l'entrée
    `openai-oauth`). `api` (facultatif, `"chat"` par défaut) choisit l'API d'appel : `"chat"`
    (`/chat/completions`) ou `"responses"` (`/responses`, pour un fournisseur qui n'accepte
-   les photos que par l'API Responses, voir l'entrée `openai-oauth`).
+   les photos que par l'API Responses, voir l'entrée `openai-oauth`). `reasoning_effort`
+   (facultatif, `none` par défaut) règle la réflexion du modèle : voir « Réflexion et recherche
+   web » ci-dessous.
 2. Définir la variable dans `infra/.env` ; en production, l'ajouter aussi à l'environnement
    du service `api` dans `infra/docker-compose.yml` (`MONFOURNISSEUR_API_KEY:
    ${MONFOURNISSEUR_API_KEY:-}`).
@@ -527,6 +537,26 @@ Ajouter un fournisseur compatible OpenAI (`POST <base_url>/chat/completions`) :
    modèle en base référence un fournisseur absent du fichier.
 4. `radarnaque-llm list` doit afficher le fournisseur avec `clé: oui` ; puis
    `radarnaque-llm use monfournisseur <modèle> --kind full` et `pnpm e2e:scan`.
+
+## Réflexion et recherche web
+
+Chaque analyse peut réfléchir et chercher sur le web. Les deux se règlent sans toucher au code.
+
+- **`reasoning_effort`** (`none`, `low`, `medium` ou `high`) est une option de chaque fournisseur
+  de `services/api/providers.toml`. Avec l'API Responses (`openai-oauth`), l'API envoie
+  `reasoning: { effort, summary: "auto" }` ; avec l'API Chat d'OpenRouter, `reasoning: { effort }`
+  dans le corps. Valeurs de départ : `openai-oauth` `high`, `openrouter` `low`, les autres
+  `none`. Les résumés de réflexion sont relayés en direct à l'extension. Le fournisseur est lu
+  au démarrage de l'API : la redémarrer après une modification du fichier.
+- **Recherche web :** le modèle appelle l'outil `web_search`, que l'API exécute sur SearXNG
+  (`SEARCH_BACKEND=searxng`, `SEARXNG_URL=http://127.0.0.1:8888` en dev). Au plus
+  `settings.max_web_searches` recherches par analyse (3 par défaut, de 0 à 5), modifiable en
+  base : `UPDATE app.settings SET max_web_searches = 2;`. `SEARCH_BACKEND=none` retire l'outil.
+  Un SearXNG arrêté n'empêche pas l'analyse : l'outil répond « Recherche indisponible ».
+- **`pnpm e2e:scan`** passe par la route en flux et affiche chaque événement (`stage`,
+  `thinking`, `search`, `search_done`) à son arrivée, puis `E2E SCAN OK`. Avec un fournisseur qui
+  réfléchit et cherche (`openai-oauth`, modèle `gpt-6-luna`), on y voit les titres de réflexion et
+  les recherches. `--no-stream` revient à la route JSON, sans événements.
 
 ## Déployer
 

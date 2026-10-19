@@ -164,7 +164,7 @@ Le prompt est inséré par la migration 0005, avec la clé (`full`, 1). Il repre
 
 **Langue de réflexion :** réfléchis en français. Les résumés de réflexion affichés à l'utilisateur suivent alors sa langue.
 
-**Date du jour :** elle est ajoutée par le serveur dans le bloc `<annonce>` (`today`). C'est une exception à l'invariant du §6.4 de la spécification principale : elle vient du serveur, pas de l'extension, et ne peut donc pas empoisonner le cache.
+**Date du jour :** elle est ajoutée par le serveur dans le bloc `<annonce>` (`today`), en date d'Europe/Brussels. C'est une exception à l'invariant du §6.4 de la spécification principale : elle vient du serveur, pas de l'extension, et ne peut donc pas empoisonner le cache.
 
 Le prompt `full` v1 est immuable dès sa publication, comme les autres.
 
@@ -181,7 +181,7 @@ Migration **0005_full_scans** :
 - **Réglages :** `settings.max_web_searches INTEGER NOT NULL DEFAULT 3 CHECK (max_web_searches BETWEEN 0 AND 5)`.
 - **Analyses :**
   - `analyses.images_analyzed INTEGER NOT NULL DEFAULT 0` : le nombre de photos réellement envoyées ;
-  - nouvelle table `analysis_web_searches(analysis_id FK ON DELETE CASCADE, position, query, aspect, PK(analysis_id, position))` : les recherches faites pour cette analyse. Elles s'affichent aussi quand l'analyse est servie depuis le cache.
+  - nouvelle table `analysis_web_searches(analysis_id FK ON DELETE CASCADE, position, query, aspect, PK(analysis_id, position))` : les recherches **réussies** de cette analyse (les échecs ne se voient qu'en direct). Elles s'affichent aussi quand l'analyse est servie depuis le cache.
 - **Clé du cache :** `input_hash` intègre le **nombre de photos demandées**. Une analyse Standard (1 photo) et une analyse Premium (4 photos) de la même annonce sont donc deux entrées distinctes.
 - **Retour arrière :** il remet les quotas `text` et `image` et la fonctionnalité `image_scan`, puis supprime `full` seulement si aucun scan ne l'utilise, comme R2 de la phase 3c.
 
@@ -209,7 +209,7 @@ Dans `/api/me`, `quotas` ne liste plus que `full`, et le champ `maxImages` s'ajo
 |---|---|---|
 | `stage` | `{ "stage": "cache" }` | l'analyse est dans le cache (suivie aussitôt de `result`) |
 | `stage` | `{ "stage": "photos", "count": 3 }` | début du téléchargement des photos |
-| `stage` | `{ "stage": "analyzing", "images": 3 }` | premier appel au modèle |
+| `stage` | `{ "stage": "analyzing", "count": 3 }` | premier appel au modèle |
 | `thinking` | `{ "part": 2, "text": "…" }` | résumé de réflexion, cumulé par partie, 600 caractères au plus, au plus un toutes les 300 ms |
 | `search` | `{ "id": 1, "query": "…", "aspect": "price" }` | le modèle lance une recherche |
 | `search_done` | `{ "id": 1, "ok": true, "count": 5, "domains": ["apple.com", …] }` | résultats renvoyés au modèle (3 domaines au plus) |
@@ -243,8 +243,8 @@ LLMClient.analyze(*, model, system_prompt, messages,
 ## 9. Superuser en Premium
 
 - Hors production, un superuser est traité comme un compte **Premium** :
-  - `/api/me` donne `plan: "premium"`, les fonctionnalités du plan Premium et `maxImages: 4` ;
-  - `unlimited` reste vrai.
+  - `/api/me` donne `plan: "premium"`, les fonctionnalités du plan Premium et `maxImages: 4` (4 photos par analyse) ;
+  - `unlimited` reste vrai : il n'y a pas de quota.
 - `Privileges` gagne `plan_override: str | None`, qui vaut `"premium"` pour le superuser et `None` sinon.
 - En production, ce traitement ne s'applique pas, comme aujourd'hui.
 
@@ -276,7 +276,7 @@ LLMClient.analyze(*, model, system_prompt, messages,
 - Selon l'état :
   - connecté, avec des analyses restantes : le bouton lance l'analyse tout de suite ;
   - non connecté : il ouvre la popup de connexion (`ui/open-popup`) ;
-  - quota épuisé : il est grisé, avec une infobulle.
+  - quota épuisé : il est grisé, avec l'infobulle « Plus d'analyses IA disponibles ».
 - Le bouton disparaît quand un résultat IA est affiché. Le panneau garde « Lancer une analyse IA » ; le bouton « Analyse avec photos » disparaît.
 
 **Pendant l'analyse, la pastille s'élargit :**
