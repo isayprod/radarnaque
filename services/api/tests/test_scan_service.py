@@ -1286,3 +1286,76 @@ async def test_debug_block_and_log_contain_no_secret(engine, http, mock, clock, 
     for secret in (SECRET_KEY, "Bearer", "base64,"):
         assert secret not in payload
         assert secret not in caplog.text
+
+
+async def test_debug_block_summarizes_images_through_the_responses_api(engine, http, mock, clock):
+    # Fournisseur en API Responses (openai-oauth) : le bloc debug résume toujours les messages
+    # au format Chat, avant leur conversion en `input_image`.
+    for url in IMAGE_URLS:
+        mock.get(url).respond(200, content=_png(), headers={"content-type": "image/png"})
+    analysis = {
+        "score": 70,
+        "summary": {"fr": "Résumé", "nl": "Samenvatting"},
+        "advice": {"fr": "Conseil", "nl": "Advies"},
+        "reasons": [],
+    }
+    llm_route = mock.post(f"{LLM_BASE}/responses").respond(
+        200,
+        json={
+            "id": "resp_1",
+            "object": "response",
+            "created_at": 1,
+            "model": "m",
+            "status": "completed",
+            "parallel_tool_calls": False,
+            "tool_choice": "auto",
+            "tools": [],
+            "output": [
+                {
+                    "type": "message",
+                    "id": "msg_1",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [
+                        {"type": "output_text", "text": json.dumps(analysis), "annotations": []}
+                    ],
+                }
+            ],
+            "usage": {"input_tokens": 74, "output_tokens": 45, "total_tokens": 119},
+        },
+    )
+    provider = ProviderConfig(
+        code="fake",
+        base_url=LLM_BASE,
+        api_key_env=None,
+        base_url_env=None,
+        structured_output="json_object",
+        cost_source="none",
+        extra_body={},
+        omit_params=("temperature",),
+        api="responses",
+    )
+    client = OpenAICompatibleClient(provider, {}, http_client=httpx.AsyncClient(trust_env=False))
+
+    class Provider:
+        def llm_for(self, code: str) -> OpenAICompatibleClient:
+            return client
+
+    superuser = await _user(engine, role="superuser", plan=None)
+    try:
+        result = await _scan_once(
+            engine, superuser, _scan(images=IMAGE_URLS, scanKind="image"), Provider(), http, clock
+        )
+    finally:
+        await client.aclose()
+
+    parts = json.loads(llm_route.calls.last.request.content)["input"][0]["content"]
+    assert [p["type"] for p in parts] == ["input_text", "input_image", "input_image"]
+    sizes = [_b64_size(p["image_url"].split("base64,", 1)[1]) for p in parts[1:]]
+    assert result.debug is not None and result.debug.llm_called is True
+    assert result.debug.messages[0].content == "\n".join(
+        [parts[0]["text"], f"[image 1 : {sizes[0]} octets]", f"[image 2 : {sizes[1]} octets]"]
+    )
+    assert result.debug.raw_response == json.dumps(analysis)
+    assert "Schéma JSON exact" in result.debug.system_prompt
+    assert "base64," not in result.model_dump_json(by_alias=True)

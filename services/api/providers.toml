@@ -28,6 +28,9 @@ base_url_env = "OPENAI_OAUTH_BASE_URL"
 structured_output = "json_object"
 cost_source = "none"
 omit_params = ["temperature"]
+# API Responses : sur /chat/completions, le proxy refuse les photos en data URL (« URL scheme
+# must be http or https », erreur 500) ; /responses les accepte (`input_image`).
+api = "responses"
 
 [providers.omniroute]
 base_url = "http://localhost:20128/v1"

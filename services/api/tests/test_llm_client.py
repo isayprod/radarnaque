@@ -39,6 +39,7 @@ def _provider(
     api_key_env: str | None = "TEST_LLM_KEY",
     max_images: int | None = None,
     omit_params: tuple[str, ...] = (),
+    api: str = "chat",
 ) -> ProviderConfig:
     return ProviderConfig(
         code="testprov",
@@ -50,6 +51,7 @@ def _provider(
         extra_body=extra_body or {},
         max_images=max_images,
         omit_params=omit_params,  # type: ignore[arg-type]
+        api=api,  # type: ignore[arg-type]
     )
 
 
@@ -519,3 +521,219 @@ def test_llm_result_trace_fields_default_to_empty():
         analysis=LLMAnalysis.model_validate(VALID), tokens_in=0, tokens_out=0, cost_usd_micros=0
     )
     assert (result.raw_text, result.system_prompt) == ("", "")
+
+
+# --- API Responses (`api = "responses"`, proxy openai-oauth) -----------------------------------
+
+IMAGE_URL = "data:image/jpeg;base64,/9j/AAAA"
+IMAGE_MESSAGES = [
+    {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "faits"},
+            {"type": "image_url", "image_url": {"url": IMAGE_URL}},
+        ],
+    }
+]
+
+
+def _responses_provider(**overrides) -> ProviderConfig:
+    base = {
+        "structured_output": "json_object",
+        "cost_source": "none",
+        "api_key_env": None,
+        "omit_params": ("temperature",),
+        "api": "responses",
+    }
+    return _provider(**{**base, **overrides})
+
+
+def _response(text: str | None, usage: dict | None = None) -> dict:
+    content = [] if text is None else [{"type": "output_text", "text": text, "annotations": []}]
+    return {
+        "id": "resp_1",
+        "object": "response",
+        "created_at": 1,
+        "model": "m",
+        "status": "completed",
+        "parallel_tool_calls": False,
+        "tool_choice": "auto",
+        "tools": [],
+        "output": [
+            {
+                "type": "message",
+                "id": "msg_1",
+                "role": "assistant",
+                "status": "completed",
+                "content": content,
+            }
+        ],
+        "usage": usage
+        if usage is not None
+        else {
+            "input_tokens": 74,
+            "output_tokens": 45,
+            "total_tokens": 119,
+            "input_tokens_details": {"cached_tokens": 0},
+            "output_tokens_details": {"reasoning_tokens": 0},
+        },
+    }
+
+
+def _responses_ok(analysis: dict | None = None, usage: dict | None = None) -> httpx.Response:
+    return httpx.Response(200, json=_response(json.dumps(analysis or VALID), usage))
+
+
+@pytest.fixture
+async def direct_http() -> AsyncIterator[httpx.AsyncClient]:
+    # Sans les variables de proxy de l'environnement : respx intercepte à coup sûr.
+    async with httpx.AsyncClient(trust_env=False) as client:
+        yield client
+
+
+async def _analyze_responses(
+    provider: ProviderConfig, http: httpx.AsyncClient, env=ENV, messages=IMAGE_MESSAGES
+) -> LLMResult:
+    client = OpenAICompatibleClient(provider, env, http_client=http)
+    return await client.analyze(model="gpt-test", system_prompt="SYS", messages=messages)
+
+
+async def test_responses_api_request_shape(mock, direct_http):
+    chat = mock.post("/chat/completions").mock(return_value=_ok())
+    route = mock.post("/responses").mock(return_value=_responses_ok())
+    provider = _responses_provider(extra_body={"store": False})
+    result = await _analyze_responses(provider, direct_http)
+
+    assert (route.call_count, chat.call_count) == (1, 0)
+    body = json.loads(route.calls.last.request.content)
+    client = OpenAICompatibleClient(provider, ENV)
+    assert body["model"] == "gpt-test"
+    assert body["instructions"] == client.final_system_prompt("SYS")
+    assert body["input"] == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "faits"},
+                # L'image en data URL passe telle quelle.
+                {"type": "input_image", "image_url": IMAGE_URL},
+            ],
+        }
+    ]
+    assert body["max_output_tokens"] == 800
+    assert body["store"] is False  # extra_body transmis
+    for absent in ("temperature", "response_format", "messages", "max_tokens", "text"):
+        assert absent not in body
+    assert result.analysis == LLMAnalysis.model_validate(VALID)
+    assert result.system_prompt == body["instructions"]
+
+
+async def test_responses_api_plain_string_content_is_one_input_text(mock, direct_http):
+    route = mock.post("/responses").mock(return_value=_responses_ok())
+    messages = [{"role": "user", "content": "bonjour"}]
+    await _analyze_responses(_responses_provider(), direct_http, messages=messages)
+
+    body = json.loads(route.calls.last.request.content)
+    assert body["input"] == [
+        {"role": "user", "content": [{"type": "input_text", "text": "bonjour"}]}
+    ]
+
+
+async def test_responses_api_sends_temperature_unless_omitted(mock, direct_http):
+    route = mock.post("/responses").mock(return_value=_responses_ok())
+    await _analyze_responses(_responses_provider(omit_params=()), direct_http)
+    body = json.loads(route.calls.last.request.content)
+    assert body["temperature"] == 0.2
+    assert body["max_output_tokens"] == 800
+
+    await _analyze_responses(_responses_provider(omit_params=("max_tokens",)), direct_http)
+    body = json.loads(route.calls.last.request.content)
+    assert "max_output_tokens" not in body
+    assert body["temperature"] == 0.2
+
+
+async def test_responses_api_reads_output_text_and_maps_tokens(mock, direct_http):
+    raw = json.dumps(VALID, ensure_ascii=False)
+    mock.post("/responses").mock(return_value=httpx.Response(200, json=_response(raw)))
+    result = await _analyze_responses(_responses_provider(), direct_http)
+
+    assert result.raw_text == raw
+    assert result.analysis == LLMAnalysis.model_validate(VALID)
+    assert (result.tokens_in, result.tokens_out) == (74, 45)
+    assert result.cost_usd_micros == 0
+
+
+async def test_responses_api_cost_follows_cost_source(mock, direct_http):
+    usage = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15, "cost": 0.0012}
+    mock.post("/responses").mock(return_value=_responses_ok(usage=usage))
+    result = await _analyze_responses(_responses_provider(cost_source="usage_cost"), direct_http)
+    assert (result.tokens_in, result.tokens_out, result.cost_usd_micros) == (10, 5, 1200)
+
+
+async def test_responses_api_invalid_then_valid_json_uses_two_calls(mock, direct_http):
+    route = mock.post("/responses").mock(
+        side_effect=[
+            httpx.Response(200, json=_response("pas du json")),
+            _responses_ok(),
+        ]
+    )
+    result = await _analyze_responses(_responses_provider(), direct_http)
+    assert route.call_count == 2
+    assert result.analysis == LLMAnalysis.model_validate(VALID)
+
+
+async def test_responses_api_empty_output_twice_is_an_invalid_response(mock, direct_http):
+    route = mock.post("/responses").mock(return_value=httpx.Response(200, json=_response(None)))
+    with pytest.raises(LLMError) as info:
+        await _analyze_responses(_responses_provider(), direct_http)
+    assert info.value.code == "invalid_response"
+    assert route.call_count == 2
+    _assert_not_chained(info.value)
+
+
+async def test_responses_api_server_error_twice_raises_transport(mock, direct_http):
+    route = mock.post("/responses").mock(
+        return_value=httpx.Response(500, json={"error": {"message": BODY_MARKER}})
+    )
+    with pytest.raises(LLMError) as info:
+        await _analyze_responses(_responses_provider(), direct_http)
+    assert info.value.code == "transport"
+    assert route.call_count == 2
+    assert BODY_MARKER not in str(info.value)
+    _assert_not_chained(info.value)
+
+
+async def test_responses_api_auth_rejection_is_configuration_without_leak(mock, direct_http):
+    route = mock.post("/responses").mock(
+        return_value=httpx.Response(
+            401, json={"error": {"message": f"bad key {KEY} {BODY_MARKER}", "code": 401}}
+        )
+    )
+    provider = _responses_provider(api_key_env="TEST_LLM_KEY")
+    with pytest.raises(LLMError) as info:
+        await _analyze_responses(provider, direct_http)
+    error = info.value
+    assert error.code == "configuration"
+    assert route.call_count == 1
+    assert route.calls.last.request.headers["authorization"] == f"Bearer {KEY}"
+    for text in (str(error), repr(error), str(error.args)):
+        assert KEY not in text
+        assert BODY_MARKER not in text
+        assert BASE not in text
+    _assert_not_chained(error)
+
+
+def test_response_text_walks_output_without_output_text():
+    from types import SimpleNamespace
+
+    from radarnaque_api.llm.client import response_text
+
+    part = SimpleNamespace(type="output_text", text='{"a"')
+    other = SimpleNamespace(type="refusal", refusal="non")
+    tail = SimpleNamespace(type="output_text", text=": 1}")
+    response = SimpleNamespace(
+        output=[
+            SimpleNamespace(type="reasoning"),
+            SimpleNamespace(type="message", content=[part, other, tail]),
+        ]
+    )
+    assert response_text(response) == '{"a": 1}'
