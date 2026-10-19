@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from radarnaque_api.auth.privileges import Privileges
 from radarnaque_api.images import MAX_IMAGES
-from radarnaque_api.models import Plan, PlanQuota, ScanEvent, ScanFailure, Subscription
+from radarnaque_api.models import Plan, PlanFeature, PlanQuota, ScanEvent, ScanFailure, Subscription
 from radarnaque_api.services.periods import current_period_start
 
 
@@ -85,3 +85,14 @@ async def plan_max_images(
         return 0
     plan = await session.get(Plan, code)
     return 0 if plan is None else plan.max_images
+
+
+async def plan_features(session: AsyncSession, plan_code: str) -> list[str]:
+    """Codes des fonctionnalités de l'offre `plan_code`, triés."""
+    return list(
+        await session.scalars(
+            select(PlanFeature.feature)
+            .where(PlanFeature.plan == plan_code)
+            .order_by(PlanFeature.feature)
+        )
+    )

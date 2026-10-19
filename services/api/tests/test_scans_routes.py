@@ -105,7 +105,6 @@ def _body(external_id: str = "m123", **listing: object) -> dict:
             "version": 1,
             "signals": [{"id": "new_account", "weight": 30, "severity": "warning"}],
         },
-        "scanKind": "text",
         "trigger": "button",
     }
     body["listing"].update(listing)
@@ -123,7 +122,8 @@ async def test_scan_returns_camel_case_result_then_from_cache(client, bearer, us
     assert {"analysisId", "fromCache", "remaining", "analyzedAt", "level"} <= set(data)
     assert data["fromCache"] is False
     assert data["score"] == 61 and data["level"] == "high"
-    assert data["remaining"] == {"text": 2, "image": 2, "total": 2}
+    assert data["remaining"] == {"scans": 2}
+    assert data["imagesAnalyzed"] == 0 and data["webSearches"] == []
 
     again = await client.post("/api/scans", json=_body(), headers=bearer(uid))
     assert again.status_code == 200, again.text
@@ -223,7 +223,7 @@ async def test_superuser_scans_without_subscription_outside_production(
     for i in range(31):  # au-delà de la limite de requêtes (30 par minute)
         r = await client.post("/api/scans", json=_body(f"m{i}"), headers=bearer(uid))
         assert r.status_code == 200, r.text
-    assert r.json()["remaining"] == {"text": None, "image": None, "total": None}
+    assert r.json()["remaining"] == {"scans": None}
 
 
 async def test_superuser_without_subscription_gets_402_in_production(
@@ -275,7 +275,7 @@ async def test_history_lists_scans_newest_first(client, bearer, user, llm):
         assert item["site"] == "2dehands.be"
         assert item["title"] == "Vélo de course"
         assert item["score"] == first["score"] and item["level"] == "high"
-    assert {item["scanKind"] for item in items} == {"text"}
+    assert {item["scanKind"] for item in items} == {"full"}
     assert {item["trigger"] for item in items} == {"button"}
     assert all(item["createdAt"] for item in items)
 
@@ -508,19 +508,16 @@ async def test_real_extension_signal_params_are_accepted(client, bearer, user, l
     assert r.status_code == 200, r.text
 
 
-# --- Scan « image » sans photo -------------------------------------------------------------
+# --- Le type de scan n'est plus un choix du client ---------------------------------------------
 
 
-async def test_image_scan_without_images_is_invalid_listing_before_reserving(
-    client, bearer, user, llm, db
-):
+async def test_scan_in_rejects_scan_kind_before_reserving(client, bearer, user, llm, db):
     uid = await user()
     body = {**_body(), "scanKind": "image"}
     r = await client.post("/api/scans", json=body, headers=bearer(uid))
     assert r.status_code == 422, r.text
-    error = r.json()["error"]
-    assert error["code"] == "invalid_listing"
-    assert error["details"]["field"] == "listing.images"
+    assert r.json()["error"]["code"] == "invalid_listing"
+    assert r.json()["error"]["details"]["field"] == "scanKind"
     assert llm.calls == 0
     events = await db.scalar(
         text("select count(*) from app.scan_events where user_id = :uid"), {"uid": uid}
@@ -540,7 +537,7 @@ async def test_scan_response_has_debug_only_for_a_superuser(client, bearer, make
     assert r.status_code == 200, r.text
     debug = r.json()["debug"]
     assert debug["llmCalled"] is True and debug["fromCache"] is False
-    assert debug["promptVersion"] == {"scanKind": "text", "version": 2}
+    assert debug["promptVersion"] == {"scanKind": "full", "version": 1}
     assert debug["analysisId"] == r.json()["analysisId"]
     assert "Bearer" not in r.text  # le JWT reçu n'est jamais renvoyé
 
@@ -563,7 +560,7 @@ async def test_no_cache_is_accepted_and_honoured_only_for_a_superuser(
     assert [r.status_code for r in responses] == [200, 200]
     assert llm.calls == 1  # ignoré pour un compte ordinaire
     assert responses[1].json()["fromCache"] is True
-    assert responses[1].json()["remaining"]["total"] == 1
+    assert responses[1].json()["remaining"]["scans"] == 1
 
     again = await client.post("/api/scans", json=body, headers=bearer(superuser))
     assert again.status_code == 200, again.text

@@ -1,9 +1,11 @@
 """Type de scan `full` : photos selon le plan, recherche web et réflexion en direct.
 
-Un seul type de scan (`full`) remplace à terme `text` et `image`. Dans cette révision, la
-migration ne fait qu'ajouter : le type `full` (même modèle que `image`), son prompt v1 avec les
-règles de recherche web, ses quotas, `plans.max_images`, `settings.max_web_searches`,
-`analyses.images_analyzed` et la table `analysis_web_searches`.
+Un seul type de scan (`full`) remplace `text` et `image`. La migration ajoute le type `full`
+(même modèle que `image`), son prompt v1 avec les règles de recherche web, ses quotas,
+`plans.max_images`, `settings.max_web_searches`, `analyses.images_analyzed` et la table
+`analysis_web_searches`. Elle retire aussi les quotas `text` et `image` et la fonctionnalité
+`image_scan` (les photos dépendent du plan, `plans.max_images`) ; les types `text` et `image`
+restent, l'historique les référence. Le retour arrière les remet comme après 0004.
 
 Revision ID: 0005
 Revises: 0004
@@ -66,6 +68,17 @@ FULL_PROMPT_V1 = COMMON_V2 + "\n" + IMAGE_V2 + "\n" + SEARCH_V1 + "\n" + FORMAT_
 MAX_IMAGES = {"trial": 4, "standard": 1, "premium": 4}
 FULL_QUOTAS = {"trial": 3, "standard": 150, "premium": 300}
 
+# Offre de 0001, remise par le retour arrière.
+LEGACY_QUOTAS = [
+    ("trial", "text", 3),
+    ("trial", "image", 3),
+    ("standard", "text", 150),
+    ("standard", "image", 0),
+    ("premium", "text", 1000),
+    ("premium", "image", 100),
+]
+LEGACY_IMAGE_SCAN_PLANS = ("trial", "premium")
+
 
 def _check_deferred_constraints() -> None:
     # Voir 0004 : sans cela, un ALTER TABLE ou un DROP TABLE ultérieur de la même transaction
@@ -122,6 +135,11 @@ def upgrade() -> None:
     )
     for plan, quota in FULL_QUOTAS.items():
         op.execute(quotas.bindparams(plan=plan, quota=quota))
+
+    # Plus de quota par type hérité, ni de fonctionnalité « photos » : les photos dépendent du plan.
+    op.execute(f"delete from {S}.plan_quotas where scan_kind in ('text', 'image')")
+    op.execute(f"delete from {S}.plan_features where feature = 'image_scan'")
+    op.execute(f"delete from {S}.features where code = 'image_scan'")
 
     # Photos envoyées par plan (essai 4, Standard 1, Premium 4).
     op.add_column(
@@ -181,6 +199,20 @@ def downgrade() -> None:
     op.drop_column("plans", "max_images", schema=S)
 
     op.execute(f"delete from {S}.plan_quotas where scan_kind = 'full'")
+    # L'offre d'avant : quotas `text` et `image`, fonctionnalité `image_scan` (essai et Premium).
+    legacy_quota = sa.text(
+        f"insert into {S}.plan_quotas(plan, scan_kind, quota) values (:plan, :kind, :quota)"
+        " on conflict (plan, scan_kind) do nothing"
+    )
+    for plan, kind, quota in LEGACY_QUOTAS:
+        op.execute(legacy_quota.bindparams(plan=plan, kind=kind, quota=quota))
+    op.execute(f"insert into {S}.features(code) values ('image_scan') on conflict do nothing")
+    legacy_feature = sa.text(
+        f"insert into {S}.plan_features(plan, feature) values (:plan, 'image_scan')"
+        " on conflict do nothing"
+    )
+    for plan in LEGACY_IMAGE_SCAN_PLANS:
+        op.execute(legacy_feature.bindparams(plan=plan))
     # Un type `full` déjà utilisé (scan_events) ou un prompt référencé par une analyse est
     # conservé : les supprimer violerait les clés étrangères et effacerait l'historique ; l'upgrade
     # suivant les réutilise. Sinon, la ligne `full` et son prompt disparaissent. Le prompt part

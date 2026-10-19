@@ -25,12 +25,14 @@ from radarnaque_api.llm.client import (
     LLMReason,
     LLMResult,
     OpenAICompatibleClient,
+    SearchRecord,
 )
 from radarnaque_api.llm.providers import ProviderConfig, ProviderError
 from radarnaque_api.models import (
     Analysis,
     AnalysisReason,
     AnalysisText,
+    AnalysisWebSearch,
     AuthUser,
     ListingSnapshot,
     PromptVersion,
@@ -83,6 +85,9 @@ class FakeLLM:
         self.calls: list[dict] = []
         self.providers: list[str] = []
         self.professional = False  # valeur de `professional` des prochaines réponses
+        self.searches: list[
+            SearchRecord
+        ] = []  # recherches web « faites » par les prochaines réponses
 
     def llm_for(self, provider: str) -> "FakeLLM":
         self.providers.append(provider)
@@ -110,6 +115,7 @@ class FakeLLM:
             tokens_out=10 * n,
             cost_usd_micros=42 * n,
             raw_text=f'{{"score": {60 + n}}}',
+            searches=list(self.searches),
         )
 
 
@@ -204,7 +210,6 @@ def _scan(
             if signals is not None
             else [{"id": "new_account", "weight": 30, "severity": "warning"}],
         },
-        "scanKind": "text",
         "trigger": "button",
     }
     body["listing"].update(listing or {})
@@ -281,7 +286,7 @@ async def test_trial_text_scan_succeeds_and_consumes_one_scan(engine, http, cloc
 
     assert len(llm.calls) == 1
     assert llm.providers == ["openrouter"]
-    assert llm.calls[0]["model"] == "google/gemini-2.5-flash-lite"
+    assert llm.calls[0]["model"] == "google/gemini-3.1-flash-lite"
     assert llm.calls[0]["system_prompt"].startswith("Tu aides un acheteur à repérer")
     assert result.score == 61 and result.level == "high"
     assert result.partial is False and result.from_cache is False
@@ -292,21 +297,22 @@ async def test_trial_text_scan_succeeds_and_consumes_one_scan(engine, http, cloc
         ("info", "Raison B1", "Reden B1"),
     ]
     assert result.analyzed_at == T0
-    assert result.remaining.total == 2
-    assert (result.remaining.text, result.remaining.image) == (2, 2)
+    assert result.remaining.scans == 2
+    assert result.remaining.scans == 2
+    assert result.images_analyzed == 0 and result.web_searches == []
     assert await _remaining_total(engine, user, clock()) == 2
 
     analysis = await _scalar(engine, select(Analysis).where(Analysis.id == result.analysis_id))
     assert (analysis.tokens_in, analysis.tokens_out, analysis.cost_usd_micros) == (100, 10, 42)
     assert analysis.rules_version == 1 and analysis.created_at == T0
-    # L'analyse est enregistrée avec le prompt v2 (prompt actif du type « text »).
+    # L'analyse est enregistrée avec le prompt full v1 (prompt actif du type unique « full »).
     prompt = await _scalar(
         engine, select(PromptVersion).where(PromptVersion.id == analysis.prompt_version_id)
     )
-    assert (prompt.scan_kind, prompt.version) == ("text", 2)
+    assert (prompt.scan_kind, prompt.version) == ("full", 1)
     assert prompt.system_prompt == llm.calls[0]["system_prompt"]
     event = await _scalar(engine, select(ScanEvent).where(ScanEvent.user_id == user.id))
-    assert (event.scan_kind, event.trigger, event.created_at) == ("text", "button", T0)
+    assert (event.scan_kind, event.trigger, event.created_at) == ("full", "button", T0)
 
 
 async def test_same_listing_twice_is_served_from_cache_but_counts_twice(engine, http, clock, llm):
@@ -319,7 +325,7 @@ async def test_same_listing_twice_is_served_from_cache_but_counts_twice(engine, 
     assert first.from_cache is False and second.from_cache is True
     assert second.analysis_id == first.analysis_id and second.score == first.score
     assert second.analyzed_at == T0
-    assert (first.remaining.total, second.remaining.total) == (2, 1)
+    assert (first.remaining.scans, second.remaining.scans) == (2, 1)
     assert await _count(engine, ScanResult, ScanResult.analysis_id == first.analysis_id) == 2
 
 
@@ -497,7 +503,7 @@ async def test_concurrent_scans_of_the_same_listing_make_a_single_llm_call(engin
     aid = results[0].analysis_id
     assert await _count(engine, ScanResult, ScanResult.analysis_id == aid) == 2
     assert await _count(engine, Analysis) == 1
-    assert [r.remaining.total for r in results] == [2, 2]
+    assert [r.remaining.scans for r in results] == [2, 2]
 
 
 async def test_concurrent_scans_with_one_remaining_scan(engine, http, clock, llm):
@@ -505,7 +511,7 @@ async def test_concurrent_scans_with_one_remaining_scan(engine, http, clock, llm
     async with AsyncSession(engine) as session:
         for _ in range(2):
             session.add(
-                ScanEvent(user_id=user.id, scan_kind="text", trigger="button", created_at=T0)
+                ScanEvent(user_id=user.id, scan_kind="full", trigger="button", created_at=T0)
             )
         await session.commit()
     clock.advance(minutes=5)
@@ -520,8 +526,8 @@ async def test_concurrent_scans_with_one_remaining_scan(engine, http, clock, llm
     errors = [r for r in results if isinstance(r, ScanError)]
     assert len(successes) == 1 and len(errors) == 1, results
     assert (errors[0].status, errors[0].code) == (402, "quota_exhausted")
-    assert errors[0].details == {"plan": "trial", "scanKind": "text"}
-    assert successes[0].remaining.total == 0
+    assert errors[0].details == {"plan": "trial", "scanKind": "full"}
+    assert successes[0].remaining.scans == 0
     assert await _count(engine, ScanEvent, ScanEvent.user_id == user.id) == 3
 
 
@@ -580,11 +586,11 @@ async def test_scan_kind_without_active_prompt_is_a_configuration_failure(engine
     async with AsyncSession(engine) as session:
         previous = (
             await session.execute(
-                text("select active_prompt_version_id from app.scan_kinds where code = 'text'")
+                text("select active_prompt_version_id from app.scan_kinds where code = 'full'")
             )
         ).scalar_one()
         await session.execute(
-            text("update app.scan_kinds set active_prompt_version_id = null where code = 'text'")
+            text("update app.scan_kinds set active_prompt_version_id = null where code = 'full'")
         )
         await session.commit()
     try:
@@ -593,7 +599,7 @@ async def test_scan_kind_without_active_prompt_is_a_configuration_failure(engine
     finally:
         async with AsyncSession(engine) as session:
             await session.execute(
-                text("update app.scan_kinds set active_prompt_version_id = :p where code = 'text'"),
+                text("update app.scan_kinds set active_prompt_version_id = :p where code = 'full'"),
                 {"p": previous},
             )
             await session.commit()
@@ -634,7 +640,7 @@ async def test_cancellation_during_the_analysis_returns_the_scan(engine, http, c
     # Le verrou consultatif a été libéré : un nouveau scan de la même annonce aboutit.
     clock.advance(seconds=1)
     result = await asyncio.wait_for(_scan_once(engine, user, _scan(), FakeLLM(), http, clock), 10)
-    assert result.from_cache is False and result.remaining.total == 2
+    assert result.from_cache is False and result.remaining.scans == 2
 
 
 class _FailureWriteError(RuntimeError):
@@ -699,36 +705,144 @@ async def test_failed_give_back_after_cancellation_is_logged(
 # --- Photos ------------------------------------------------------------------------------------
 
 
-async def test_image_scan_downloads_the_photos_and_sends_them(engine, http, mock, clock, llm):
+async def _mock_photos(mock: respx.MockRouter, count: int) -> list:
+    return [
+        mock.get(f"https://images.2dehands.com/api/p{n}.jpg").respond(
+            200, content=_png(), headers={"content-type": "image/png"}
+        )
+        for n in range(count)
+    ]
+
+
+def _photo_urls(count: int) -> list[str]:
+    return [f"https://images.2dehands.com/api/p{n}.jpg" for n in range(count)]
+
+
+def _sent_images(llm: FakeLLM, call: int = 0) -> int:
+    parts = llm.calls[call]["messages"][0]["content"]
+    return sum(1 for part in parts if part["type"] == "image_url")
+
+
+async def test_trial_downloads_the_photos_and_sends_them(engine, http, mock, clock, llm):
     for url in IMAGE_URLS:
         mock.get(url).respond(200, content=_png(), headers={"content-type": "image/png"})
     user = await _user(engine)
 
-    result = await _scan_once(
-        engine, user, _scan(images=IMAGE_URLS, scanKind="image"), llm, http, clock
-    )
+    result = await _scan_once(engine, user, _scan(images=IMAGE_URLS), llm, http, clock)
 
     assert result.from_cache is False
     assert llm.calls[0]["model"] == "google/gemini-3.1-flash-lite"
     parts = llm.calls[0]["messages"][0]["content"]
     assert [p["type"] for p in parts] == ["text", "image_url", "image_url"]
     assert parts[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
-    assert result.remaining.image == 2
+    assert result.remaining.scans == 2 and result.images_analyzed == 2
 
 
-async def test_image_scan_respects_the_provider_image_limit(engine, http, mock, clock):
-    routes = [
-        mock.get(url).respond(200, content=_png(), headers={"content-type": "image/png"})
-        for url in IMAGE_URLS
+async def test_standard_sends_one_photo(engine, http, mock, clock, llm):
+    routes = await _mock_photos(mock, 3)
+    user = await _user(engine, plan="standard")
+
+    result = await _scan_once(engine, user, _scan(images=_photo_urls(3)), llm, http, clock)
+
+    assert _sent_images(llm) == 1 and result.images_analyzed == 1
+    assert [r.call_count for r in routes] == [1, 0, 0]
+    assert '"imagesSent":1' in llm.calls[0]["messages"][0]["content"][0]["text"]
+    assert result.remaining.scans == 149
+    analysis = await _scalar(engine, select(Analysis).where(Analysis.id == result.analysis_id))
+    assert analysis.images_analyzed == 1
+
+
+async def test_premium_sends_four_photos(engine, http, mock, clock, llm):
+    await _mock_photos(mock, 6)
+    user = await _user(engine, plan="premium")
+
+    result = await _scan_once(engine, user, _scan(images=_photo_urls(6)), llm, http, clock)
+
+    assert _sent_images(llm) == 4 and result.images_analyzed == 4
+
+
+async def test_provider_image_limit_applies_below_the_plan_limit(engine, http, mock, clock):
+    routes = await _mock_photos(mock, 6)
+    llm = FakeLLM(max_images=3)
+    user = await _user(engine, plan="premium")
+
+    result = await _scan_once(engine, user, _scan(images=_photo_urls(6)), llm, http, clock)
+
+    assert _sent_images(llm) == 3 and result.images_analyzed == 3
+    assert [r.call_count for r in routes] == [1, 1, 1, 0, 0, 0]
+
+
+async def test_no_photo_listing_analyzed(engine, http, clock, llm):
+    user = await _user(engine, plan="premium")
+
+    result = await _scan_once(engine, user, _scan(images=[]), llm, http, clock)
+
+    assert result.score == 61 and result.images_analyzed == 0
+    assert _sent_images(llm) == 0
+    assert '"imagesSent":0' in llm.calls[0]["messages"][0]["content"][0]["text"]
+
+
+async def test_today_in_the_payload_is_the_event_day(engine, http, clock, llm):
+    user = await _user(engine)
+    await _scan_once(engine, user, _scan(), llm, http, clock)
+    assert '"today":"2026-10-17"' in llm.calls[0]["messages"][0]["content"][0]["text"]
+
+
+async def test_cache_key_differs_by_photo_count(engine, http, mock, clock, llm):
+    await _mock_photos(mock, 3)
+    standard = await _user(engine, plan="standard")
+    premium = await _user(engine, plan="premium")
+    scan = _scan(images=_photo_urls(3))
+
+    first = await _scan_once(engine, standard, scan, llm, http, clock)
+    clock.advance(seconds=1)
+    second = await _scan_once(engine, premium, scan, llm, http, clock)
+    clock.advance(seconds=1)
+    third = await _scan_once(engine, premium, scan, llm, http, clock)
+
+    assert len(llm.calls) == 2
+    assert (_sent_images(llm, 0), _sent_images(llm, 1)) == (1, 3)
+    assert first.analysis_id != second.analysis_id
+    assert (first.images_analyzed, second.images_analyzed) == (1, 3)
+    assert third.from_cache is True and third.analysis_id == second.analysis_id
+    assert await _count(engine, Analysis) == 2
+
+
+async def test_cached_result_returns_web_searches(engine, http, clock, llm):
+    llm.searches = [
+        SearchRecord(query="iphone 17 pro prix occasion", aspect="price"),
+        SearchRecord(query="iphone 17 pro existe", aspect="model"),
     ]
-    llm = FakeLLM(max_images=1)
     user = await _user(engine)
 
-    await _scan_once(engine, user, _scan(images=IMAGE_URLS, scanKind="image"), llm, http, clock)
+    first = await _scan_once(engine, user, _scan(), llm, http, clock)
+    clock.advance(seconds=1)
+    second = await _scan_once(engine, user, _scan(), llm, http, clock)
 
-    parts = llm.calls[0]["messages"][0]["content"]
-    assert [p["type"] for p in parts] == ["text", "image_url"]
-    assert [r.call_count for r in routes] == [1, 0]
+    expected = [("iphone 17 pro prix occasion", "price"), ("iphone 17 pro existe", "model")]
+    assert [(w.query, w.aspect) for w in first.web_searches] == expected
+    assert second.from_cache is True and len(llm.calls) == 1
+    assert [(w.query, w.aspect) for w in second.web_searches] == expected
+    dumped = second.model_dump(mode="json", by_alias=True)
+    assert dumped["webSearches"][0] == {
+        "query": "iphone 17 pro prix occasion",
+        "aspect": "price",
+    }
+
+
+async def test_refresh_replaces_web_searches_and_images_analyzed(engine, http, mock, clock, llm):
+    await _mock_photos(mock, 2)
+    llm.searches = [SearchRecord(query="première", aspect="other")]
+    user = await _user(engine, plan="premium")
+    first = await _scan_once(engine, user, _scan(images=_photo_urls(2)), llm, http, clock)
+    clock.advance(hours=25)  # cache expiré : rafraîchi sur place (règle R4)
+    llm.searches = [SearchRecord(query="deuxième", aspect="scam")]
+
+    second = await _scan_once(engine, user, _scan(images=_photo_urls(2)), llm, http, clock)
+
+    assert second.analysis_id == first.analysis_id and len(llm.calls) == 2
+    assert [(w.query, w.aspect) for w in second.web_searches] == [("deuxième", "scam")]
+    assert await _count(engine, AnalysisWebSearch) == 1
 
 
 @pytest.mark.parametrize(
@@ -745,7 +859,7 @@ async def test_image_download_failure_gives_502_and_returns_the_scan(
         await _scan_once(
             engine,
             user,
-            _scan(images=IMAGE_URLS[:1], scanKind="image"),
+            _scan(images=IMAGE_URLS[:1]),
             llm,
             http,
             clock,
@@ -785,13 +899,23 @@ async def test_image_host_of_another_site_is_refused(engine, http, clock, llm):
 # --- Droits ------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("overrides", [{"scanKind": "image"}, {"trigger": "card"}])
-async def test_standard_plan_lacks_image_scan_and_card_icons(engine, http, clock, llm, overrides):
+async def test_card_requires_card_icons(engine, http, clock, llm):
     user = await _user(engine, plan="standard")
     with pytest.raises(ScanError) as info:
-        await _scan_once(engine, user, _scan(**overrides), llm, http, clock)
+        await _scan_once(engine, user, _scan(trigger="card"), llm, http, clock)
     assert (info.value.status, info.value.code) == (403, "feature_not_in_plan")
+    assert info.value.details == {"feature": "card_icons"}
     assert await _count(engine, ScanEvent) == 0
+
+
+@pytest.mark.parametrize("role", ["admin", "superuser"])
+async def test_unlimited_accounts_send_four_photos(engine, http, mock, clock, llm, role):
+    await _mock_photos(mock, 6)
+    user = await _user(engine, role=role, plan=None)
+
+    result = await _scan_once(engine, user, _scan(images=_photo_urls(6)), llm, http, clock)
+
+    assert _sent_images(llm) == 4 and result.images_analyzed == 4
 
 
 async def test_user_without_subscription_gets_402(engine, http, clock, llm):
@@ -809,13 +933,13 @@ async def test_admin_without_subscription_can_scan_everything(engine, http, mock
     result = await _scan_once(
         engine,
         admin,
-        _scan(images=IMAGE_URLS[:1], scanKind="image", trigger="card"),
+        _scan(images=IMAGE_URLS[:1], trigger="card"),
         llm,
         http,
         clock,
     )
 
-    assert result.remaining.model_dump() == {"text": None, "image": None, "total": None}
+    assert result.remaining.model_dump() == {"scans": None}
     assert await _count(engine, ScanEvent, ScanEvent.user_id == admin.id) == 1
 
 
@@ -829,14 +953,12 @@ async def test_superuser_without_subscription_has_every_feature_and_no_quota(
         result = await _scan_once(
             engine,
             superuser,
-            _scan(
-                description=f"annonce {i}", images=IMAGE_URLS[:1], scanKind="image", trigger="card"
-            ),
+            _scan(description=f"annonce {i}", images=IMAGE_URLS[:1], trigger="card"),
             llm,
             http,
             clock,
         )
-        assert result.remaining.model_dump() == {"text": None, "image": None, "total": None}
+        assert result.remaining.model_dump() == {"scans": None}
 
     assert await _count(engine, ScanEvent, ScanEvent.user_id == superuser.id) == 5
     assert await _count(engine, Subscription, Subscription.user_id == superuser.id) == 0
@@ -874,7 +996,7 @@ async def test_quota_exhausted_gives_402_with_plan_and_kind(engine, http, clock,
     with pytest.raises(ScanError) as info:
         await _scan_once(engine, user, _scan(), llm, http, clock)
     assert (info.value.status, info.value.code) == (402, "quota_exhausted")
-    assert info.value.details == {"plan": "trial", "scanKind": "text"}
+    assert info.value.details == {"plan": "trial", "scanKind": "full"}
     assert await _count(engine, ScanEvent) == 3
 
 
@@ -909,7 +1031,7 @@ async def test_superuser_concurrent_scans_are_not_rate_limited(engine, http, clo
     async with AsyncSession(engine) as session:
         for _ in range(29):
             session.add(
-                ScanEvent(user_id=superuser.id, scan_kind="text", trigger="button", created_at=T0)
+                ScanEvent(user_id=superuser.id, scan_kind="full", trigger="button", created_at=T0)
             )
         await session.commit()
 
@@ -948,7 +1070,7 @@ async def test_rate_limit_is_atomic_under_concurrency(engine, http, clock, llm):
     async with AsyncSession(engine) as session:
         for _ in range(29):
             session.add(
-                ScanEvent(user_id=admin.id, scan_kind="text", trigger="button", created_at=T0)
+                ScanEvent(user_id=admin.id, scan_kind="full", trigger="button", created_at=T0)
             )
         await session.commit()
 
@@ -1003,8 +1125,8 @@ async def test_superuser_scan_has_a_debug_block(engine, http, clock, llm):
 
     debug = result.debug
     assert debug is not None
-    assert (debug.provider, debug.model) == ("openrouter", "google/gemini-2.5-flash-lite")
-    assert (debug.prompt_version.scan_kind, debug.prompt_version.version) == ("text", 2)
+    assert (debug.provider, debug.model) == ("openrouter", "google/gemini-3.1-flash-lite")
+    assert (debug.prompt_version.scan_kind, debug.prompt_version.version) == ("full", 1)
     assert debug.system_prompt == llm.calls[0]["system_prompt"]
     sent = llm.calls[0]["messages"]
     assert debug.messages[0].model_dump() == {
@@ -1029,7 +1151,7 @@ async def test_superuser_scan_has_a_debug_block(engine, http, clock, llm):
     # Sérialisé en camelCase, comme le reste de la réponse.
     dumped = result.model_dump(mode="json", by_alias=True)["debug"]
     assert {"promptVersion", "systemPrompt", "rawResponse", "llmCalled", "timingsMs"} <= set(dumped)
-    assert dumped["promptVersion"] == {"scanKind": "text", "version": 2}
+    assert dumped["promptVersion"] == {"scanKind": "full", "version": 1}
 
 
 @pytest.mark.parametrize(("role", "plan"), [("admin", None), ("user", "trial")])
@@ -1052,9 +1174,7 @@ async def test_debug_block_summarizes_images_by_size(engine, http, mock, clock, 
         mock.get(url).respond(200, content=_png(), headers={"content-type": "image/png"})
     superuser = await _user(engine, role="superuser", plan=None)
 
-    result = await _scan_once(
-        engine, superuser, _scan(images=IMAGE_URLS, scanKind="image"), llm, http, clock
-    )
+    result = await _scan_once(engine, superuser, _scan(images=IMAGE_URLS), llm, http, clock)
 
     parts = llm.calls[0]["messages"][0]["content"]
     sizes = [_b64_size(p["image_url"]["url"].split("base64,", 1)[1]) for p in parts[1:]]
@@ -1065,7 +1185,7 @@ async def test_debug_block_summarizes_images_by_size(engine, http, mock, clock, 
     assert "base64" not in result.model_dump_json()
     assert isinstance(result.debug.timings_ms.images, int)
     assert (result.debug.prompt_version.scan_kind, result.debug.model) == (
-        "image",
+        "full",
         "google/gemini-3.1-flash-lite",
     )
 
@@ -1078,7 +1198,7 @@ async def test_debug_block_from_cache_shows_the_messages_without_calling_the_llm
         for url in IMAGE_URLS
     ]
     superuser = await _user(engine, role="superuser", plan=None)
-    scan = _scan(images=IMAGE_URLS, scanKind="image")
+    scan = _scan(images=IMAGE_URLS)
     first = await _scan_once(engine, superuser, scan, llm, http, clock)
     clock.advance(seconds=1)
 
@@ -1122,7 +1242,7 @@ async def test_cached_debug_survives_an_unknown_provider(engine, http, mock, clo
     for url in IMAGE_URLS:
         mock.get(url).respond(200, content=_png(), headers={"content-type": "image/png"})
     superuser = await _user(engine, role="superuser", plan=None)
-    scan = _scan(images=IMAGE_URLS, scanKind="image")
+    scan = _scan(images=IMAGE_URLS)
     await _scan_once(engine, superuser, scan, llm, http, clock)
     clock.advance(seconds=1)
 
@@ -1181,7 +1301,7 @@ async def test_no_cache_from_a_user_is_ignored(engine, http, clock, llm):
     assert len(llm.calls) == 1
     assert second.from_cache is True and second.analysis_id == first.analysis_id
     assert second.debug is None
-    assert (first.remaining.total, second.remaining.total) == (2, 1)  # quota normal
+    assert (first.remaining.scans, second.remaining.scans) == (2, 1)  # quota normal
 
 
 @pytest.mark.parametrize("role", ["admin", "superuser"])
@@ -1203,7 +1323,7 @@ async def test_superuser_scan_is_logged_with_its_debug_block(engine, http, clock
     [record] = _debug_records(debug_log)
     assert record.levelno == logging.INFO
     header, _, body = record.getMessage().partition("\n")
-    assert header == "[debug superuser] scan text 2dehands.be|m123"
+    assert header == "[debug superuser] scan full 2dehands.be|m123"
     assert json.loads(body) == result.model_dump(mode="json", by_alias=True)["debug"]
     assert body.startswith("{\n  ")  # JSON indenté, lisible dans la console
 
@@ -1268,7 +1388,7 @@ async def test_debug_block_and_log_contain_no_secret(engine, http, mock, clock, 
     superuser = await _user(engine, role="superuser", plan=None)
     try:
         result = await _scan_once(
-            engine, superuser, _scan(images=IMAGE_URLS, scanKind="image"), Provider(), http, clock
+            engine, superuser, _scan(images=IMAGE_URLS), Provider(), http, clock
         )
     finally:
         await client.aclose()
@@ -1344,7 +1464,7 @@ async def test_debug_block_summarizes_images_through_the_responses_api(engine, h
     superuser = await _user(engine, role="superuser", plan=None)
     try:
         result = await _scan_once(
-            engine, superuser, _scan(images=IMAGE_URLS, scanKind="image"), Provider(), http, clock
+            engine, superuser, _scan(images=IMAGE_URLS), Provider(), http, clock
         )
     finally:
         await client.aclose()

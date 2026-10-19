@@ -51,6 +51,10 @@
             "title": "Fromcache",
             "type": "boolean"
           },
+          "imagesAnalyzed": {
+            "title": "Imagesanalyzed",
+            "type": "integer"
+          },
           "level": {
             "enum": [
               "low",
@@ -84,6 +88,13 @@
           },
           "summary": {
             "$ref": "#/components/schemas/LocalizedTextOut"
+          },
+          "webSearches": {
+            "items": {
+              "$ref": "#/components/schemas/WebSearchOut"
+            },
+            "title": "Websearches",
+            "type": "array"
           }
         },
         "required": [
@@ -96,6 +107,8 @@
           "summary",
           "advice",
           "reasons",
+          "imagesAnalyzed",
+          "webSearches",
           "analyzedAt",
           "remaining"
         ],
@@ -606,9 +619,9 @@
         "type": "object"
       },
       "RemainingOut": {
-        "description": "Scans restants apr\u00e8s celui-ci ; `None` : illimit\u00e9 (admin) ou sans plafond.",
+        "description": "Scans restants apr\u00e8s celui-ci ; `None` : illimit\u00e9 (admin, superuser hors production).",
         "properties": {
-          "image": {
+          "scans": {
             "anyOf": [
               {
                 "type": "integer"
@@ -617,35 +630,11 @@
                 "type": "null"
               }
             ],
-            "title": "Image"
-          },
-          "text": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Text"
-          },
-          "total": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total"
+            "title": "Scans"
           }
         },
         "required": [
-          "text",
-          "image",
-          "total"
+          "scans"
         ],
         "title": "RemainingOut",
         "type": "object"
@@ -920,15 +909,6 @@
           "rules": {
             "$ref": "#/components/schemas/RulesIn"
           },
-          "scanKind": {
-            "enum": [
-              "text",
-              "image",
-              "full"
-            ],
-            "title": "Scankind",
-            "type": "string"
-          },
           "trigger": {
             "enum": [
               "button",
@@ -941,7 +921,6 @@
         "required": [
           "listing",
           "rules",
-          "scanKind",
           "trigger"
         ],
         "title": "ScanIn",
@@ -1126,6 +1105,31 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WebSearchOut": {
+        "description": "Une recherche web faite pour l'analyse (requ\u00eate d\u00e9j\u00e0 masqu\u00e9e de toute donn\u00e9e perso).",
+        "properties": {
+          "aspect": {
+            "enum": [
+              "model",
+              "price",
+              "scam",
+              "other"
+            ],
+            "title": "Aspect",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "aspect"
+        ],
+        "title": "WebSearchOut",
         "type": "object"
       }
     }

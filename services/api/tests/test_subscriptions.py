@@ -97,31 +97,30 @@ async def test_usage_trial_shared_cap(db, make_user):
     uid = await make_user("a@b.test")
     now = _utc(2026, 3, 10)
     sub = await _add_sub(db, uid, "trial", "active", _utc(2026, 3, 1))
-    await _add_event(db, uid, "text", _utc(2026, 3, 2))
-    await _add_event(db, uid, "text", _utc(2026, 3, 3), failed=True)
-    await _add_event(db, uid, "image", _utc(2026, 3, 4))
+    await _add_event(db, uid, "full", _utc(2026, 3, 2))
+    await _add_event(db, uid, "full", _utc(2026, 3, 3), failed=True)
+    await _add_event(db, uid, "full", _utc(2026, 3, 4))
     usage = await compute_usage(db, sub, now)
     assert usage.period_start == sub.period_start
-    assert (usage.per_kind["text"].used, usage.per_kind["text"].remaining) == (1, 1)
-    assert (usage.per_kind["image"].used, usage.per_kind["image"].remaining) == (1, 1)
+    assert list(usage.per_kind) == ["full"]
+    assert (usage.per_kind["full"].used, usage.per_kind["full"].remaining) == (2, 1)
     assert usage.total is not None
     assert (usage.total.limit, usage.total.used, usage.total.remaining) == (3, 2, 1)
-    # Le plafond global borne le reste par type.
-    await _add_event(db, uid, "text", _utc(2026, 3, 5))
+    # Le plafond global borne aussi le reste du type.
+    await _add_event(db, uid, "full", _utc(2026, 3, 5))
     usage = await compute_usage(db, sub, now)
     assert usage.total is not None and usage.total.remaining == 0
-    assert usage.per_kind["image"].remaining == 0
-    assert usage.per_kind["text"].remaining == 0
+    assert usage.per_kind["full"].remaining == 0
 
 
 async def test_usage_standard_monthly_window(db, make_user):
     uid = await make_user("a@b.test")
     sub = await _add_sub(db, uid, "standard", "active", _utc(2026, 1, 31))
-    await _add_event(db, uid, "text", _utc(2026, 2, 27))
-    await _add_event(db, uid, "text", _utc(2026, 3, 1))
+    await _add_event(db, uid, "full", _utc(2026, 2, 27))
+    await _add_event(db, uid, "full", _utc(2026, 3, 1))
     usage = await compute_usage(db, sub, _utc(2026, 3, 10))
     assert usage.period_start == _utc(2026, 2, 28)
     assert usage.total is None
-    assert usage.per_kind["text"].used == 1
-    assert usage.per_kind["text"].remaining == 149
-    assert usage.per_kind["image"].limit == 0
+    assert usage.per_kind["full"].used == 1
+    assert usage.per_kind["full"].remaining == 149
+    assert list(usage.per_kind) == ["full"]

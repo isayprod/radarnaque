@@ -1,5 +1,6 @@
 import hashlib
 import json
+from datetime import date
 
 import pytest
 
@@ -34,11 +35,15 @@ def _scan(**overrides) -> dict:
                 {"id": "a_signal", "weight": 40, "severity": "danger"},
             ],
         },
-        "scanKind": "text",
         "trigger": "button",
     }
     scan.update(overrides)
     return scan
+
+
+TODAY = date(2026, 10, 19)
+IMAGE_B64 = "QUJD"
+IMAGES_REQUESTED = 2
 
 
 def _content(scan: ScanIn) -> str:
@@ -105,18 +110,18 @@ def test_input_hash_ignores_signal_order_and_key_order():
         {"params": {"y": "a", "x": 1}, "severity": "warning", "weight": 20, "id": "b_signal"},
     ]
     reordered["listing"]["seller"] = {"reviewCount": 2, "accountAgeMonths": {"max": 3, "min": 1}}
-    assert input_hash(a) == input_hash(ScanIn.model_validate(reordered))
+    assert input_hash(a, 2) == input_hash(ScanIn.model_validate(reordered), 2)
 
 
 def test_input_hash_ignores_listing_content_and_trigger():
     a = ScanIn.model_validate(_scan())
     b = _scan(trigger="card")
     b["listing"]["description"] = "autre chose"
-    assert input_hash(a) == input_hash(ScanIn.model_validate(b))
+    assert input_hash(a, 2) == input_hash(ScanIn.model_validate(b), 2)
 
 
 def test_input_hash_changes_with_signals_seller_rules_version_and_partial():
-    base = input_hash(ScanIn.model_validate(_scan()))
+    base = input_hash(ScanIn.model_validate(_scan()), 2)
     variants = []
     weight = _scan()
     weight["rules"]["signals"][0]["weight"] = 21
@@ -131,13 +136,13 @@ def test_input_hash_changes_with_signals_seller_rules_version_and_partial():
     version["rules"]["version"] = 4
     variants.append(version)
     variants.append(_scan(partial=True))
-    hashes = [input_hash(ScanIn.model_validate(v)) for v in variants]
+    hashes = [input_hash(ScanIn.model_validate(v), 2) for v in variants]
     assert base not in hashes
     assert len(set(hashes)) == len(hashes)
 
 
 def test_input_hash_covers_the_listing_facts_sent_to_the_llm():
-    base = input_hash(ScanIn.model_validate(_scan()))
+    base = input_hash(ScanIn.model_validate(_scan()), 2)
     changes = [
         ("category", "Fietsen"),
         ("condition", "Gebruikt"),
@@ -149,13 +154,14 @@ def test_input_hash_covers_the_listing_facts_sent_to_the_llm():
     for key, value in changes:
         body = _scan()
         body["listing"][key] = value
-        hashes.append(input_hash(ScanIn.model_validate(body)))
+        hashes.append(input_hash(ScanIn.model_validate(body), 2))
     assert base not in hashes and len(set(hashes)) == len(hashes)
 
 
 def _facts_sent(scan: ScanIn) -> dict:
     """Faits réellement envoyés au LLM : le bloc JSON `<annonce>` du message utilisateur."""
-    text = build_messages(scan.listing, scan.rules, [])[0]["content"][0]["text"]
+    sent = [IMAGE_B64] * IMAGES_REQUESTED
+    text = build_messages(scan.listing, scan.rules, sent, today=TODAY)[0]["content"][0]["text"]
     return json.loads(text.split("<annonce>\n", 1)[1].split("\n</annonce>", 1)[0])
 
 
@@ -166,6 +172,11 @@ CONTENT = "content_hash"
 INPUT = "input_hash"
 FACT_MUTATIONS = {
     "site": ("cache_key", None),
+    # Nombre de photos demandées : paramètre d'`input_hash`, vérifié par un test dédié.
+    "imagesSent": ("images_requested", None),
+    # Seule exception à R12 : la date du jour change chaque jour sans changer l'annonce ; elle
+    # n'entre dans aucune empreinte (la durée du cache, en heures, borne l'écart).
+    "today": ("excluded", None),
     "title": (CONTENT, lambda b: b["listing"].update(title="Fiets kapot")),
     "description": (CONTENT, lambda b: b["listing"].update(description="Slechte staat")),
     "maskedContacts": (
@@ -229,4 +240,22 @@ def test_changing_a_fact_sent_to_the_llm_changes_its_declared_hash(field):
     if coverage == CONTENT:
         assert _content(changed) != _content(base)
     else:
-        assert input_hash(changed) != input_hash(base)
+        assert input_hash(changed, IMAGES_REQUESTED) != input_hash(base, IMAGES_REQUESTED)
+
+
+def test_images_sent_is_covered_by_the_requested_photo_count():
+    scan = ScanIn.model_validate(_scan())
+    assert input_hash(scan, 1) != input_hash(scan, 2) != input_hash(scan, 0)
+    assert input_hash(scan, 2) == input_hash(scan, 2)
+    facts = _facts_sent(scan)
+    assert facts["imagesSent"] == IMAGES_REQUESTED
+
+
+def test_today_is_in_the_message_but_in_no_hash():
+    scan = ScanIn.model_validate(_scan())
+    sent = [IMAGE_B64] * IMAGES_REQUESTED
+    other_day = build_messages(scan.listing, scan.rules, sent, today=date(2026, 10, 20))
+    assert '"today":"2026-10-20"' in other_day[0]["content"][0]["text"]
+    assert _facts_sent(scan)["today"] == "2026-10-19"
+    # `input_hash` n'a aucun paramètre de date : deux jours donnent la même empreinte.
+    assert "today" not in input_hash.__code__.co_varnames

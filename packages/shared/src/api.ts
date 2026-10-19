@@ -174,6 +174,8 @@ export interface components {
             debug?: components["schemas"]["ScanDebugOut"] | null;
             /** Fromcache */
             fromCache: boolean;
+            /** Imagesanalyzed */
+            imagesAnalyzed: number;
             /**
              * Level
              * @enum {string}
@@ -189,6 +191,8 @@ export interface components {
             /** Score */
             score: number;
             summary: components["schemas"]["LocalizedTextOut"];
+            /** Websearches */
+            webSearches: components["schemas"]["WebSearchOut"][];
         };
         /**
          * BillingUrlOut
@@ -362,15 +366,11 @@ export interface components {
         };
         /**
          * RemainingOut
-         * @description Scans restants après celui-ci ; `None` : illimité (admin) ou sans plafond.
+         * @description Scans restants après celui-ci ; `None` : illimité (admin, superuser hors production).
          */
         RemainingOut: {
-            /** Image */
-            image: number | null;
-            /** Text */
-            text: number | null;
-            /** Total */
-            total: number | null;
+            /** Scans */
+            scans: number | null;
         };
         /** RulesIn */
         RulesIn: {
@@ -478,11 +478,6 @@ export interface components {
             partial: boolean;
             rules: components["schemas"]["RulesIn"];
             /**
-             * Scankind
-             * @enum {string}
-             */
-            scanKind: "text" | "image" | "full";
-            /**
              * Trigger
              * @enum {string}
              */
@@ -533,6 +528,19 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /**
+         * WebSearchOut
+         * @description Une recherche web faite pour l'analyse (requête déjà masquée de toute donnée perso).
+         */
+        WebSearchOut: {
+            /**
+             * Aspect
+             * @enum {string}
+             */
+            aspect: "model" | "price" | "scam" | "other";
+            /** Query */
+            query: string;
         };
     };
     responses: never;
