@@ -724,6 +724,35 @@ async def test_failed_give_back_after_cancellation_is_logged(
     assert "secret-db-message-4471" not in caplog.text
 
 
+async def test_cancellation_while_giving_back_a_failure_still_returns_the_scan(
+    engine, http, clock, monkeypatch: pytest.MonkeyPatch
+):
+    """Le client part pendant l'écriture du `scan_failures` qui suit un échec de l'analyse :
+    l'écriture, protégée par `shield`, aboutit quand même."""
+    writing, release, written = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    record = scans_service._record_failure
+
+    async def slow_record(*args, **kwargs) -> None:
+        writing.set()
+        await release.wait()
+        await record(*args, **kwargs)
+        written.set()
+
+    monkeypatch.setattr(scans_service, "_record_failure", slow_record)
+    user = await _user(engine)
+    llm = FakeLLM(error=LLMError("transport", "fake"))
+    task = asyncio.create_task(_scan_once(engine, user, _scan(), llm, http, clock))
+    await asyncio.wait_for(writing.wait(), 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    release.set()
+
+    await asyncio.wait_for(written.wait(), 5)
+    assert (await _scalar(engine, select(ScanFailure))).error_code == "transport"
+    assert await _remaining_total(engine, user, clock()) == 3
+
+
 # --- Photos ------------------------------------------------------------------------------------
 
 

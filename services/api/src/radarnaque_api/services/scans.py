@@ -560,9 +560,10 @@ async def _give_back(
     maker: async_sessionmaker[AsyncSession], event_id: int, exc: Exception, at: datetime
 ) -> NoReturn:
     """Rend le scan, puis lève `502 analysis_failed`, ou relance une erreur inattendue telle
-    quelle (500) une fois le scan rendu (règle R10)."""
+    quelle (500) une fois le scan rendu (règle R10). L'écriture est sous `shield` : si le
+    client part pendant celle-ci, le scan est rendu quand même, puis l'annulation continue."""
     code = _failure_code(exc)
-    await _record_failure(maker, event_id, code, at)
+    await asyncio.shield(_record_failure(maker, event_id, code, at))
     if code == INTERNAL_FAILURE:
         raise exc
     raise ScanError(

@@ -15,6 +15,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import ClientDisconnect
 
 from radarnaque_api.llm.client import Bilingual, LLMAnalysis, LLMError, LLMReason, LLMResult
 from radarnaque_api.llm.events import EventSink, SearchDone, SearchStarted, Thinking, Writing
@@ -25,6 +26,7 @@ from radarnaque_api.schemas import (
     RemainingOut,
 )
 from radarnaque_api.search import SearchHit
+from radarnaque_api.services import scan_stream
 from radarnaque_api.services import scans as scans_service
 from radarnaque_api.services.scan_stream import Stage, encode_sse, sse_of, stream_scan
 
@@ -56,15 +58,20 @@ class _Body(httpx.AsyncByteStream):
 
 
 class _StreamingASGI(httpx.AsyncBaseTransport):
-    def __init__(self, app: FastAPI, *, gone_at_start: bool = False) -> None:
+    def __init__(
+        self, app: FastAPI, *, gone_at_start: bool = False, spec_version: str = "2.3"
+    ) -> None:
         self._app = app
         self._gone_at_start = gone_at_start  # client déjà parti quand la réponse commence
+        # Version d'ASGI annoncée (uvicorn 0.54 : 2.3). En 2.4, le serveur ne signale plus la
+        # déconnexion par `receive` : c'est `send` qui lève `OSError` (client parti).
+        self._spec_version = spec_version
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         body = b"".join([part async for part in request.stream])  # type: ignore[union-attr]
         scope = {
             "type": "http",
-            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "asgi": {"version": "3.0", "spec_version": self._spec_version},
             "http_version": "1.1",
             "method": request.method,
             "headers": [(k.lower(), v) for k, v in request.headers.raw],
@@ -95,6 +102,8 @@ class _StreamingASGI(httpx.AsyncBaseTransport):
             if message["type"] == "http.response.start":
                 start.set_result(message)
                 if self._gone_at_start:
+                    if self._spec_version == "2.4":
+                        raise OSError("client parti")
                     await asyncio.sleep(0)  # point d'annulation avant le premier événement
             elif message["type"] == "http.response.body":
                 chunks.put_nowait(message.get("body", b""))
@@ -104,6 +113,8 @@ class _StreamingASGI(httpx.AsyncBaseTransport):
         async def run() -> None:
             try:
                 await self._app(scope, receive, send)
+            except ClientDisconnect:
+                pass  # ASGI 2.4 : client parti, ignoré comme par le serveur
             finally:
                 chunks.put_nowait(None)
                 if not start.done():
@@ -556,6 +567,44 @@ async def test_pending_thinking_sent_after_throttle_delay():
     await stream.aclose()
 
 
+async def test_unexpected_error_message_stays_neutral():
+    """Erreur inattendue : on ne sait pas si le scan a été rendu (erreur après l'enregistrement
+    du résultat, ou remboursement en échec) ; le message ne le promet donc pas."""
+
+    async def admitted(sink):
+        raise RuntimeError("bogue")
+
+    events = await _collect(stream_scan(admitted))
+
+    assert events == [
+        (
+            "error",
+            {
+                "code": "analysis_failed",
+                "message": "L'analyse a échoué.",
+                "details": {"reason": "internal"},
+            },
+        )
+    ]
+
+
+async def test_analysis_task_is_strongly_referenced_until_done():
+    gate = asyncio.Event()
+
+    async def admitted(sink):
+        await sink(Stage("analyzing", 0))
+        await gate.wait()
+        return _result()
+
+    stream = stream_scan(admitted)
+    await anext(stream)
+    [task] = [t for t in scan_stream._TASKS if not t.done()]  # tenue hors du générateur
+    gate.set()
+    assert (await anext(stream)).startswith("event: result\n")
+    await stream.aclose()
+    assert task.done() and task not in scan_stream._TASKS
+
+
 async def test_closing_the_stream_cancels_the_analysis():
     cancelled = asyncio.Event()
 
@@ -583,11 +632,22 @@ def test_encode_and_sse_of():
     )
 
 
-async def test_client_gone_before_the_stream_gives_back(app, bearer, user, llm, db):
+@pytest.mark.parametrize("spec_version", ["2.3", "2.4"])
+async def test_client_gone_before_the_stream_gives_back(
+    app, bearer, user, llm, db, spec_version, monkeypatch: pytest.MonkeyPatch
+):
     """Client parti pendant l'admission : la déconnexion arrive avant que le flux ne
-    démarre (le générateur ne tourne jamais) ; le scan est rendu après la réponse."""
+    démarre (le générateur ne tourne jamais) ; le scan est rendu après la réponse, une seule
+    fois, quelle que soit la version d'ASGI (Starlette n'exécute `background` qu'en 2.3)."""
+    record, given_back = scans_service._record_failure, []
+
+    async def counted(*args, **kwargs) -> None:
+        given_back.append(args[1])  # identifiant de l'événement rendu
+        await record(*args, **kwargs)
+
+    monkeypatch.setattr(scans_service, "_record_failure", counted)
     uid = await user()
-    transport = _StreamingASGI(app, gone_at_start=True)
+    transport = _StreamingASGI(app, gone_at_start=True, spec_version=spec_version)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         async with client.stream(
             "POST", "/api/scans/stream", json=_body(), headers=bearer(uid)
@@ -596,3 +656,4 @@ async def test_client_gone_before_the_stream_gives_back(app, bearer, user, llm, 
             assert [chunk async for chunk in r.aiter_bytes()] == []
     assert llm.calls == 0
     assert await _wait_failures(db, uid) == ["internal"]
+    assert len(given_back) == 1
