@@ -899,3 +899,51 @@ describe("twhAdapter.cardAnchor", () => {
 		expect(twhAdapter.cardAnchor(bare)).toBe(bare);
 	});
 });
+
+describe("twhAdapter.extractListing — forme réelle des pages", () => {
+	/** Comme sur 2ememain : `__HEADER_CONFIG__` précède `__CONFIG__` dans le même script, suivi d'une autre affectation. */
+	function realShaped(doc: Document): Document {
+		const script = configScript(doc);
+		script.textContent = `window.__HEADER_CONFIG__ = {"isSticky":true,"label":"a = b; c"};\n${script.textContent}\nwindow.__AFTER__ = {"x":1};`;
+		return doc;
+	}
+
+	test("reads __CONFIG__ when another assignment precedes it in the same script", () => {
+		const { listing } = extract(realShaped(bidding()), BIDDING_URL);
+		expect(listing.priceType).toBe("bidding");
+		expect(listing.location).toEqual({ city: "Namur", country: "BE" });
+		expect(listing.seller.sellerKind).toBe("private");
+		expect(listing.images).toHaveLength(9);
+	});
+
+	test("ignores a __CONFIG__ whose JSON is unreadable", () => {
+		const doc = bidding();
+		configScript(doc).textContent = 'window.__CONFIG__ = {"listing": {';
+		expect(() => extract(doc, BIDDING_URL)).not.toThrow();
+	});
+
+	test.each([
+		["with __CONFIG__", (d: Document) => d],
+		[
+			"without __CONFIG__",
+			(d: Document) => {
+				configScript(d).remove();
+				return d;
+			},
+		],
+	])(
+		"the badge injected after the title changes nothing (%s)",
+		(_, prepare) => {
+			const before = extract(prepare(fixed()), FIXED_URL).listing;
+			const doc = prepare(fixed());
+			const anchor = twhAdapter.badgeAnchor?.(doc.body);
+			if (!anchor) throw new Error("no badge anchor");
+			const host = doc.createElement("radarnaque-badge");
+			host.textContent = "Risque faible 10/100";
+			anchor.after(host);
+			const after = extract(doc, FIXED_URL).listing;
+			expect(after.price).toEqual(before.price);
+			expect(after.priceType).toBe(before.priceType);
+		},
+	);
+});

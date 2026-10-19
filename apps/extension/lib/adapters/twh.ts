@@ -10,7 +10,13 @@ import type { CardRef, ExtractResult, MarketplaceAdapter } from "./types";
 const SITES: Site[] = ["2ememain.be", "2dehands.be"];
 
 const LISTING_PATH_RE = /^\/v\/[^/]+\/[^/]+\/(m\d+)/i;
-const CONFIG_PREFIX_RE = /^\s*window\.__CONFIG__\s*=/;
+/**
+ * Affectation de `__CONFIG__`, n'importe où dans le script : sur les vraies pages,
+ * `window.__HEADER_CONFIG__ = …;` la précède dans le même `<script>`.
+ */
+const CONFIG_ASSIGN_RE = /\bwindow\.__CONFIG__\s*=\s*/;
+/** Hôtes de nos interfaces injectées (pastille, icônes) : jamais lus comme contenu de la page. */
+const OWN_HOST_PREFIX = "radarnaque-";
 /** Pages de résultats : catégorie (`/l/…`) ou recherche libre (`/q/…`). */
 const SEARCH_PATH_RE = /^\/(l|q)\//i;
 /**
@@ -126,10 +132,11 @@ function idOf(url: URL): string | null {
 function readConfigListing(doc: Document): TwhConfigListing | null {
 	for (const script of doc.querySelectorAll("script:not([src])")) {
 		const text = script.textContent ?? "";
-		if (!CONFIG_PREFIX_RE.test(text)) continue;
+		const match = CONFIG_ASSIGN_RE.exec(text);
+		if (!match) continue;
+		const json = jsonObjectAt(text, match.index + match[0].length);
+		if (json === null) return null;
 		try {
-			const body = text.slice(text.indexOf("=") + 1).trimEnd();
-			const json = body.endsWith(";") ? body.slice(0, -1) : body;
 			const config = JSON.parse(json) as { listing?: TwhConfigListing };
 			return config?.listing && typeof config.listing === "object"
 				? config.listing
@@ -139,6 +146,37 @@ function readConfigListing(doc: Document): TwhConfigListing | null {
 		}
 	}
 	return null;
+}
+
+/**
+ * Texte de l'objet JSON qui commence à `start` (après les espaces), accolades
+ * équilibrées hors des chaînes ; `null` s'il n'y en a pas ou s'il n'est pas fermé.
+ * Ce qui suit l'objet dans le script (autre affectation) est ignoré.
+ */
+function jsonObjectAt(text: string, start: number): string | null {
+	let i = start;
+	while (i < text.length && /\s/.test(text[i] ?? "")) i++;
+	if (text[i] !== "{") return null;
+	let depth = 0;
+	let inString = false;
+	for (let j = i; j < text.length; j++) {
+		const c = text[j];
+		if (inString) {
+			if (c === "\\") j++;
+			else if (c === '"') inString = false;
+		} else if (c === '"') inString = true;
+		else if (c === "{") depth++;
+		else if (c === "}" && --depth === 0) return text.slice(i, j + 1);
+	}
+	return null;
+}
+
+/** Élément qui suit `el`, en sautant nos propres interfaces injectées (la pastille). */
+function nextPageElement(el: Element | null | undefined): Element | null {
+	let next = el?.nextElementSibling ?? null;
+	while (next?.tagName.toLowerCase().startsWith(OWN_HOST_PREFIX))
+		next = next.nextElementSibling;
+	return next;
 }
 
 function readJsonLdProduct(doc: Document): JsonLdProduct | null {
@@ -466,7 +504,8 @@ function extract(doc: Document, url: URL, site: Site): ExtractResult | null {
 
 	// Un type connu de `__CONFIG__` fait foi ; un type absent ou inconnu laisse
 	// le libellé affiché à la place du prix (« Prix sur demande »…) le préciser.
-	const priceText = h1?.nextElementSibling?.textContent ?? "";
+	// La pastille est insérée juste après le titre : elle n'est jamais lue comme prix.
+	const priceText = nextPageElement(h1)?.textContent ?? "";
 	const configPrice = priceFromConfig(config?.priceInfo);
 	const priceInfo =
 		(configPrice?.priceType === "unknown" ? null : configPrice) ??
