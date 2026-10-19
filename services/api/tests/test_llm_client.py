@@ -345,11 +345,11 @@ async def test_provider_without_key_sends_placeholder(mock, http):
     assert route.calls.last.request.headers["authorization"] == "Bearer unused"
 
 
-async def test_timeout_twice_raises_transport(mock, http):
+async def test_timeout_twice_raises_timeout(mock, http):
     route = mock.post("/chat/completions").mock(side_effect=httpx.ReadTimeout("slow"))
     with pytest.raises(LLMError) as info:
         await _analyze(_provider(), http)
-    assert info.value.code == "transport"
+    assert info.value.code == "timeout"  # spec §11 : `timeout` dans les détails
     assert route.call_count == 2
     _assert_not_chained(info.value)
 

@@ -88,10 +88,11 @@ class LLMResult:
     rounds: int = 1
 
 
-LLMErrorCode = Literal["transport", "invalid_response", "configuration"]
+LLMErrorCode = Literal["transport", "timeout", "invalid_response", "configuration"]
 
 _MESSAGES: dict[str, str] = {
     "transport": "fournisseur LLM injoignable ou en erreur",
+    "timeout": "fournisseur LLM trop lent (délai d'un tour dépassé)",
     "invalid_response": "réponse du LLM invalide",
     "configuration": "fournisseur LLM mal configuré (clé absente ou refusée, URL invalide)",
 }
@@ -459,9 +460,12 @@ class OpenAICompatibleClient:
                     fatal = "transport"
                 else:
                     retryable = not sink.emitted
-            # Connexion impossible, délai dépassé (du SDK ou du tour), flux coupé, ou erreur
-            # annoncée dans le flux (`openai.APIError`).
-            except (openai.APIError, _StreamFailed, TimeoutError):
+            # Délai dépassé : celui du SDK (90 s sans réponse) ou la durée totale du tour.
+            except (openai.APITimeoutError, TimeoutError):
+                code, retryable = "timeout", not sink.emitted
+            # Connexion impossible, flux coupé, ou erreur annoncée dans le flux
+            # (`openai.APIError`).
+            except (openai.APIError, _StreamFailed):
                 retryable = not sink.emitted
             if fatal is not None:
                 raise self._error(fatal)
@@ -607,7 +611,16 @@ class OpenAICompatibleClient:
         completed: Any = None
         calling = writing = False
         try:
-            async for event in stream:
+            while True:
+                # Seuls la lecture et le décodage du flux sont sous `try` : une erreur du
+                # récepteur d'événements remonte telle quelle, jamais prise pour une réponse
+                # invalide.
+                try:
+                    event = await anext(stream)
+                except StopAsyncIteration:
+                    break
+                except ValueError:  # ligne `data:` illisible
+                    raise _Invalid from None
                 kind = getattr(event, "type", None)
                 if kind == "response.reasoning_summary_text.delta":
                     key = (getattr(event, "item_id", None), getattr(event, "summary_index", None))
@@ -631,8 +644,6 @@ class OpenAICompatibleClient:
                     raise _StreamFailed
                 elif kind == "response.incomplete":  # réponse coupée (limite de tokens)
                     raise _Invalid
-        except ValueError:  # ligne `data:` illisible
-            raise _Invalid from None
         finally:
             await stream.close()
         if completed is None:
