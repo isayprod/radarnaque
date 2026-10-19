@@ -15,6 +15,7 @@ from radarnaque_api.errors import install_error_handlers
 from radarnaque_api.llm.client import LLMClientFactory
 from radarnaque_api.llm.providers import ensure_models_use_known_providers, load_providers
 from radarnaque_api.routes import billing, health, internal, me, scans
+from radarnaque_api.search import make_search_backend
 
 # En DEBUG, ces bibliothèques journalisent les URL et les corps des requêtes : l'annonce, les
 # photos, et les réponses du fournisseur.
@@ -77,6 +78,18 @@ def create_app(
         # résoudrait l'hôte à la place de la vérification SSRF), ni redirection automatique
         # (fetch_images vérifie chaque saut), ni en-têtes, cookies ou authentification partagés.
         app.state.http_images = httpx.AsyncClient(trust_env=False, follow_redirects=False)
+        # Client dédié à SearXNG, seul hôte que l'API appelle pour la recherche : pas de proxy de
+        # l'environnement ni de redirection. Absent (None) quand SEARCH_BACKEND vaut "none".
+        app.state.http_search = (
+            None
+            if settings.search_backend == "none"
+            else httpx.AsyncClient(trust_env=False, follow_redirects=False)
+        )
+        app.state.search = (
+            None
+            if app.state.http_search is None
+            else make_search_backend(settings, app.state.http_search)
+        )
         # Un client par fournisseur, créé au premier scan ; jamais le client des photos.
         app.state.llm_clients = LLMClientFactory(providers, os.environ)
         app.state.llm_for = app.state.llm_clients
@@ -87,6 +100,8 @@ def create_app(
         finally:
             await app.state.llm_clients.aclose()
             await app.state.http_images.aclose()
+            if app.state.http_search is not None:
+                await app.state.http_search.aclose()
             await app.state.engine.dispose()
 
     app = FastAPI(title="Radarnaque API", lifespan=lifespan)

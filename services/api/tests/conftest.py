@@ -84,6 +84,7 @@ def settings(pg_url: str) -> Settings:
         internal_api_secret="test-internal-secret-0123456789abcdef",  # type: ignore[arg-type]
         env="test",
         providers_file=API_ROOT / "providers.toml",
+        search_backend="none",  # aucune requête réseau réelle dans les tests
     )
 
 
