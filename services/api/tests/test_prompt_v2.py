@@ -23,9 +23,14 @@ def _load_migration(filename: str):
 _0002 = _load_migration("0002_scans.py")
 _0004 = _load_migration("0004_prompt_v2.py")
 
+# Le type `full` (0005) a ses propres versions : ces tests ne regardent que `text` et `image`.
+_VERSIONS_SQL = (
+    "select scan_kind, version from app.prompt_versions where scan_kind <> 'full' order by 1, 2"
+)
 _ACTIVE = (
     "select k.code, p.version, p.scan_kind, p.system_prompt from app.scan_kinds k"
-    " join app.prompt_versions p on p.id = k.active_prompt_version_id order by 1"
+    " join app.prompt_versions p on p.id = k.active_prompt_version_id"
+    " where k.code <> 'full' order by 1"
 )
 
 
@@ -34,7 +39,11 @@ async def _rows(db, sql: str) -> list[tuple]:
 
 
 async def _prompts(db) -> dict[tuple[str, int], str]:
-    rows = await _rows(db, "select scan_kind, version, system_prompt from app.prompt_versions")
+    rows = await _rows(
+        db,
+        "select scan_kind, version, system_prompt from app.prompt_versions"
+        " where scan_kind <> 'full'",
+    )
     return {(kind, version): prompt for kind, version, prompt in rows}
 
 
@@ -99,7 +108,8 @@ async def test_downgrade_to_0003_reactivates_v1_then_upgrade_restores_v2(db, ale
         assert [(r[0], r[1]) for r in rows] == [("image", 1), ("text", 1)]
         assert rows[0][3] == _0002.IMAGE_PROMPT_V1 and rows[1][3] == _0002.TEXT_PROMPT_V1
         assert await _rows(
-            db, "select scan_kind, version from app.prompt_versions order by 1, 2"
+            db,
+            _VERSIONS_SQL,
         ) == [
             ("image", 1),
             ("text", 1),
@@ -153,13 +163,17 @@ async def test_downgrade_keeps_a_v2_row_referenced_by_an_analysis(db, alembic_co
         assert [(r[0], r[1]) for r in rows] == [("image", 1), ("text", 1)]
         # La v2 texte, référencée par une analyse, est conservée ; la v2 image est supprimée.
         assert await _rows(
-            db, "select scan_kind, version from app.prompt_versions order by 1, 2"
+            db,
+            _VERSIONS_SQL,
         ) == [("image", 1), ("text", 1), ("text", 2)]
         await db.rollback()
     finally:
         command.upgrade(alembic_config, "head")  # ne doit pas échouer non plus
     assert [r[:3] for r in await _rows(db, _ACTIVE)] == [("image", 2, "image"), ("text", 2, "text")]
-    assert await _rows(db, "select scan_kind, version from app.prompt_versions order by 1, 2") == [
+    assert await _rows(
+        db,
+        _VERSIONS_SQL,
+    ) == [
         ("image", 1),
         ("image", 2),
         ("text", 1),

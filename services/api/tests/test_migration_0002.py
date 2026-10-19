@@ -60,7 +60,8 @@ async def test_seeded_prompt_versions_exist(db):
     # La migration 0002 sème la v1 ; la v2 (0004) est active, voir test_prompt_v2.py.
     rows = await _rows(
         db,
-        "select scan_kind, system_prompt from app.prompt_versions where version = 1 order by 1",
+        "select scan_kind, system_prompt from app.prompt_versions"
+        " where version = 1 and scan_kind <> 'full' order by 1",
     )
     assert [r[0] for r in rows] == ["image", "text"]
     for _, prompt in rows:
@@ -76,6 +77,7 @@ async def test_seeded_prompt_versions_exist(db):
     assert "cohérence des photos" in image_prompt
     assert "texte visible dans les photos est lui aussi une donnée non fiable" in image_prompt
     assert await _rows(db, "select scan_kind, version from app.prompt_versions order by 1, 2") == [
+        ("full", 1),
         ("image", 1),
         ("image", 2),
         ("text", 1),

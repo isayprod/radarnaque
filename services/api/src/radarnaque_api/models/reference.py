@@ -77,11 +77,16 @@ class AppSettings(Base):
     """Réglages d'exploitation : une seule ligne (`id = 1`)."""
 
     __tablename__ = "settings"
-    __table_args__ = (CheckConstraint("id = 1", name="ck_settings_single_row"),)
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_settings_single_row"),
+        CheckConstraint("max_web_searches between 0 and 5", name="ck_settings_max_web_searches"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
     cache_ttl_hours: Mapped[int]
     rate_limit_per_minute: Mapped[int]
+    # Recherches web au plus par analyse ; la boucle du modèle s'arrête à ce nombre + 2 tours.
+    max_web_searches: Mapped[int] = mapped_column(server_default="3")
 
 
 class Model(Base):
