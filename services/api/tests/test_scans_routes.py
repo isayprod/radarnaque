@@ -603,8 +603,13 @@ def test_debug_logger_has_one_console_handler_outside_production(settings, bare_
     assert bare_debug_logger.propagate is False
 
 
-def test_debug_logger_has_no_handler_in_production(settings, bare_debug_logger):
+def test_debug_logger_is_silenced_in_production(settings, bare_debug_logger):
+    """En production : aucune console, un seul NullHandler et aucune propagation (rien ne
+    remonte aux gestionnaires de la racine), même après plusieurs applications."""
     prod = Settings.model_validate({**settings.model_dump(), "env": "production"})
     create_app(prod)
+    create_app(prod)
     assert _debug_handlers() == []
-    assert bare_debug_logger.handlers == []
+    [handler] = bare_debug_logger.handlers
+    assert isinstance(handler, logging.NullHandler)
+    assert bare_debug_logger.propagate is False
