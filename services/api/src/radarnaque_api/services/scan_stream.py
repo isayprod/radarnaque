@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 import math
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -31,6 +31,10 @@ THROTTLE_S = 0.3  # au plus un `thinking` par partie dans cet intervalle
 PING = ": ping\n\n"
 
 logger = logging.getLogger(__name__)
+
+# Tâches d'analyse en cours : la boucle ne garde qu'une référence faible à une tâche ; celle-ci
+# la tient jusqu'à la fin, même si le générateur qui l'a lancée est abandonné.
+_TASKS: set[asyncio.Task[AnalysisResultOut]] = set()
 
 
 @dataclass(frozen=True)
@@ -76,7 +80,9 @@ def sse_of(event: ScanEvent) -> str:
 
 def _outcome(task: asyncio.Task[AnalysisResultOut]) -> str:
     """Dernier événement : `result`, ou `error` avec le code et les détails de la réponse JSON
-    équivalente. Une erreur inattendue (le scan est déjà rendu) donne `analysis_failed`."""
+    équivalente. Une erreur inattendue donne `analysis_failed`, avec un message neutre : le
+    scan a pu être rendu ou non (erreur après l'enregistrement du résultat, remboursement en
+    échec)."""
     exc = None if task.cancelled() else task.exception()
     if exc is None and not task.cancelled():
         return encode_sse("result", task.result().model_dump(mode="json", by_alias=True))
@@ -87,14 +93,14 @@ def _outcome(task: asyncio.Task[AnalysisResultOut]) -> str:
             logger.error("analyse en flux en échec", exc_info=exc)
         error = ScanStreamErrorOut(
             code="analysis_failed",
-            message="L'analyse a échoué ; ce scan n'est pas décompté.",
+            message="L'analyse a échoué.",
             details={"reason": "internal"},
         )
     return _encode("error", error)
 
 
 async def stream_scan(
-    admitted: Callable[[ScanEventSink], Awaitable[AnalysisResultOut]],
+    admitted: Callable[[ScanEventSink], Coroutine[Any, Any, AnalysisResultOut]],
     *,
     ping_s: float = PING_S,
     throttle_s: float = THROTTLE_S,
@@ -116,7 +122,9 @@ async def stream_scan(
         if not done.cancelled():
             done.exception()  # lue ici : jamais d'avertissement « exception never retrieved »
 
-    task = asyncio.ensure_future(admitted(sink))
+    task = asyncio.create_task(admitted(sink))
+    _TASKS.add(task)
+    task.add_done_callback(_TASKS.discard)
     task.add_done_callback(finished)
     pending: Thinking | None = None  # dernier `thinking` retenu, pas encore envoyé
     thinking_at: dict[int, float] = {}  # dernier envoi d'un `thinking`, par partie

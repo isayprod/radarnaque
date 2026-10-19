@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any
@@ -7,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.background import BackgroundTask
+from starlette.types import Receive, Scope, Send
 
 from radarnaque_api.auth.deps import current_user
 from radarnaque_api.auth.privileges import privileges_of
@@ -63,6 +64,24 @@ class _ListingRoute(APIRoute):
         return _handler
 
 
+class _GiveBackStreamingResponse(StreamingResponse):
+    """`StreamingResponse` qui lance `give_back` à la fin de la réponse, quelle qu'en soit
+    l'issue. Starlette n'exécute `background` qu'en ASGI < 2.4 quand le client est parti (en
+    2.4, l'`OSError` de `send` devient `ClientDisconnect`) : ce `finally` ne dépend pas de la
+    version annoncée par le serveur. `shield` : l'écriture aboutit même si la requête est
+    annulée pendant celle-ci."""
+
+    def __init__(self, *args: Any, give_back: Callable[[], Awaitable[None]], **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._give_back = give_back
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await asyncio.shield(self._give_back())
+
+
 def _scan_args(scan: ScanIn, request: Request, user: AuthUser) -> dict[str, Any]:
     """Arguments communs de `run_scan` et `admit_scan`, tirés de l'état de l'application."""
     state = request.app.state
@@ -112,17 +131,17 @@ async def create_scan_stream(
 
     async def give_back_if_unserved() -> None:
         # Client parti avant que l'analyse ne commence (flux jamais lancé, ou tâche annulée
-        # avant son premier pas) : rien d'autre ne rendrait le scan réservé. Starlette lance
-        # cette tâche après la réponse, même interrompue par la déconnexion.
+        # avant son premier pas) : rien d'autre ne rendrait le scan réservé. Lancé à la fin de
+        # la réponse, même interrompue par la déconnexion.
         if not served:
             await give_back_unserved(admitted)
 
-    return StreamingResponse(
+    return _GiveBackStreamingResponse(
         stream_scan(serve),
         media_type="text/event-stream",
         # Ni cache ni tampon d'un proxy : chaque événement part aussitôt (Caddy : flush_interval).
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        background=BackgroundTask(give_back_if_unserved),
+        give_back=give_back_if_unserved,
     )
 
 
