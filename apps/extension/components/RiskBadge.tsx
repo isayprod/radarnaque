@@ -199,8 +199,11 @@ export function RiskBadge({
 	const progress = scan.ai.status === "loading" ? scan.ai.progress : null;
 	const line = progress ? statusLine(progress, locale) : "";
 	const waiting = useWaiting(progress?.lastAt ?? 0, progress !== null);
-	// Analyse en échec : son texte dans la pastille et dans la région annoncée.
-	const announced = useThrottled(line || badgeError(scan.ai, locale) || "");
+	// Analyse en échec : son texte dans la pastille et dans la région annoncée,
+	// sauf panneau ouvert, qui l'affiche et l'annonce déjà (`role="alert"`).
+	const announced = useThrottled(
+		line || (open ? null : badgeError(scan.ai, locale)) || "",
+	);
 
 	// Police en px et reset explicite : le site hôte ne doit ni agrandir ni styler la pastille.
 	return (
@@ -246,6 +249,7 @@ export function RiskBadge({
 					scan={scan}
 					locale={locale}
 					busy={shown !== null || progress !== null}
+					panelOpen={open}
 					onLaunch={launch}
 				/>
 			</span>
