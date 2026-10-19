@@ -78,6 +78,37 @@ describe("ScanProgressView", () => {
 		expect(lines[5]).toContain("Rédige le verdict");
 	});
 
+	test("le corps d'une réflexion ne répète pas le titre affiché", () => {
+		const count = (text: string, part: string) => text.split(part).length - 1;
+		const p = progressOf(
+			[
+				0,
+				{
+					type: "thinking",
+					part: 1,
+					text: "**Prix cohérent**\n\nLe prix suit le marché.",
+				},
+			],
+			[
+				1_000,
+				{
+					type: "thinking",
+					part: 2,
+					text: "Je regarde le prix. Il semble bas.",
+				},
+			],
+			[2_000, { type: "thinking", part: 3, text: "Une seule phrase." }],
+		);
+		render(<ScanProgressView progress={p} locale="fr" live />);
+		const [titled, plain, single] = items();
+		expect(count(titled ?? "", "Prix cohérent")).toBe(1);
+		expect(titled).toContain("Le prix suit le marché.");
+		// Sans titre en gras, la dernière phrase sert de ligne : le corps garde le reste.
+		expect(count(plain ?? "", "Il semble bas.")).toBe(1);
+		expect(plain).toContain("Je regarde le prix.");
+		expect(count(single ?? "", "Une seule phrase.")).toBe(1);
+	});
+
 	test("en direct : la liste seule ; après l'analyse : repliée sous « Comment l'IA a analysé »", () => {
 		const { container, rerender } = render(
 			<ScanProgressView progress={sample} locale="fr" live />,

@@ -138,7 +138,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"ai.launch": "Analyser avec l'IA",
 		"ai.launchShort": "Analyser",
 		"ai.retry": "Relancer",
-		"ai.noScansLeft": "Plus d'analyses IA ce mois-ci",
+		"ai.noScansLeft": "Plus d'analyses IA disponibles",
 		"ai.noPhoto": "Analysée sans photo",
 		"ai.howAnalyzed": "Comment l'IA a analysé",
 		"ai.loading": "Analyse en cours…",
@@ -159,7 +159,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"ai.error.no_active_subscription":
 			"Un abonnement est nécessaire pour lancer une analyse IA.",
 		"ai.error.quota_exhausted":
-			"Vous avez utilisé toutes vos analyses de ce type pour cette période.",
+			"Vous avez utilisé toutes vos analyses IA pour cette période.",
 		"ai.error.feature_not_in_plan":
 			"Cette analyse n'est pas comprise dans votre formule.",
 		"ai.error.invalid_listing":
@@ -238,7 +238,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"ai.launch": "Analyseren met AI",
 		"ai.launchShort": "Analyseren",
 		"ai.retry": "Opnieuw proberen",
-		"ai.noScansLeft": "Geen AI-analyses meer deze maand",
+		"ai.noScansLeft": "Geen AI-analyses meer beschikbaar",
 		"ai.noPhoto": "Geanalyseerd zonder foto",
 		"ai.howAnalyzed": "Hoe de AI analyseerde",
 		"ai.loading": "Analyse bezig…",
@@ -259,7 +259,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"ai.error.no_active_subscription":
 			"Je hebt een abonnement nodig om een AI-analyse te starten.",
 		"ai.error.quota_exhausted":
-			"Je hebt al je analyses van dit type voor deze periode gebruikt.",
+			"Je hebt al je AI-analyses voor deze periode gebruikt.",
 		"ai.error.feature_not_in_plan": "Deze analyse zit niet in je formule.",
 		"ai.error.invalid_listing":
 			"Deze advertentie kan niet geanalyseerd worden (onleesbare gegevens).",

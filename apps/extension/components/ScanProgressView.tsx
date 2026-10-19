@@ -3,6 +3,7 @@ import {
 	eventLine,
 	type ProgressStep,
 	type ScanProgress,
+	thinkingParts,
 } from "../lib/content/scan-progress";
 import { contentText } from "../lib/content-i18n";
 
@@ -11,9 +12,6 @@ type WebSearch = AnalysisResult["webSearches"][number];
 /** Temps écoulé depuis le départ, à la seconde : « 3 s ». */
 const elapsed = (at: number, startedAt: number) =>
 	`${Math.max(0, Math.round((at - startedAt) / 1000))} s`;
-
-/** Résumé de réflexion entier, sans les marqueurs `**` du titre. */
-const thinkingBody = (text: string) => text.replaceAll("**", "").trim();
 
 function Step({
 	step,
@@ -26,7 +24,8 @@ function Step({
 }) {
 	const { event } = step;
 	const line = eventLine(event, locale);
-	const body = event.type === "thinking" ? thinkingBody(event.text) : "";
+	// Réflexion : sous son titre (la ligne), le reste du résumé, sans le répéter.
+	const body = event.type === "thinking" ? thinkingParts(event.text).body : "";
 	return (
 		<li className="flex items-start gap-2">
 			<span className="w-8 shrink-0 text-right text-slate-500 tabular-nums">
@@ -34,7 +33,7 @@ function Step({
 			</span>
 			<span className="min-w-0 break-words">
 				<span className="block">{line}</span>
-				{body && body !== line && (
+				{body && (
 					<span className="block whitespace-pre-line text-slate-600">
 						{body}
 					</span>

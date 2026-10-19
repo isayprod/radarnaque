@@ -191,7 +191,7 @@ describe("textes de la section IA", () => {
 			"ai.launch": "Analyser avec l'IA",
 			"ai.launchShort": "Analyser",
 			"ai.retry": "Relancer",
-			"ai.noScansLeft": "Plus d'analyses IA ce mois-ci",
+			"ai.noScansLeft": "Plus d'analyses IA disponibles",
 			"ai.noPhoto": "Analysée sans photo",
 			"ai.howAnalyzed": "Comment l'IA a analysé",
 			"ai.loading": "Analyse en cours…",
@@ -212,7 +212,7 @@ describe("textes de la section IA", () => {
 			"ai.error.no_active_subscription":
 				"Un abonnement est nécessaire pour lancer une analyse IA.",
 			"ai.error.quota_exhausted":
-				"Vous avez utilisé toutes vos analyses de ce type pour cette période.",
+				"Vous avez utilisé toutes vos analyses IA pour cette période.",
 			"ai.error.feature_not_in_plan":
 				"Cette analyse n'est pas comprise dans votre formule.",
 			"ai.error.invalid_listing":
@@ -237,6 +237,12 @@ describe("textes de la section IA", () => {
 
 	test("bouton de la pastille : nom accessible FR et NL, qui contient le texte visible", () => {
 		expect(contentText("nl", "ai.launch")).toBe("Analyseren met AI");
+		expect(contentText("nl", "ai.noScansLeft")).toBe(
+			"Geen AI-analyses meer beschikbaar",
+		);
+		expect(contentText("nl", "ai.error.quota_exhausted")).toBe(
+			"Je hebt al je AI-analyses voor deze periode gebruikt.",
+		);
 		for (const locale of ["fr", "nl"] as const)
 			expect(contentText(locale, "ai.launch")).toContain(
 				contentText(locale, "ai.launchShort"),
