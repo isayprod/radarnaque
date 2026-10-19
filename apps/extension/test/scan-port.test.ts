@@ -9,7 +9,11 @@ import {
 } from "../lib/background-handlers";
 import type { ScanDebugHooks } from "../lib/debug-state";
 import type { ScanRequest } from "../lib/messages";
-import { createScanPortListener, SCAN_PORT } from "../lib/scan-port";
+import {
+	createScanPortListener,
+	KEEP_ALIVE_MS,
+	SCAN_PORT,
+} from "../lib/scan-port";
 import type { SseMessage } from "../lib/sse";
 import { fakePort, sampleAnalysis, sse, sseMessages } from "./helpers";
 
@@ -58,13 +62,15 @@ function setup(
 		ensureKnown: vi.fn(async () => {}),
 		group: vi.fn(async () => {}),
 	};
+	const keepAlive = vi.fn(async () => ({ os: "linux" }));
 	const listener = createScanPortListener({
 		api: { scanStream },
 		allowSender: options.allowSender ?? (() => true),
 		debug,
 		timeoutMs: options.timeoutMs,
+		keepAlive,
 	});
-	return { scanStream, debug, listener };
+	return { scanStream, debug, keepAlive, listener };
 }
 
 afterEach(() => {
@@ -399,5 +405,69 @@ describe("port scan/stream", () => {
 			["scan envoyé", body],
 			["scan en erreur", { code: "analysis_failed" }],
 		]);
+	});
+
+	test("keepAlive every 20 s during a silent stream, then never after the end", async () => {
+		vi.useFakeTimers();
+		let release!: () => void;
+		const { listener, keepAlive } = setup(async function* () {
+			yield sse("stage", { stage: "analyzing", count: 0 });
+			// Tour du modèle silencieux : seuls des `: ping` arriveraient, jetés par readSse.
+			await new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			yield sse("result", sampleAnalysis);
+		});
+		const tab = fakePort();
+		listener(tab.port);
+		await vi.advanceTimersByTimeAsync(KEEP_ALIVE_MS);
+		// Pas de battement avant le message de départ.
+		expect(keepAlive).not.toHaveBeenCalled();
+		tab.send(scanRequest());
+		await vi.advanceTimersByTimeAsync(KEEP_ALIVE_MS * 4);
+		expect(keepAlive).toHaveBeenCalledTimes(4);
+		release();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(tab.posted.at(-1)).toEqual({
+			type: "result",
+			result: sampleAnalysis,
+		});
+		await vi.advanceTimersByTimeAsync(KEEP_ALIVE_MS * 3);
+		expect(keepAlive).toHaveBeenCalledTimes(4);
+	});
+
+	test("keepAlive stops when the tab disconnects; its failure is ignored", async () => {
+		vi.useFakeTimers();
+		const { listener, keepAlive } = setup((signal) => endless(signal));
+		keepAlive.mockRejectedValue(new Error("indisponible"));
+		const tab = fakePort();
+		listener(tab.port);
+		tab.send(scanRequest());
+		await vi.advanceTimersByTimeAsync(KEEP_ALIVE_MS * 2);
+		expect(keepAlive).toHaveBeenCalledTimes(2);
+		expect(tab.port.disconnect).not.toHaveBeenCalled();
+		tab.close();
+		await vi.advanceTimersByTimeAsync(KEEP_ALIVE_MS * 3);
+		expect(keepAlive).toHaveBeenCalledTimes(2);
+	});
+
+	test("disconnect during ensureKnown → no toScanIn log, no scanStream", async () => {
+		const { listener, debug, scanStream } = setup();
+		let known!: () => void;
+		vi.mocked(debug.ensureKnown).mockReturnValueOnce(
+			new Promise<void>((resolve) => {
+				known = resolve;
+			}),
+		);
+		const tab = fakePort();
+		listener(tab.port);
+		tab.send(scanRequest());
+		await vi.waitFor(() => expect(debug.ensureKnown).toHaveBeenCalled());
+		tab.close();
+		known();
+		await new Promise((r) => setTimeout(r, 0));
+		expect(scanStream).not.toHaveBeenCalled();
+		expect(debug.group).not.toHaveBeenCalled();
+		expect(tab.posted).toEqual([]);
 	});
 });

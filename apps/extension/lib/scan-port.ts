@@ -13,6 +13,13 @@ export const SCAN_PORT = "scan/stream";
 /** Au-delà, sans fin de flux, la requête est annulée et l'onglet reçoit `timeout`. */
 export const SCAN_TIMEOUT_MS = 200_000;
 
+/**
+ * MV3 : Chrome arrête un service worker resté environ 30 s sans appel d'API d'extension.
+ * Un tour du modèle peut durer 90 s sans événement (les `: ping` du serveur ne passent pas
+ * par une API d'extension) : pendant le relais, un appel bon marché part à cet intervalle.
+ */
+export const KEEP_ALIVE_MS = 20_000;
+
 /** Message posté à l'onglet : une progression, puis une seule fin (`result` ou `error`). */
 export type PortMessage =
 	| { type: "event"; event: ScanProgressEvent }
@@ -35,6 +42,11 @@ export interface ScanPortDeps {
 	/** Debug du superuser : l'état partagé avec `createHandlers` (R3, R5). */
 	debug: ScanDebugHooks;
 	timeoutMs?: number;
+	/**
+	 * Appel d'API d'extension bon marché qui tient le service worker en vie pendant le
+	 * relais (`browser.runtime.getPlatformInfo()` en production) ; son échec est ignoré.
+	 */
+	keepAlive: () => Promise<unknown>;
 }
 
 /**
@@ -60,6 +72,15 @@ export function createScanPortListener(
 		let over = false;
 		// Le délai court dès l'ouverture du port, aussi sans message de départ. Les deux
 		// appels sont synchrones : la lecture annulée trouve `over` et ne poste plus rien.
+		/** Battement de `keepAlive`, du message de départ à la fin du relais. */
+		let beat: ReturnType<typeof setInterval> | undefined;
+
+		/** Plus rien à attendre : délai et battement arrêtés. */
+		function stop(): void {
+			clearTimeout(timer);
+			clearInterval(beat);
+		}
+
 		const timer = setTimeout(() => {
 			controller.abort();
 			finish({ type: "error", code: "timeout" });
@@ -80,7 +101,7 @@ export function createScanPortListener(
 			if (over) return;
 			if (outcome) post(outcome);
 			over = true;
-			clearTimeout(timer);
+			stop();
 			try {
 				port.disconnect();
 			} catch {
@@ -97,6 +118,8 @@ export function createScanPortListener(
 		/** L'analyse, du message de départ à sa fin ; `null` si elle est déjà terminée. */
 		async function relay(message: unknown): Promise<StreamOutcome | null> {
 			await debug.ensureKnown();
+			// Port fermé ou délai dépassé pendant la lecture de `me` : rien n'est envoyé.
+			if (over) return null;
 			// La demande vient d'une page web : sa forme est vérifiée avant `toScanIn`, qui
 			// retire l'identité du vendeur et applique les bornes.
 			const listing = (message as { listing?: unknown } | null)?.listing;
@@ -141,12 +164,19 @@ export function createScanPortListener(
 		port.onDisconnect.addListener(() => {
 			// L'onglet a fermé le port (navigation, onglet fermé) : la requête est annulée.
 			over = true;
-			clearTimeout(timer);
+			stop();
 			controller.abort();
 		});
 		port.onMessage.addListener((message) => {
 			if (started || over) return;
 			started = true;
+			beat = setInterval(() => {
+				try {
+					deps.keepAlive().catch(() => {});
+				} catch {
+					// API indisponible : le relais continue.
+				}
+			}, KEEP_ALIVE_MS);
 			void relay(message).then(finish, (error: unknown) =>
 				finish({ type: "error", code: errorCode(error) }),
 			);
