@@ -33,6 +33,7 @@ Rien de ceci n'a été essayé hors des tests.
 - **Resend :** la page dit que l'adresse email est transmise à Resend et qu'il peut la traiter hors de l'UE, sans autre détail. Vérifier le contrat de traitement et la région d'envoi de Resend, puis préciser ou garder la formule.
 - **Relecture :** les textes FR et NL rendus sur `/privacy/?lang=fr` et `?lang=nl`.
 - **Adresse de contact :** confirmer `privacy@mostconsult.be`.
+- **Sessions expirées :** Better Auth ne supprime une session expirée que si elle est présentée à nouveau ; ajouter à la purge quotidienne un balayage des `auth.session` expirées (adresse IP et navigateur), puis la page pourra dire qu'elles sont aussi effacées à l'expiration.
 
 ## Plus tard
 
@@ -50,6 +51,11 @@ Rien de ceci n'a été essayé hors des tests.
   - `aria-describedby` du bouton et du champ ;
   - le focus après un échec ;
   - l'état « supprimé » est gardé jusqu'au prochain envoi d'email.
+- **Relecture finale (R11 et suite) :**
+  - la décision R11 laisse compter « 401 puis renouvellement refusé » comme compte supprimé (rare : session révoquée sans suppression) ;
+  - l'état « compte supprimé » de la popup n'est pas remis à zéro sur une session expirée ;
+  - le commentaire de `account/delete` dans `apps/extension/lib/messages.ts` (~l.49) est encore long ;
+  - sur le chemin « session refusée avant envoi », les résultats IA gardés ne sont pas vidés (comme pour une expiration ordinaire).
 - **Hors de la phase :**
   - l'action « supprimer un compte » de l'admin (phase 4b) ;
   - une purge configurable (durée en base plutôt qu'en constante) ;
