@@ -1,6 +1,6 @@
 # Radarnaque v4 — État du projet
 
-*Au 19 octobre 2026.* Ce document résume ce qui a été construit, où le trouver, et ce qu'il reste à faire.
+*Au 20 octobre 2026.* Ce document résume ce qui a été construit, où le trouver, et ce qu'il reste à faire.
 
 Les autres documents :
 - le démarrage pas à pas est dans le [README](../README.md) ;
@@ -24,11 +24,12 @@ Radarnaque est une extension Chrome, Edge et Brave qui signale les annonces susp
 | 3c | L'IA remplace l'analyse locale, prompt v2, annonces professionnelles | `feat/phase-3c` (au-dessus de 3b) | terminée, non poussée |
 | — | Superuser de développement (logs de debug, relance sans cache) | `feat/superuser-debug` (au-dessus de 3c) | terminée, non poussée |
 | 3d | Recherche web (SearXNG), réflexion, photos obligatoires (un seul type d'analyse), analyse en direct dans la pastille | `feat/phase-3d` (au-dessus de `feat/superuser-debug`) | terminée, non poussée |
-| 4 | Administration, suppression du compte, purge à 12 mois | — | à faire |
+| 4a | RGPD : suppression du compte, purge à 12 mois, page `/privacy` à jour | `feat/phase-4a` (au-dessus de `feat/phase-3d`) | terminée, non poussée |
+| 4b | Administration (SPA admin, `/api/admin/*`, suppression d'un compte par l'admin) | — | à faire |
 | 5 | Paiement Stripe | — | à faire (les routes répondent 501) |
 | — | Passe de design (identité visuelle, maquettes) | — | à faire en dernier |
 
-Les phases 3b, 3c et 3d n'ont pas encore été essayées sur les vrais sites. Les vérifications à faire sont listées dans les suivis [3b](superpowers/plans/2026-10-18-phase-3b-suivi.md), [3c](superpowers/plans/2026-10-18-phase-3c-suivi.md) et [3d](superpowers/plans/2026-10-19-phase-3d-suivi.md). La phase 3d a aussi une liste de corrections prévues avant sa fusion.
+Les phases 3b, 3c et 3d n'ont pas encore été essayées sur les vrais sites. Les vérifications à faire sont listées dans les suivis [3b](superpowers/plans/2026-10-18-phase-3b-suivi.md), [3c](superpowers/plans/2026-10-18-phase-3c-suivi.md), [3d](superpowers/plans/2026-10-19-phase-3d-suivi.md) et [4a](superpowers/plans/2026-10-20-phase-4a-suivi.md). Les phases 3d et 4a ont aussi une liste de corrections prévues avant leur fusion.
 
 ## Architecture
 
@@ -126,7 +127,32 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
 - **Bandeau « annonce professionnelle » :** il signale un magasin qui utilise l'annonce comme vitrine. Il ne cache jamais le score.
 - **Sécurité :**
   - les content scripts ne peuvent envoyer que trois messages au service worker (`content/access`, `content/debug` en dev seulement, `ui/open-popup`), plus le port `scan/stream`, soumis au même contrôle de l'émetteur ;
+  - `account/delete` n'est accepté que d'une page de l'extension (la popup) ;
   - le service worker est le seul à détenir la session et le JWT.
+
+### RGPD (phase 4a)
+- **Suppression du compte :**
+  - `DELETE /api/me` (`204` sans corps, `401 unauthenticated` si l'utilisateur est absent) supprime l'utilisateur dans une seule transaction ;
+  - la cascade efface la session, le compte, l'abonnement, les scans et leurs résultats et échecs ;
+  - les analyses d'annonces et leurs snapshots restent : ce ne sont pas des données personnelles ;
+  - l'API journalise une ligne `INFO` sans identifiant ni email.
+- **Dans la popup :**
+  - section « Supprimer mon compte », repliée, en bas quand on est connecté ;
+  - il faut taper `SUPPRIMER` (FR) ou `VERWIJDEREN` (NL), sans tenir compte de la casse ni des espaces autour ;
+  - un double clic n'envoie qu'une requête ;
+  - un lien « Confidentialité » dans le pied mène à `/privacy/?lang=<langue>`.
+- **Messagerie :** `account/delete` n'est accepté que d'une page de l'extension. Un content script reçoit `forbidden_sender`, sans appel réseau.
+- **Côté extension :**
+  - sur `204` ou `401`, le service worker efface la session, le JWT et les résultats IA gardés ;
+  - sur une autre erreur (500, réseau), il ne touche à rien et la popup dit que le compte n'a pas été modifié.
+- **Purge à 12 mois :**
+  - une tâche de fond de l'API (lancée 60 s après le démarrage, puis toutes les 24 h) supprime les `scan_events` de plus de 12 mois (`SCAN_RETENTION_MONTHS`), par lots de 5 000 ;
+  - `pg_try_advisory_lock` : un seul processus purge à la fois ;
+  - `PURGE_ENABLED=false` la désactive (valeur par défaut des tests) ;
+  - `uv run radarnaque-purge` fait une passe à la main ;
+  - le journal `INFO` ne donne que le nombre d'événements supprimés.
+- **Essai préservé :** avant de supprimer, la purge ajoute les scans réussis de l'essai à `subscriptions.purged_scans` (migration 0006). Le plafond total en tient compte : un essai ne retrouve pas ses 3 analyses.
+- **Page `/privacy` :** FR et NL à jour, avec les sections photos (toute analyse), recherches sur le web, résultat gardé 24 h dans le navigateur, conservation (seul le nombre d'analyses de l'essai reste après 12 mois) et effacement.
 
 ### Superuser de développement
 - **Rôle `superuser`, réservé au développement :** aucun quota ni limite de requêtes, traité comme un compte **Premium** (plan, fonctionnalités, 4 photos). Il s'attribue avec `DEV_SUPERUSER_EMAIL` (`infra/.env`) ou `pnpm dev:superuser <email>`. L'API l'ignore en production.
@@ -136,7 +162,7 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
 
 ### Site
 - La page `/auth/callback` reçoit la connexion par lien magique.
-- Les pages `/pricing` et `/privacy` existent en FR et NL. `/privacy` ne doit pas être publiée avant la phase 4.
+- Les pages `/pricing` et `/privacy` existent en FR et NL. Depuis la phase 4a, `/privacy` décrit fidèlement le produit : elle peut être publiée une fois l'adresse `privacy@mostconsult.be` confirmée.
 
 ## Offre
 
@@ -154,10 +180,10 @@ Coût estimé avec `google/gemini-3.1-flash-lite` : environ 1,1 ¢ par analyse a
 
 | Partie | Tests | Commande |
 |---|---|---|
-| API | 754 | `pnpm test:api` |
-| Extension | 1049 | `pnpm --filter extension test` |
+| API | 787 | `pnpm test:api` |
+| Extension | 1075 | `pnpm --filter extension test` |
 | Auth | 66 | `pnpm --filter auth test` |
-| Site | 39 | `pnpm --filter site test` |
+| Site | 46 | `pnpm --filter site test` |
 | Scripts | 16 | `pnpm test:scripts` |
 | Bout en bout | connexion et scan (en flux) | `pnpm e2e:login`, `pnpm e2e:scan` |
 
@@ -175,16 +201,19 @@ Coût estimé avec `google/gemini-3.1-flash-lite` : environ 1,1 ¢ par analyse a
 - **Réflexion :** `reasoning_effort` (`none`, `low`, `medium`, `high`) est une option de chaque fournisseur de `services/api/providers.toml`. Redémarrer l'API après l'avoir changée.
 - **Sans recherche web :** `SEARCH_BACKEND=none` dans `infra/.env` retire l'outil de recherche.
 - **Essayer le flux :** `pnpm e2e:scan` affiche chaque événement à son arrivée ; `--no-stream` utilise la route sans flux.
-- **Base de dev :** l'API applique les migrations au démarrage (`pnpm dev:api`). La migration 0005 de la phase 3d crée le type `full`, retire les quotas `text` et `image` et ajoute `plans.max_images`.
+- **Base de dev :** l'API applique les migrations au démarrage (`pnpm dev:api`). La migration 0005 de la phase 3d crée le type `full`, retire les quotas `text` et `image` et ajoute `plans.max_images`. La migration 0006 de la phase 4a ajoute `subscriptions.purged_scans`.
+- **Purge :** `PURGE_ENABLED=false` dans `infra/.env` coupe la tâche de fond en dev ; `radarnaque-purge` fait une passe à la main (voir le [README](../README.md)).
 
 ## Points ouverts avant une mise en ligne
 
-1. Passer les corrections prévues avant la fusion de la phase 3d (voir son suivi), après la relecture finale de la branche.
+1. Passer les corrections prévues avant la fusion des phases 3d et 4a (voir leurs suivis), après la relecture finale de la branche.
 2. Essayer les phases 3b, 3c et 3d sur les vrais sites, avec les listes des suivis.
 3. Relever la valeur réelle de `sellerType` pour un professionnel sur 2ememain.
 4. Lancer `pnpm e2e:scan` contre OpenRouter (le fournisseur de production), avec Gemini : sortie stricte et outils ensemble, réflexion recopiée d'un tour à l'autre, flux derrière Caddy.
 5. Vérifier SearXNG sur le serveur de production (substitution de `SEARXNG_SECRET`, moteurs qui répondent).
 6. Vérifier la langue des titres de réflexion : `gpt-6-luna` les donne en anglais malgré la consigne.
-7. Faire la phase 4 : `DELETE /api/me`, la purge à 12 mois et l'admin. C'est la condition pour publier `/privacy`.
-8. Confirmer l'adresse `privacy@mostconsult.be`.
-9. Faire la passe de design.
+7. Publier `/privacy` : la phase 4a est faite (`DELETE /api/me`, purge à 12 mois, textes à jour). Reste à confirmer l'adresse `privacy@mostconsult.be`.
+8. Essayer la suppression du compte et la purge sur la vraie pile (voir le [suivi 4a](superpowers/plans/2026-10-20-phase-4a-suivi.md)).
+9. Préparer les déclarations du Chrome Web Store (liste dans le suivi 4a).
+10. Faire la phase 4b : l'administration, avec la suppression d'un compte par l'admin.
+11. Faire la passe de design.
