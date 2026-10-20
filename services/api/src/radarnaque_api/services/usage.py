@@ -55,6 +55,10 @@ async def compute_usage(session: AsyncSession, sub: Subscription, now: datetime)
             )
         ).all()
     )
+    if plan.quota_period == "lifetime" and sub.purged_scans:
+        # Les scans réussis effacés par la purge comptent toujours : sans cela, un essai
+        # récupérerait ses analyses au bout de 12 mois. Ils sont comptés sur le type `full`.
+        used_by_kind["full"] = used_by_kind.get("full", 0) + sub.purged_scans
     total_used = sum(used_by_kind.values())
     cap = plan.total_scan_cap
     cap_remaining = None if cap is None else max(0, cap - total_used)

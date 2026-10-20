@@ -1390,6 +1390,16 @@
       }
     },
     "/api/me": {
+      "delete": {
+        "description": "Supprime le compte de l'utilisateur et ses donn\u00e9es personnelles (cascade en base).",
+        "operationId": "delete_me_api_me_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Delete Me"
+      },
       "get": {
         "operationId": "me_api_me_get",
         "responses": {

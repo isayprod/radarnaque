@@ -26,6 +26,17 @@ create table if not exists auth."user" (
     email text not null unique,
     role text not null default 'user'
 );
+-- Tables de Better Auth qui référencent l'utilisateur (colonnes réduites à l'essentiel).
+create table if not exists auth.session (
+    id text primary key,
+    user_id text not null references auth."user"(id) on delete cascade,
+    token text not null
+);
+create table if not exists auth.account (
+    id text primary key,
+    user_id text not null references auth."user"(id) on delete cascade,
+    provider_id text not null
+);
 """
 
 
