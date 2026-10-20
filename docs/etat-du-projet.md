@@ -152,7 +152,7 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
   - `uv run radarnaque-purge` fait une passe à la main ;
   - le journal `INFO` ne donne que le nombre d'événements supprimés.
 - **Essai préservé :** avant de supprimer, la purge ajoute les scans réussis de l'essai à `subscriptions.purged_scans` (migration 0006). Le plafond total en tient compte : un essai ne retrouve pas ses 3 analyses.
-- **Page `/privacy` :** FR et NL à jour, avec les sections photos (toute analyse), recherches sur le web, résultat gardé 24 h dans le navigateur, conservation (seul le nombre d'analyses de l'essai reste après 12 mois) et effacement.
+- **Page `/privacy` :** FR et NL à jour, avec les sections photos (toute analyse), recherches sur le web, résultat gardé 24 h dans le navigateur, conservation (seul le nombre d'analyses de l'essai reste après 12 mois), hébergement (sauvegardes chiffrées copiées vers un stockage externe, Resend pour les emails de connexion) et effacement.
 
 ### Superuser de développement
 - **Rôle `superuser`, réservé au développement :** aucun quota ni limite de requêtes, traité comme un compte **Premium** (plan, fonctionnalités, 4 photos). Il s'attribue avec `DEV_SUPERUSER_EMAIL` (`infra/.env`) ou `pnpm dev:superuser <email>`. L'API l'ignore en production.
@@ -162,7 +162,7 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
 
 ### Site
 - La page `/auth/callback` reçoit la connexion par lien magique.
-- Les pages `/pricing` et `/privacy` existent en FR et NL. Depuis la phase 4a, `/privacy` décrit fidèlement le produit : elle peut être publiée une fois l'adresse `privacy@mostconsult.be` confirmée.
+- Les pages `/pricing` et `/privacy` existent en FR et NL. Depuis la phase 4a, `/privacy` décrit fidèlement le produit : elle peut être publiée une fois l'adresse `privacy@mostconsult.be` confirmée et la rétention du stockage distant des sauvegardes vérifiée (la page annonce 14 jours sur notre serveur).
 
 ## Offre
 
@@ -212,7 +212,7 @@ Coût estimé avec `google/gemini-3.1-flash-lite` : environ 1,1 ¢ par analyse a
 4. Lancer `pnpm e2e:scan` contre OpenRouter (le fournisseur de production), avec Gemini : sortie stricte et outils ensemble, réflexion recopiée d'un tour à l'autre, flux derrière Caddy.
 5. Vérifier SearXNG sur le serveur de production (substitution de `SEARXNG_SECRET`, moteurs qui répondent).
 6. Vérifier la langue des titres de réflexion : `gpt-6-luna` les donne en anglais malgré la consigne.
-7. Publier `/privacy` : la phase 4a est faite (`DELETE /api/me`, purge à 12 mois, textes à jour). Reste à confirmer l'adresse `privacy@mostconsult.be`.
+7. Publier `/privacy` : la phase 4a est faite (`DELETE /api/me`, purge à 12 mois, textes à jour). Reste à confirmer l'adresse `privacy@mostconsult.be` et à vérifier la rétention des sauvegardes distantes.
 8. Essayer la suppression du compte et la purge sur la vraie pile (voir le [suivi 4a](superpowers/plans/2026-10-20-phase-4a-suivi.md)).
 9. Préparer les déclarations du Chrome Web Store (liste dans le suivi 4a).
 10. Faire la phase 4b : l'administration, avec la suppression d'un compte par l'admin.

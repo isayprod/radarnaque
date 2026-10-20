@@ -29,10 +29,14 @@ Rien de ceci n'a été essayé hors des tests.
   - le temps d'un lot de 5 000 sur un volume réaliste ;
   - la tâche de fond, 60 s après le démarrage, avec `PURGE_ENABLED=true`.
 - **Journaux en production :** les lignes `radarnaque.*` en `INFO` sont-elles visibles dans `docker compose logs api` ? Si la racine reste en `WARNING`, elles n'apparaissent pas.
-- **Page `/privacy` :**
-  - relire les textes FR et NL rendus sur `/privacy/?lang=fr` et `?lang=nl` ;
-  - le lien « Confidentialité » de la popup, dans les deux langues ;
-  - confirmer l'adresse `privacy@mostconsult.be` avant de publier.
+- **Lien de la popup :** le lien « Confidentialité », dans les deux langues.
+
+## À vérifier avant la publication de `/privacy`
+
+- **Sauvegardes :** `infra/backup/backup.sh` fait un `pg_dump` quotidien chiffré (`age`), copié par `rclone` vers `BACKUP_RCLONE_REMOTE`. Les copies locales sont gardées 14 jours (spec principale §11). Connaître la rétention et la localisation (UE ou non) du stockage distant, puis aligner la phrase de la page (`erasure` : « effacées au fil de leur renouvellement (14 jours sur notre serveur) » ; `hosting` : « copiées vers un stockage externe »). Si la rétention distante est plus longue que 14 jours, le dire.
+- **Resend :** la page dit que l'adresse email est transmise à Resend et qu'il peut la traiter hors de l'UE, sans autre détail. Vérifier le contrat de traitement et la région d'envoi de Resend, puis préciser ou garder la formule.
+- **Relecture :** les textes FR et NL rendus sur `/privacy/?lang=fr` et `?lang=nl`.
+- **Adresse de contact :** confirmer `privacy@mostconsult.be`.
 
 ## Plus tard
 
@@ -58,7 +62,7 @@ Rien de ceci n'a été essayé hors des tests.
 
 ## Décisions prises pendant l'exécution
 
-R1, R2 et R5 viennent des tâches 1 à 4 ; R3, R4 et R6 à R8 ont été prises à la tâche 5.
+R1, R2 et R5 viennent des tâches 1 à 4 ; R3, R4 et R6 à R10 ont été prises à la tâche 5.
 
 - **R1. Pas de limite de requêtes sur `DELETE /api/me` (T1) :** l'API ne limite que les scans (comptés sur `scan_events`), et la suppression est idempotente. Une seule suppression par compte, donc aucun abus possible. Coût si c'est faux : aucun abus constaté ; ajouter une limite par IP ou par utilisateur dans la route.
 - **R2. `PURGE_ENABLED` non transmis par la composition (T2) :** `docker-compose.yml` ne le passe pas, donc la purge est toujours active en production. Voulu : on ne désactive pas la conservation limitée par oubli. Coût si c'est faux : une ligne dans le service `api`.
@@ -70,7 +74,9 @@ R1, R2 et R5 viennent des tâches 1 à 4 ; R3, R4 et R6 à R8 ont été prises �
   - Coût si c'est faux : un registre à rechanger ; vague finale.
 - **R6. Termes de la page `/privacy` :** le texte cite les libellés de la popup, « Supprimer mon compte » (FR) et « Mijn account verwijderen » (NL). Si l'un change dans `apps/extension/lib/i18n.ts`, la page doit suivre (un test vérifie le texte de la page, pas celui de la popup). Coût si c'est faux : un texte.
 - **R7. Photos dans `/privacy` :** la section ne dépend plus d'une formule : « 1 photo en Standard, jusqu'à 4 en Premium et pendant l'essai ». Les nombres viennent de `plans.max_images`. Si ceux-ci changent, le texte aussi. Coût si c'est faux : un texte.
-- **R8. Durée de conservation :** deux constantes séparées, `SCAN_RETENTION_MONTHS` (API) et `PRIVACY_RETENTION_MONTHS` (site), toutes deux à 12. Aucun test ne les compare. Coût si c'est faux : une page qui annonce une durée différente de la purge.
+- **R8. Durée de conservation :** deux constantes séparées, `SCAN_RETENTION_MONTHS` (API) et `PRIVACY_RETENTION_MONTHS` (site), toutes deux à 12. Un test du site vérifie que celle du site vaut 12 (avec un renvoi à celle de l'API) ; aucun test ne compare les deux projets. Coût si c'est faux : une page qui annonce une durée différente de la purge.
+- **R9. Nombre de recherches affiché :** la page dit « jusqu'à 3 recherches », le défaut de `settings.max_web_searches`. Ce réglage est modifiable en base (de 0 à 5) : à mettre à jour dans la page si on le change en admin. Coût si c'est faux : un texte.
+- **R10. Effacement et sauvegardes :** la page ne promet plus un effacement « définitif » : les copies de sauvegarde chiffrées sont renouvelées, et la rétention distante n'est pas connue. Coût si c'est faux : une phrase à ajuster une fois la rétention du stockage distant connue.
 
 ## Déclarations du Chrome Web Store à préparer
 
@@ -85,5 +91,5 @@ R1, R2 et R5 viennent des tâches 1 à 4 ; R3, R4 et R6 à R8 ont été prises �
 - **URL de la politique de confidentialité :** `https://radarnaque.mostconsult.be/privacy/`.
 - **Justification des permissions :** `storage` (session, langue, résultats gardés 24 h) et l'accès à l'origine de Radarnaque (`host_permissions`) ; les content scripts ne s'exécutent que sur les trois sites. Relire `apps/extension/wxt.config.ts` avant de remplir le formulaire.
 - **Code distant :** aucun (tout le code est dans le paquet).
-- **Sous-traitants à citer dans la description :** fournisseur d'IA (peut traiter hors de l'UE, `data_collection: "deny"` demandé), SearXNG auto-hébergé pour la recherche, Resend pour les emails de connexion.
+- **Sous-traitants à citer dans la description :** fournisseur d'IA (peut traiter hors de l'UE, `data_collection: "deny"` demandé), SearXNG auto-hébergé pour la recherche, Resend pour les emails de connexion (peut traiter hors de l'UE), stockage externe des sauvegardes chiffrées (rclone).
 - **Contact :** `privacy@mostconsult.be` (à confirmer).

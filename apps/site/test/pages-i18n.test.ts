@@ -11,6 +11,7 @@ import {
 	PRIVACY,
 	PRIVACY_EMAIL,
 	PRIVACY_ORDER,
+	PRIVACY_RETENTION_MONTHS,
 } from "../src/pages-i18n";
 import { renderPricing, renderPrivacy } from "../src/pages-render";
 
@@ -229,8 +230,8 @@ describe("privacy wording (spec 10)", () => {
 			expect(PRIVACY[l].sections.photos.body).toMatch(/Standard/);
 			expect(PRIVACY[l].sections.photos.body).toMatch(/\b4\b/);
 		}
-		expect(PRIVACY.fr.sections.photos.body).toMatch(/^Toute analyse/);
-		expect(PRIVACY.nl.sections.photos.body).toMatch(/^Elke AI-analyse/);
+		expect(PRIVACY.fr.sections.photos.body).toMatch(/^Une analyse IA envoie/);
+		expect(PRIVACY.nl.sections.photos.body).toMatch(/^Een AI-analyse stuurt/);
 	});
 
 	it("discloses the web search: at most 3, no seller identity, masked contacts", () => {
@@ -265,6 +266,34 @@ describe("privacy wording (spec 10)", () => {
 		);
 		expect(PRIVACY.fr.sections.erasure.body).toContain("{email}");
 		expect(PRIVACY.nl.sections.erasure.body).toContain("{email}");
+		expect(PRIVACY.nl.sections.erasure.body).not.toContain("«");
+	});
+
+	it("erasure does not promise that backups are gone at once", () => {
+		const fr = PRIVACY.fr.sections.erasure.body;
+		const nl = PRIVACY.nl.sections.erasure.body;
+		expect(fr).not.toMatch(/définitiv/);
+		expect(nl).not.toMatch(/definitie?f/);
+		expect(fr).toMatch(/copies de sauvegarde chiffrées/);
+		expect(fr).toMatch(/14 jours/);
+		expect(nl).toMatch(/versleutelde back-ups/);
+		expect(nl).toMatch(/14 dagen/);
+	});
+
+	it("hosting names the external backup copy and the email provider (Resend)", () => {
+		const fr = PRIVACY.fr.sections.hosting.body;
+		const nl = PRIVACY.nl.sections.hosting.body;
+		expect(fr).toMatch(/stockage externe/);
+		expect(fr).toContain("Resend");
+		expect(fr).toMatch(/Resend\)[^.]*hors de l'UE/);
+		expect(nl).toMatch(/externe opslag/);
+		expect(nl).toContain("Resend");
+		expect(nl).toMatch(/Resend\)[^.]*buiten de EU/);
+	});
+
+	it("shows a retention that matches the API purge (SCAN_RETENTION_MONTHS = 12)", () => {
+		// Doit rester égal à SCAN_RETENTION_MONTHS dans services/api (purge à 12 mois).
+		expect(PRIVACY_RETENTION_MONTHS).toBe(12);
 	});
 
 	it("does not promise that the AI provider keeps nothing", () => {
