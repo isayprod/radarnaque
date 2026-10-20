@@ -1,19 +1,23 @@
+import logging
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from radarnaque_api.auth.deps import current_user
 from radarnaque_api.auth.privileges import privileges_of
 from radarnaque_api.db import get_session
+from radarnaque_api.errors import ApiError
 from radarnaque_api.models import AuthUser, Feature
 from radarnaque_api.schemas import MeOut, QuotaOut
+from radarnaque_api.services.accounts import delete_account
 from radarnaque_api.services.subscriptions import bootstrap_trial, get_active_subscription
 from radarnaque_api.services.usage import compute_usage, plan_features, plan_max_images
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/api/me", response_model=MeOut)
@@ -97,3 +101,16 @@ async def me(
             )
         ),
     )
+
+
+@router.delete("/api/me", status_code=204)
+async def delete_me(
+    user: Annotated[AuthUser, Depends(current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Response:
+    """Supprime le compte de l'utilisateur et ses données personnelles (cascade en base)."""
+    if not await delete_account(session, user.id):
+        raise ApiError(401, "unauthenticated", "Authentification requise.")
+    await session.commit()
+    logger.info("compte supprimé")
+    return Response(status_code=204)

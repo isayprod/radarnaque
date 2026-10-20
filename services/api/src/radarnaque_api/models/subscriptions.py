@@ -26,4 +26,7 @@ class Subscription(Base):
     provider_ref: Mapped[str | None]
     period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Scans réussis de l'essai effacés par la purge à 12 mois : ils comptent encore dans le
+    # quota « à vie » (voir `compute_usage`).
+    purged_scans: Mapped[int] = mapped_column(server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
