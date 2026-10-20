@@ -259,6 +259,19 @@ describe("privacy wording (spec 10)", () => {
 		expect(PRIVACY.nl.sections.kept.body).toMatch(/proef/);
 	});
 
+	it("kept names the session IP address and browser, erased at session end and deletion", () => {
+		const fr = PRIVACY.fr.sections.kept.body;
+		const nl = PRIVACY.nl.sections.kept.body;
+		expect(fr).toMatch(/session de connexion/);
+		expect(fr).toMatch(/adresse IP et le navigateur/);
+		expect(fr).toMatch(/fin de la session et à la suppression du compte/);
+		expect(nl).toMatch(/aanmeldsessie/);
+		expect(nl).toMatch(/IP-adres en de browser/);
+		expect(nl).toMatch(
+			/einde van de sessie en bij het verwijderen van uw account/,
+		);
+	});
+
 	it("erasure names the popup button and gives the contact address", () => {
 		expect(PRIVACY.fr.sections.erasure.body).toContain("Supprimer mon compte");
 		expect(PRIVACY.nl.sections.erasure.body).toContain(
