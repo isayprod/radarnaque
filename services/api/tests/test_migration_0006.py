@@ -16,11 +16,26 @@ async def _purged_scans_column(db) -> list[tuple]:
     )
 
 
+async def _created_at_index(db) -> list[tuple]:
+    return await _rows(
+        db,
+        "select indexdef from pg_indexes where schemaname = 'app'"
+        " and indexname = 'ix_scan_events_created_at'",
+    )
+
+
 async def test_purged_scans_column(db):
     assert await _purged_scans_column(db) == [("integer", "NO", "0")]
 
 
-async def test_downgrade_drops_and_upgrade_restores_zero(db, make_user, alembic_config):
+async def test_scan_events_created_at_index(db):
+    # La purge cherche les événements par date seule (`created_at < :cutoff`).
+    assert await _created_at_index(db) == [
+        ("CREATE INDEX ix_scan_events_created_at ON app.scan_events USING btree (created_at)",)
+    ]
+
+
+async def test_downgrade_drops_and_upgrade_restores(db, make_user, alembic_config):
     uid = await make_user("old@b.test")
     await db.execute(
         text(
@@ -34,9 +49,11 @@ async def test_downgrade_drops_and_upgrade_restores_zero(db, make_user, alembic_
     try:
         command.downgrade(alembic_config, "0005")
         assert await _purged_scans_column(db) == []
+        assert await _created_at_index(db) == []
         await db.rollback()
     finally:
         command.upgrade(alembic_config, "head")
     # Les lignes existantes reçoivent 0.
     assert await _rows(db, "select purged_scans from app.subscriptions") == [(0,)]
     assert await _purged_scans_column(db) == [("integer", "NO", "0")]
+    assert len(await _created_at_index(db)) == 1

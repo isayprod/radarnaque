@@ -68,6 +68,7 @@ async def purge_old_scans(engine: AsyncEngine, now: datetime) -> int | None:
             await lock_conn.execute(select(func.pg_try_advisory_lock(PURGE_LOCK_KEY)))
         ).scalar_one()
         if not locked:
+            logger.info("purge déjà en cours ailleurs, passe sautée")
             return None
         try:
             while True:

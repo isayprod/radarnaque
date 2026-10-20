@@ -4,6 +4,9 @@ L'essai a un quota « à vie » compté sur les `scan_events`. La purge à 12 mo
 événements : sans compteur, l'essai récupérerait ses analyses. `compute_usage` ajoute ce nombre
 à la consommation d'une période `lifetime`.
 
+Index `ix_scan_events_created_at` : la purge cherche les événements par date seule, ce que
+l'index existant (`user_id`, `scan_kind`, `created_at`) ne sert pas.
+
 Revision ID: 0006
 Revises: 0005
 Create Date: 2026-10-20
@@ -31,7 +34,9 @@ def upgrade() -> None:
         sa.Column("purged_scans", sa.Integer, nullable=False, server_default="0"),
         schema=S,
     )
+    op.create_index("ix_scan_events_created_at", "scan_events", ["created_at"], schema=S)
 
 
 def downgrade() -> None:
+    op.drop_index("ix_scan_events_created_at", table_name="scan_events", schema=S)
     op.drop_column("subscriptions", "purged_scans", schema=S)

@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import psycopg
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from radarnaque_api import main as main_module
@@ -219,6 +220,35 @@ async def test_lock_skips_second_purge(app, db, make_user, pg_url):
         assert other.execute("select pg_try_advisory_lock(%s)", (PURGE_LOCK_KEY,)).fetchone() == (
             True,
         )
+
+
+async def test_lock_taken_logs_skipped_pass(app, db, make_user, pg_url, caplog):
+    uid = await make_user("old@b.test")
+    await _event(db, uid, OLD)
+    with psycopg.connect(_raw(pg_url), autocommit=True) as other:
+        other.execute("select pg_advisory_lock(%s)", (PURGE_LOCK_KEY,))
+        with caplog.at_level(logging.INFO, logger="radarnaque.purge"):
+            assert await purge_old_scans(app.state.engine, NOW) is None
+        other.execute("select pg_advisory_unlock(%s)", (PURGE_LOCK_KEY,))
+    records = [r for r in caplog.records if r.name == "radarnaque.purge"]
+    assert [(r.levelno, r.getMessage()) for r in records] == [
+        (logging.INFO, "purge déjà en cours ailleurs, passe sautée")
+    ]
+
+
+async def test_failed_batch_rolls_back_counter_and_events(app, db, make_user, monkeypatch):
+    """Un lot dont la suppression échoue après l'UPDATE du compteur : sa transaction est
+    annulée, `purged_scans` et les événements restent tels quels."""
+    uid = await make_user("trial@b.test")
+    await _subscription(db, uid, "trial", OLD - timedelta(days=30))
+    events = {await _event(db, uid, OLD) for _ in range(2)}
+    monkeypatch.setattr(purge, "_DELETE_BATCH", text("delete from app.table_absente"))
+
+    with pytest.raises(ProgrammingError):
+        await purge_old_scans(app.state.engine, NOW)
+
+    assert await _purged_scans(db, uid) == 0
+    assert await _ids(db, "app.scan_events", "id") == events
 
 
 async def test_purge_logs_count_without_identifier(app, db, make_user, caplog):
