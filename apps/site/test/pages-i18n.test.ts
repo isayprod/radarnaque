@@ -208,6 +208,65 @@ describe("privacy wording (spec 10)", () => {
 		);
 	});
 
+	it("FR and NL declare the same sections, in the display order", () => {
+		expect(Object.keys(PRIVACY.fr.sections)).toEqual([...PRIVACY_ORDER]);
+		expect(Object.keys(PRIVACY.nl.sections)).toEqual([...PRIVACY_ORDER]);
+	});
+
+	it("places the web search and browser sections right after the photos", () => {
+		const order = [...PRIVACY_ORDER];
+		expect(order.indexOf("web")).toBe(order.indexOf("photos") + 1);
+		expect(order.indexOf("browser")).toBe(order.indexOf("web") + 1);
+		for (const l of ["fr", "nl"] as const) {
+			expect(PRIVACY[l].sections.web.body.length).toBeGreaterThan(0);
+			expect(PRIVACY[l].sections.browser.body.length).toBeGreaterThan(0);
+		}
+	});
+
+	it("photos apply to every analysis, not only to Premium", () => {
+		for (const l of ["fr", "nl"] as const) {
+			expect(PRIVACY[l].sections.photos.heading).not.toContain("Premium");
+			expect(PRIVACY[l].sections.photos.body).toMatch(/Standard/);
+			expect(PRIVACY[l].sections.photos.body).toMatch(/\b4\b/);
+		}
+		expect(PRIVACY.fr.sections.photos.body).toMatch(/^Toute analyse/);
+		expect(PRIVACY.nl.sections.photos.body).toMatch(/^Elke AI-analyse/);
+	});
+
+	it("discloses the web search: at most 3, no seller identity, masked contacts", () => {
+		const fr = PRIVACY.fr.sections.web.body;
+		const nl = PRIVACY.nl.sections.web.body;
+		expect(fr).toMatch(/3 recherches/);
+		expect(fr).toMatch(/ni l'identité du vendeur/);
+		expect(fr).toMatch(/masqués/);
+		expect(nl).toMatch(/3 zoekopdrachten/);
+		expect(nl).toMatch(/identiteit van de verkoper/);
+		expect(nl).toMatch(/gemaskeerd/);
+	});
+
+	it("says the AI result is kept 24 h in the browser and erased at sign-out", () => {
+		expect(PRIVACY.fr.sections.browser.body).toMatch(/24 h/);
+		expect(PRIVACY.fr.sections.browser.body).toMatch(/déconnexion/);
+		expect(PRIVACY.nl.sections.browser.body).toMatch(/24 uur/);
+		expect(PRIVACY.nl.sections.browser.body).toMatch(/afmeldt|uitlogt/);
+	});
+
+	it("keeps only the trial count after the retention period", () => {
+		expect(PRIVACY.fr.sections.kept.body).toContain("{months}");
+		expect(PRIVACY.nl.sections.kept.body).toContain("{months}");
+		expect(PRIVACY.fr.sections.kept.body).toMatch(/essai/);
+		expect(PRIVACY.nl.sections.kept.body).toMatch(/proef/);
+	});
+
+	it("erasure names the popup button and gives the contact address", () => {
+		expect(PRIVACY.fr.sections.erasure.body).toContain("Supprimer mon compte");
+		expect(PRIVACY.nl.sections.erasure.body).toContain(
+			"Mijn account verwijderen",
+		);
+		expect(PRIVACY.fr.sections.erasure.body).toContain("{email}");
+		expect(PRIVACY.nl.sections.erasure.body).toContain("{email}");
+	});
+
 	it("does not promise that the AI provider keeps nothing", () => {
 		expect(text("fr")).not.toMatch(/ne conserve rien|ni conserver/);
 		expect(text("nl")).not.toMatch(/bewaart niets|niet bewaart/);

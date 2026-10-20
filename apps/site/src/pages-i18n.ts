@@ -170,6 +170,8 @@ export interface PrivacyText {
 		hosting: PrivacySection;
 		trigger: PrivacySection;
 		photos: PrivacySection;
+		web: PrivacySection;
+		browser: PrivacySection;
 		seller: PrivacySection;
 		ai: PrivacySection;
 		kept: PrivacySection;
@@ -187,6 +189,8 @@ export const PRIVACY_ORDER = [
 	"trigger",
 	"seller",
 	"photos",
+	"web",
+	"browser",
 	"ai",
 	"hosting",
 	"kept",
@@ -194,8 +198,6 @@ export const PRIVACY_ORDER = [
 	"erasure",
 ] as const satisfies readonly (keyof PrivacyText["sections"])[];
 
-// Ne pas publier avant la phase 4 : DELETE /api/me et la purge à 12 mois ne
-// sont pas encore implémentés.
 export const PRIVACY: Record<Locale, PrivacyText> = {
 	fr: {
 		title: "Politique de confidentialité",
@@ -217,8 +219,16 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 				body: "Avec un compte, le contenu de l'annonce est envoyé pour analyse. Le nom et l'identifiant du vendeur, ainsi que le lien vers son profil, ne sont jamais envoyés, ni à notre serveur ni à l'IA. Seuls des éléments qui ne permettent pas de l'identifier sont envoyés : ancienneté du compte, nombre d'avis, note, autres annonces, vérification. Les numéros de téléphone et les adresses email présents dans l'annonce sont masqués avant l'envoi à l'IA.",
 			},
 			photos: {
-				heading: "Analyses avec photos (Premium)",
-				body: "Pour une analyse avec photos, les photos de l'annonce sont téléchargées par notre serveur, puis envoyées à l'IA.",
+				heading: "Les photos de l'annonce",
+				body: "Toute analyse IA envoie les photos de l'annonce : 1 photo en Standard, jusqu'à 4 en Premium et pendant l'essai. Elles sont téléchargées par notre serveur, puis envoyées à l'IA.",
+			},
+			web: {
+				heading: "Recherches sur le web",
+				body: "Pendant une analyse, l'IA peut faire jusqu'à 3 recherches sur le web, sur l'objet de l'annonce (son modèle, son prix sur le marché). Les requêtes ne contiennent ni l'identité du vendeur ni vos données, et les numéros de téléphone et les adresses email en sont masqués. Elles partent de notre serveur vers des moteurs de recherche, par notre propre service de recherche.",
+			},
+			browser: {
+				heading: "Ce qui est gardé dans votre navigateur",
+				body: "Le résultat d'une analyse est gardé 24 h dans votre navigateur, pour le réafficher sans refaire l'analyse. Il est effacé à votre déconnexion et à la suppression de votre compte.",
 			},
 			ai: {
 				heading: "Données envoyées à l'IA",
@@ -230,7 +240,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			kept: {
 				heading: "Les données que nous conservons sur vous",
-				body: "Nous conservons votre adresse email, votre abonnement et l'historique de vos analyses. Cet historique est supprimé après {months} mois.",
+				body: "Nous conservons votre adresse email, votre abonnement et l'historique de vos analyses. Cet historique est supprimé après {months} mois. Pour l'essai, nous gardons seulement le nombre d'analyses déjà utilisées, sans leur contenu.",
 			},
 			listings: {
 				heading: "Les analyses d'annonces",
@@ -238,7 +248,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			erasure: {
 				heading: "Droit à l'effacement",
-				body: "Supprimer votre compte supprime votre utilisateur, vos abonnements et l'historique de vos analyses. Pour toute demande, écrivez-nous à {email}.",
+				body: "Dans la popup de l'extension, « Supprimer mon compte » supprime votre utilisateur, vos abonnements et l'historique de vos analyses, tout de suite et définitivement. Pour toute autre demande, écrivez-nous à {email}.",
 			},
 		},
 	},
@@ -262,8 +272,16 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 				body: "Met een account wordt de inhoud van de advertentie voor analyse verstuurd. De naam en de identificatie van de verkoper, en de link naar zijn profiel, worden nooit verstuurd, noch naar onze server, noch naar de AI. Alleen gegevens die de verkoper niet identificeren, worden verstuurd: hoe lang het account al bestaat, aantal beoordelingen, score, andere advertenties, verificatie. Telefoonnummers en e-mailadressen in de advertentie worden gemaskeerd voordat ze naar de AI worden verstuurd.",
 			},
 			photos: {
-				heading: "Analyses met foto's (Premium)",
-				body: "Voor een analyse met foto's worden de foto's van de advertentie door onze server gedownload en daarna naar de AI verstuurd.",
+				heading: "De foto's van de advertentie",
+				body: "Elke AI-analyse stuurt de foto's van de advertentie mee: 1 foto bij Standard, maximaal 4 bij Premium en tijdens de proef. Ze worden door onze server gedownload en daarna naar de AI verstuurd.",
+			},
+			web: {
+				heading: "Zoekopdrachten op het web",
+				body: "Tijdens een analyse kan de AI tot 3 zoekopdrachten op het web doen, over het voorwerp van de advertentie (het model, de marktprijs). De zoekopdrachten bevatten noch de identiteit van de verkoper, noch uw gegevens, en telefoonnummers en e-mailadressen worden erin gemaskeerd. Ze vertrekken van onze server naar zoekmachines, via onze eigen zoekdienst.",
+			},
+			browser: {
+				heading: "Wat in uw browser bewaard blijft",
+				body: "Het resultaat van een analyse wordt 24 uur in uw browser bewaard, om het opnieuw te tonen zonder de analyse te herhalen. Het wordt gewist wanneer u zich afmeldt en wanneer u uw account verwijdert.",
 			},
 			ai: {
 				heading: "Gegevens die naar de AI worden verstuurd",
@@ -275,7 +293,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			kept: {
 				heading: "De gegevens die wij over u bewaren",
-				body: "Wij bewaren uw e-mailadres, uw abonnement en de geschiedenis van uw analyses. Die geschiedenis wordt na {months} maanden gewist.",
+				body: "Wij bewaren uw e-mailadres, uw abonnement en de geschiedenis van uw analyses. Die geschiedenis wordt na {months} maanden gewist. Voor de proef bewaren wij alleen het aantal reeds gebruikte analyses, zonder de inhoud.",
 			},
 			listings: {
 				heading: "Analyses van advertenties",
@@ -283,7 +301,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			erasure: {
 				heading: "Recht op gegevenswissing",
-				body: "Als u uw account verwijdert, worden uw gebruikersgegevens, uw abonnementen en de geschiedenis van uw analyses gewist. Voor elke vraag kunt u mailen naar {email}.",
+				body: "Met « Mijn account verwijderen » in de popup van de extensie worden uw gebruikersgegevens, uw abonnementen en de geschiedenis van uw analyses gewist, meteen en definitief. Voor elke andere vraag kunt u mailen naar {email}.",
 			},
 		},
 	},

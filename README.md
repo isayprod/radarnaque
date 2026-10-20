@@ -558,6 +558,32 @@ Chaque analyse peut réfléchir et chercher sur le web. Les deux se règlent san
   réfléchit et cherche (`openai-oauth`, modèle `gpt-6-luna`), on y voit les titres de réflexion et
   les recherches. `--no-stream` revient à la route JSON, sans événements.
 
+## Suppression du compte et purge à 12 mois (RGPD)
+
+- **Supprimer son compte :** dans la popup, connecté, ouvrir « Supprimer mon compte » (en bas),
+  taper `SUPPRIMER` (FR) ou `VERWIJDEREN` (NL), puis « Supprimer définitivement ». L'extension appelle
+  `DELETE /api/me` (`204`) : l'utilisateur, sa session, son abonnement et ses scans sont
+  supprimés en cascade ; les analyses d'annonces restent. La popup revient à l'écran de
+  connexion avec « Votre compte a été supprimé. ». Se reconnecter avec la même adresse crée un
+  compte neuf, donc un nouvel essai.
+- **Purge :** l'API supprime les scans de plus de 12 mois (`SCAN_RETENTION_MONTHS`, par lots de
+  5 000). La tâche de fond démarre 60 s après l'API, puis tourne toutes les 24 h ; un verrou
+  consultatif PostgreSQL empêche deux processus de purger en même temps. L'essai garde son plafond
+  de 3 analyses : le nombre de scans purgés est ajouté à `subscriptions.purged_scans`.
+- **`PURGE_ENABLED`** (`infra/.env`, `true` par défaut) coupe la tâche de fond. Les tests le
+  mettent à `false`. La composition de production ne le transmet pas : la purge y reste active.
+- **`radarnaque-purge`** fait une passe tout de suite, quelle que soit `PURGE_ENABLED`, et affiche
+  `scan_events supprimés : <n>` (ou « purge déjà en cours ailleurs ») :
+
+```sh
+cd services/api && uv run --env-file ../../infra/.env radarnaque-purge
+```
+
+- **Journaux :** une ligne `INFO` par suppression de compte et par passe de purge, sans
+  identifiant ni email.
+- **Page `/privacy` :** `http://localhost:8080/privacy/?lang=fr` (ou `nl`) ; la popup y mène par
+  « Confidentialité ».
+
 ## Déployer
 
 Production : un serveur (Allemagne) avec Docker et Docker Compose, un enregistrement DNS

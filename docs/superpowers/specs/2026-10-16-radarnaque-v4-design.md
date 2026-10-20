@@ -250,12 +250,13 @@ Les poids ci-dessus sont les poids initiaux du MVP ; ils pourront être ajustés
 
 ### 4.6 Messagerie interne
 
-- Le **content script** et la **popup** envoient des messages typés au **service worker** : `auth/*` (popup seulement), `content/access`, `content/debug` (dev) et `ui/open-popup`.
+- Le **content script** et la **popup** envoient des messages typés au **service worker** : `auth/*` et `account/delete` (popup seulement), `content/access`, `content/debug` (dev) et `ui/open-popup`.
 - **L'analyse passe par un port**, pas par un message : le content script ouvre `browser.runtime.connect({ name: "scan/stream" })` et envoie un seul message de départ `{ listing, rules, trigger, partial, noCache }`. Le port est soumis au même `guardSender` que les messages.
   - Le service worker appelle `POST /api/scans/stream` avec le JWT, lit le flux (`ReadableStream` et un petit lecteur SSE qui reconstitue un événement coupé entre deux morceaux, même au milieu d'un caractère UTF-8) et relaie chaque événement au port.
   - Chaque événement est validé avant d'être relayé : type connu, chaînes bornées (texte 600 caractères, requête 200, 3 domaines de 100). Un événement invalide est ignoré, sauf un `result` invalide, qui donne l'erreur `invalid_response`.
   - Si l'onglet ferme le port (navigation vers une autre annonce, fermeture), le service worker annule la requête (`AbortController`) : le serveur rend le scan. Au-delà de 200 s sans fin de flux, il annule et envoie `error` (`timeout`). Il se maintient actif pendant les tours silencieux du modèle.
   - Un port qui se déconnecte sans `result` (service worker tué) donne « Analyse interrompue » avec « Relancer ».
+- **`account/delete`** (phase 4a) appelle `DELETE /api/me`, puis efface la session locale et les résultats IA gardés. Il est refusé (`forbidden_sender`, sans appel réseau) s'il ne vient pas d'une page de l'extension, et ne fait jamais partie de `CONTENT_SCRIPT_MESSAGES`.
 - Le **service worker** est le **seul** à détenir le jeton de session et le JWT, et le seul à appeler `/auth/*` et `/api/*`.
 - Il reçoit aussi `onMessageExternal` depuis la page `/auth/callback`, en vérifiant l'origine de l'expéditeur.
 
@@ -431,7 +432,7 @@ scan_failures(scan_event_id PK FK, error_code, created_at)
 | POST | `/api/scans/stream` | utilisateur | lancer une analyse IA, avec ses événements en direct (SSE, voir §7.2) |
 | POST | `/api/scans` | utilisateur | la même analyse, sans flux : une réponse JSON (`pnpm e2e:scan --no-stream`, tests) |
 | GET | `/api/scans/history` | utilisateur | historique paginé de ses scans |
-| DELETE | `/api/me` | utilisateur | suppression du compte et des données (RGPD) |
+| DELETE | `/api/me` | utilisateur | suppression du compte et des données (RGPD) : `204` sans corps, cascade sur la session, l'abonnement et les scans ; les analyses d'annonces restent (phase 4a, voir sa [spécification](2026-10-20-phase-4a-rgpd-design.md)) |
 | POST | `/api/billing/checkout` | utilisateur | `{ plan, interval }`. MVP : `501 billing_unavailable` |
 | POST | `/api/billing/portal` | utilisateur | MVP : `501 billing_unavailable` |
 | POST | `/api/billing/webhooks/stripe` | Stripe | MVP : `501`, implémenté en phase 5 |
@@ -594,11 +595,16 @@ Le format est `{ "error": { "code": "...", "message": "...", "details": {} } }`.
 - **Hébergement :** serveur en Allemagne (UE).
 - **Données du vendeur :** son identité (nom, identifiant, profil) n'est jamais envoyée au serveur ni au LLM. Les snapshots ne contiennent aucune donnée personnelle du vendeur. Les numéros de téléphone et les emails sont masqués avant l'envoi au LLM.
 - **OpenRouter** est configuré avec `data_collection: "deny"`.
-- **Conservation :**
-  - `scan_events` et les tables associées sont supprimés après **12 mois**, par une tâche planifiée quotidienne dans l'API ;
+- **Recherche web :** au plus 3 recherches par analyse, sur SearXNG auto-hébergé. Les requêtes ne contiennent pas l'identité du vendeur, et les téléphones et emails en sont masqués.
+- **Navigateur :** le résultat d'une analyse est gardé 24 h dans le navigateur, et effacé à la déconnexion et à la suppression du compte.
+- **Conservation (phase 4a, livrée) :**
+  - `scan_events` et les tables associées (`scan_results`, `scan_failures`) sont supprimés après **12 mois** (`SCAN_RETENTION_MONTHS`), par une tâche de fond quotidienne de l'API (`radarnaque-purge` pour une passe à la main) ;
+  - pour l'essai, le nombre de scans purgés est gardé dans `subscriptions.purged_scans` : le quota « à vie » ne se renouvelle pas ;
   - les analyses et les snapshots, qui ne sont pas des données personnelles, sont conservés.
-- **Droit à l'effacement :** `DELETE /api/me` et l'action correspondante dans l'admin suppriment l'utilisateur dans Better Auth, ce qui supprime en cascade ses abonnements et ses scans.
-- **Page `/privacy`** en FR et en NL, et déclarations correspondantes dans le Chrome Web Store.
+- **Droit à l'effacement :**
+  - par l'utilisateur (phase 4a, livrée) : « Supprimer mon compte » dans la popup (mot de confirmation `SUPPRIMER` ou `VERWIJDEREN`) appelle `DELETE /api/me`, qui supprime l'utilisateur dans Better Auth et, en cascade, sa session, son abonnement et ses scans ;
+  - par l'admin (phase 4b) : l'action correspondante dans l'admin.
+- **Page `/privacy`** en FR et en NL (mise à jour en phase 4a : photos, recherche web, navigateur, conservation, effacement), et déclarations correspondantes dans le Chrome Web Store (listées dans le [suivi de la phase 4a](../plans/2026-10-20-phase-4a-suivi.md)).
 
 ## 11. Infrastructure et déploiement
 
@@ -642,7 +648,9 @@ Chaque phase fait l'objet de son propre plan d'implémentation, et se livre et s
 2. **Adaptateurs et règles locales** : `Listing`, adaptateurs 2ememain/2dehands et Facebook, moteur de règles, pastille et panneau sur la page d'une annonce, fonctionnement sans compte.
 3. **Analyse IA** : référentiels, offre et schéma des scans, `POST /api/scans` (droits, quotas, cache, relais LLM, photos), panneau de résultat et icônes sur les cartes.
    - **3b à 3d** : analyses IA dans l'extension (3b), l'IA qui remplace l'analyse locale et le prompt v2 (3c), recherche web, photos obligatoires, un seul type d'analyse et réflexion en direct (3d, voir sa [spécification](2026-10-19-phase-3d-recherche-web-reflexion-design.md)).
-4. **Administration** : SPA admin, routes `/api/admin/*`, `admin_actions`.
+4. **Administration et RGPD**, en deux parties :
+   - **4a, RGPD (livrée)** : `DELETE /api/me`, suppression du compte depuis la popup, purge des scans à 12 mois, page `/privacy` à jour (voir sa [spécification](2026-10-20-phase-4a-rgpd-design.md)) ;
+   - **4b, administration (à venir)** : SPA admin, routes `/api/admin/*`, `admin_actions`, suppression d'un compte par l'admin.
 5. **Stripe** : `StripeBillingProvider`, webhooks, `billing_events`, pages de paiement.
 
 ## 14. Risques connus
