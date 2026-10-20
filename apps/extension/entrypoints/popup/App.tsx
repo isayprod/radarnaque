@@ -356,6 +356,7 @@ export default function App() {
 					busy={busy}
 					onSignOut={onSignOut}
 					onDeleted={onDeleted}
+					onSessionExpired={() => fail("session_expired")}
 				/>
 			) : null;
 			break;
@@ -447,13 +448,18 @@ function Account({
 	busy,
 	onSignOut,
 	onDeleted,
+	onSessionExpired,
 }: {
 	me: Me;
 	locale: Locale;
 	busy: boolean;
 	onSignOut: () => void;
 	onDeleted: () => void;
+	onSessionExpired: () => void;
 }) {
+	// Suppression en cours : la déconnexion attend (et inversement, `busy`), pour qu'une
+	// déconnexion ne passe pas pour un compte supprimé.
+	const [deleting, setDeleting] = useState(false);
 	// Une seule analyse (`full`) : son quota, limité par le plafond de l'essai ;
 	// rien pour un compte illimité (admin, superuser) ou sans abonnement.
 	const access = accessOf(me);
@@ -475,27 +481,50 @@ function Account({
 			<button
 				type="button"
 				className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:opacity-60"
-				disabled={busy}
+				disabled={busy || deleting}
 				onClick={onSignOut}
 			>
 				{t(locale, "action.signOut")}
 			</button>
-			<DeleteAccount locale={locale} onDeleted={onDeleted} />
+			<DeleteAccount
+				locale={locale}
+				disabled={busy}
+				onPendingChange={setDeleting}
+				onDeleted={onDeleted}
+				onSessionExpired={onSessionExpired}
+			/>
 		</div>
 	);
 }
 
-/** Section repliable « Supprimer mon compte » : confirmation tapée, puis `account/delete`. */
+/** Message d'échec : serveur injoignable (la suppression a pu avoir lieu), ou refus. */
+function deleteFailure(locale: Locale, code: string): string {
+	return code === "network" || code === "background_unavailable"
+		? t(locale, "delete.unreachable")
+		: t(locale, "delete.failure");
+}
+
+/**
+ * Section repliable « Supprimer mon compte » : confirmation tapée, puis `account/delete`.
+ * `disabled` : une déconnexion est en cours.
+ */
 function DeleteAccount({
 	locale,
+	disabled,
+	onPendingChange,
 	onDeleted,
+	onSessionExpired,
 }: {
 	locale: Locale;
+	disabled: boolean;
+	onPendingChange: (pending: boolean) => void;
 	onDeleted: () => void;
+	/** Session refusée avant tout envoi : rien n'est supprimé, la popup se déconnecte. */
+	onSessionExpired: () => void;
 }) {
 	const [typed, setTyped] = useState("");
 	const [pending, setPending] = useState(false);
-	const [failed, setFailed] = useState(false);
+	const [failedCode, setFailedCode] = useState<string | null>(null);
 	// Garde synchrone : deux clics avant le rendu ne doivent envoyer qu'une demande.
 	const sending = useRef(false);
 
@@ -504,15 +533,21 @@ function DeleteAccount({
 
 	async function onSubmit(event: FormEvent) {
 		event.preventDefault();
-		if (!confirmed || sending.current) return;
+		if (!confirmed || disabled || sending.current) return;
 		sending.current = true;
 		setPending(true);
-		setFailed(false);
+		onPendingChange(true);
+		setFailedCode(null);
 		const response = await sendToBackground<null>({ type: "account/delete" });
 		if (!response.ok) {
 			sending.current = false;
 			setPending(false);
-			setFailed(true);
+			onPendingChange(false);
+			if (response.error.code === "session_expired") {
+				onSessionExpired();
+				return;
+			}
+			setFailedCode(response.error.code);
 			return;
 		}
 		// Le composant disparaît avec l'écran du compte : la garde reste donc fermée.
@@ -547,15 +582,15 @@ function DeleteAccount({
 				<button
 					type="submit"
 					className="w-full rounded-lg bg-red-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-					disabled={!confirmed || pending}
+					disabled={!confirmed || pending || disabled}
 				>
 					{pending
 						? t(locale, "delete.submitting")
 						: t(locale, "delete.submit")}
 				</button>
-				{failed && (
+				{failedCode && (
 					<p role="alert" className="text-sm text-red-700">
-						{t(locale, "delete.failure")}
+						{deleteFailure(locale, failedCode)}
 					</p>
 				)}
 			</form>

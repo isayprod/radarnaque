@@ -22,6 +22,18 @@ export class ApiRequestError extends Error {
 	}
 }
 
+/**
+ * `session_expired` levé par `jwt.get()` avant le premier envoi : aucune requête n'est
+ * partie. Même code que tout `session_expired` (les autres routes n'y voient pas de
+ * différence) ; seule la suppression du compte le distingue.
+ */
+export class SessionExpiredBeforeSendError extends AuthError {
+	constructor() {
+		super("session_expired");
+		this.name = "SessionExpiredBeforeSendError";
+	}
+}
+
 export interface ApiClientOptions {
 	jwt: JwtProvider;
 	fetch: typeof fetch;
@@ -34,7 +46,8 @@ export interface ApiClient {
 	/**
 	 * `DELETE /api/me` : suppression du compte (`204` sans corps). Un 401 passe par le
 	 * renouvellement du JWT, puis devient `session_expired` ; un autre refus lève
-	 * `ApiRequestError`.
+	 * `ApiRequestError`. Un `jwt.get()` refusé avant tout envoi lève
+	 * `SessionExpiredBeforeSendError`.
 	 */
 	deleteMe(): Promise<void>;
 	/** `POST /api/scans` : le corps doit sortir de `toScanIn` (identité retirée, bornes). */
@@ -70,19 +83,26 @@ export function createApiClient({
 	fetch,
 	onUnauthenticated,
 }: ApiClientOptions): ApiClient {
-	async function sessionExpired(): Promise<never> {
+	async function sessionExpired(beforeSend = false): Promise<never> {
 		await onUnauthenticated();
-		throw new AuthError("session_expired");
+		throw beforeSend
+			? new SessionExpiredBeforeSendError()
+			: new AuthError("session_expired");
 	}
 
-	async function send(path: string, init: SendInit = {}): Promise<Response> {
+	/** `retry` : second envoi après un 401, donc une requête est déjà partie. */
+	async function send(
+		path: string,
+		init: SendInit = {},
+		retry = false,
+	): Promise<Response> {
 		let token: string;
 		try {
 			token = await jwt.get();
 		} catch (error) {
 			// Session révoquée ou expirée côté auth : même issue qu'un second 401.
 			if (error instanceof AuthError && error.code === "session_expired") {
-				return sessionExpired();
+				return sessionExpired(!retry);
 			}
 			throw error;
 		}
@@ -110,7 +130,7 @@ export function createApiClient({
 		let res = await send(path, init);
 		if (res.status === 401) {
 			jwt.invalidate();
-			res = await send(path, init);
+			res = await send(path, init, true);
 			if (res.status === 401) return sessionExpired();
 		}
 		if (!res.ok) throw new ApiRequestError(res.status, await errorBody(res));

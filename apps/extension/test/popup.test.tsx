@@ -764,6 +764,160 @@ describe("popup", () => {
 		expect(screen.getByText("Essai")).toBeTruthy();
 	});
 
+	test("sign-out disabled while a deletion is pending", async () => {
+		let release: (response: BgResponse<unknown>) => void = () => {};
+		background({
+			"auth/state": () => signedIn(),
+			"account/delete": () =>
+				new Promise<BgResponse<unknown>>((resolve) => {
+					release = resolve;
+				}) as unknown as BgResponse<unknown>,
+		});
+		const user = userEvent.setup();
+		render(<App />);
+		await user.type(
+			await screen.findByLabelText("Tapez SUPPRIMER pour confirmer"),
+			"SUPPRIMER",
+		);
+		const signOut = screen.getByRole("button", {
+			name: "Se déconnecter",
+		}) as HTMLButtonElement;
+		expect(signOut.disabled).toBe(false);
+
+		await user.click(
+			screen.getByRole("button", { name: "Supprimer définitivement" }),
+		);
+
+		await screen.findByRole("button", { name: "Suppression…" });
+		expect(signOut.disabled).toBe(true);
+		await user.click(signOut);
+		expect(requestsOf("auth/sign-out")).toHaveLength(0);
+		release(fail("unavailable"));
+		await screen.findByText(
+			"La suppression a échoué, votre compte n'a pas été modifié. Réessayez.",
+		);
+		expect(signOut.disabled).toBe(false);
+	});
+
+	test("delete disabled while a sign-out is pending", async () => {
+		let release: (response: BgResponse<unknown>) => void = () => {};
+		background({
+			"auth/state": () => signedIn(),
+			"auth/sign-out": () =>
+				new Promise<BgResponse<unknown>>((resolve) => {
+					release = resolve;
+				}) as unknown as BgResponse<unknown>,
+		});
+		const user = userEvent.setup();
+		render(<App />);
+		const input = await screen.findByLabelText(
+			"Tapez SUPPRIMER pour confirmer",
+		);
+		await user.type(input, "SUPPRIMER");
+		const submit = screen.getByRole("button", {
+			name: "Supprimer définitivement",
+		}) as HTMLButtonElement;
+		expect(submit.disabled).toBe(false);
+
+		await user.click(screen.getByRole("button", { name: "Se déconnecter" }));
+
+		await waitFor(() => expect(submit.disabled).toBe(true));
+		await user.click(submit);
+		await user.type(input, "{Enter}");
+		expect(requestsOf("account/delete")).toHaveLength(0);
+		release(fail("unavailable"));
+		await waitFor(() => expect(submit.disabled).toBe(false));
+	});
+
+	test("session_expired on delete signs out without claiming the account was deleted", async () => {
+		background({
+			"auth/state": () => signedIn(),
+			"account/delete": () => fail("session_expired"),
+		});
+		const user = userEvent.setup();
+		render(<App />);
+		await user.type(
+			await screen.findByLabelText("Tapez SUPPRIMER pour confirmer"),
+			"SUPPRIMER",
+		);
+
+		await user.click(
+			screen.getByRole("button", { name: "Supprimer définitivement" }),
+		);
+
+		expect(await screen.findByLabelText("Adresse email")).toBeTruthy();
+		expect(
+			screen.getByText("Votre session a expiré. Reconnectez-vous."),
+		).toBeTruthy();
+		expect(screen.queryByText("Votre compte a été supprimé.")).toBeNull();
+	});
+
+	test.each(["network", "background_unavailable"])(
+		"delete failure %s says the server could not be reached",
+		async (code) => {
+			background({
+				"auth/state": () => signedIn(),
+				"account/delete": () => fail(code),
+			});
+			const user = userEvent.setup();
+			render(<App />);
+			await user.type(
+				await screen.findByLabelText("Tapez SUPPRIMER pour confirmer"),
+				"SUPPRIMER",
+			);
+
+			await user.click(
+				screen.getByRole("button", { name: "Supprimer définitivement" }),
+			);
+
+			expect(
+				await screen.findByText(
+					"Impossible de joindre le serveur. Si votre compte a été supprimé, vous serez déconnecté.",
+				),
+			).toBeTruthy();
+			expect(
+				screen.queryByText(
+					"La suppression a échoué, votre compte n'a pas été modifié. Réessayez.",
+				),
+			).toBeNull();
+		},
+	);
+
+	test("nl delete texts use je/jouw like the rest of the popup", async () => {
+		await localePref.setValue("nl");
+		background({
+			"auth/state": () => signedIn(),
+			"account/delete": () => fail("network"),
+		});
+		const user = userEvent.setup();
+		render(<App />);
+		await user.type(
+			await screen.findByLabelText("Typ VERWIJDEREN om te bevestigen"),
+			"VERWIJDEREN",
+		);
+		await user.click(
+			screen.getByRole("button", { name: "Definitief verwijderen" }),
+		);
+
+		expect(
+			await screen.findByText(
+				"De server is niet bereikbaar. Als je account verwijderd is, word je afgemeld.",
+			),
+		).toBeTruthy();
+		for (const key of [
+			"delete.explanation",
+			"delete.success",
+			"delete.failure",
+			"delete.unreachable",
+		] as const) {
+			expect(t("nl", key)).not.toMatch(/\b(uw|u)\b/i);
+		}
+		expect(t("nl", "delete.success")).toBe("Je account is verwijderd.");
+		expect(t("nl", "delete.failure")).toBe(
+			"Verwijderen is mislukt, je account is niet gewijzigd. Probeer opnieuw.",
+		);
+	});
+
 	test("privacy link points to /privacy with the active locale", async () => {
 		background({ "auth/state": () => signedOut });
 		const user = userEvent.setup();

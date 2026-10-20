@@ -1,6 +1,6 @@
 import type { Locale, Me } from "@radarnaque/shared";
 import { accessOf } from "./access";
-import { ApiRequestError } from "./api-client";
+import { ApiRequestError, SessionExpiredBeforeSendError } from "./api-client";
 import {
 	AuthError,
 	type signOutRemote,
@@ -156,15 +156,20 @@ export function createHandlers(
 
 	/**
 	 * Suppression du compte : le nettoyage local n'a lieu qu'après un succès, ou un
-	 * `session_expired` (compte déjà absent). Toute autre erreur laisse la session intacte.
+	 * `session_expired` venu d'une réponse de l'API (401 sur `DELETE /api/me` : compte
+	 * déjà absent). Un `session_expired` levé avant tout envoi reste une erreur : rien
+	 * n'a été supprimé, la session est seulement effacée comme une session expirée.
+	 * Toute autre erreur laisse la session intacte.
 	 */
 	async function deleteAccount(): Promise<BgResponse<null>> {
 		try {
 			await api.deleteMe();
 		} catch (error) {
-			if (!(error instanceof AuthError && error.code === "session_expired")) {
-				throw error;
-			}
+			const accountGone =
+				error instanceof AuthError &&
+				error.code === "session_expired" &&
+				!(error instanceof SessionExpiredBeforeSendError);
+			if (!accountGone) throw error;
 		}
 		await storeSession(null);
 		// Comme à la déconnexion : un échec du vidage ne bloque pas.
@@ -278,7 +283,7 @@ function isOwnContentScript(
 /**
  * Enveloppe le handler interne. Une page de l'extension a droit à tout ; un content
  * script d'un site pris en charge, uniquement à `CONTENT_SCRIPT_MESSAGES` (jamais
- * `auth/*`). Tout autre émetteur ou message répond `forbidden_sender`.
+ * `auth/*` ni `account/*`). Tout autre émetteur ou message répond `forbidden_sender`.
  */
 export function guardSender(
 	handle: (req: BgRequest) => Promise<BgResponse<unknown>>,
