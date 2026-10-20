@@ -52,8 +52,9 @@ export type BgRequest =
 	| { type: "ui/open-popup" };
 
 /**
- * Seuls messages qu'un content script peut envoyer : jamais `auth/*` ni `account/*`. Le scan passe par
- * le port `scan/stream` (`SCAN_PORT`), soumis au même contrôle de l'émetteur.
+ * Seuls messages qu'un content script peut envoyer : jamais `auth/*` ni `account/*`.
+ * Le scan passe par le port `scan/stream` (`SCAN_PORT`), soumis au même contrôle de
+ * l'émetteur.
  */
 export const CONTENT_SCRIPT_MESSAGES: ReadonlySet<BgRequest["type"]> = new Set<
 	BgRequest["type"]

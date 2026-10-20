@@ -1,5 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
-import { ApiRequestError, createApiClient } from "../lib/api-client";
+import {
+	ApiRequestError,
+	createApiClient,
+	SessionExpiredBeforeSendError,
+} from "../lib/api-client";
 import { AuthError } from "../lib/auth-client";
 import type { JwtProvider } from "../lib/jwt-provider";
 import {
@@ -159,6 +163,35 @@ describe("api client", () => {
 			code: "session_expired",
 		});
 		expect(fetch2).toHaveBeenCalledTimes(2);
+		expect(onUnauthenticated).toHaveBeenCalledTimes(1);
+	});
+
+	test("deleteMe: jwt.get() session_expired before any send → SessionExpiredBeforeSendError", async () => {
+		const jwt = fakeJwt();
+		jwt.get.mockRejectedValueOnce(new AuthError("session_expired"));
+		const fetch = fetchSequence();
+		const onUnauthenticated = vi.fn();
+		const api = createApiClient({ jwt, fetch, onUnauthenticated });
+		const error = await api.deleteMe().catch((e: unknown) => e);
+		// Même code pour les autres routes : seul `deleteAccount` distingue la classe.
+		expect(error).toBeInstanceOf(SessionExpiredBeforeSendError);
+		expect(error).toBeInstanceOf(AuthError);
+		expect((error as AuthError).code).toBe("session_expired");
+		expect(fetch).not.toHaveBeenCalled();
+		expect(onUnauthenticated).toHaveBeenCalledTimes(1);
+	});
+
+	test("deleteMe: 401 then renewal refused → plain session_expired (request sent)", async () => {
+		const jwt = fakeJwt("old");
+		jwt.get.mockRejectedValueOnce(new AuthError("session_expired"));
+		const fetch = fetchSequence(errorResponse(401, "unauthenticated"));
+		const onUnauthenticated = vi.fn();
+		const api = createApiClient({ jwt, fetch, onUnauthenticated });
+		const error = await api.deleteMe().catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(AuthError);
+		expect(error).not.toBeInstanceOf(SessionExpiredBeforeSendError);
+		expect((error as AuthError).code).toBe("session_expired");
+		expect(fetch).toHaveBeenCalledTimes(1);
 		expect(onUnauthenticated).toHaveBeenCalledTimes(1);
 	});
 

@@ -220,6 +220,62 @@ describe("background handlers", () => {
 		expect(clear).toHaveBeenCalledTimes(1);
 	});
 
+	test("account/delete: jwt.get() session_expired before any send → error, signed out, not deleted", async () => {
+		await sessionToken.setValue("session-abc");
+		const fetch = fetchSequence();
+		const jwt = {
+			get: vi.fn(async (): Promise<string> => {
+				throw new AuthError("session_expired");
+			}),
+			invalidate: vi.fn(),
+		};
+		const api = createApiClient({
+			jwt,
+			fetch,
+			onUnauthenticated: async () => {
+				await sessionToken.setValue(null);
+				jwt.invalidate();
+			},
+		});
+		const { deps, clearAiResults: clear } = makeDeps({ api, jwt });
+		expect(await createHandlers(deps)({ type: "account/delete" })).toEqual({
+			ok: false,
+			error: { code: "session_expired" },
+		});
+		// Aucune requête partie : rien n'a été supprimé. La session est effacée comme
+		// une session expirée ordinaire.
+		expect(fetch).not.toHaveBeenCalled();
+		expect(await sessionToken.getValue()).toBeNull();
+		expect(clear).not.toHaveBeenCalled();
+	});
+
+	test("account/delete: 401 then renewal refused → done (account already gone)", async () => {
+		await sessionToken.setValue("session-abc");
+		const fetch = fetchSequence(errorResponse(401, "unauthenticated"));
+		const jwt = {
+			get: vi
+				.fn<() => Promise<string>>()
+				.mockResolvedValueOnce("jwt-1")
+				.mockRejectedValueOnce(new AuthError("session_expired")),
+			invalidate: vi.fn(),
+		};
+		const api = createApiClient({
+			jwt,
+			fetch,
+			onUnauthenticated: async () => {
+				await sessionToken.setValue(null);
+			},
+		});
+		const { deps, clearAiResults: clear } = makeDeps({ api, jwt });
+		expect(await createHandlers(deps)({ type: "account/delete" })).toEqual({
+			ok: true,
+			data: null,
+		});
+		expect(fetch).toHaveBeenCalledTimes(1);
+		expect(await sessionToken.getValue()).toBeNull();
+		expect(clear).toHaveBeenCalledTimes(1);
+	});
+
 	test("account/delete keeps session on 500", async () => {
 		await sessionToken.setValue("session-abc");
 		const { deps, api, jwt, clearAiResults: clear } = makeDeps();

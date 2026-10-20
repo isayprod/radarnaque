@@ -33,6 +33,8 @@ const fr = {
 	"delete.success": "Votre compte a été supprimé.",
 	"delete.failure":
 		"La suppression a échoué, votre compte n'a pas été modifié. Réessayez.",
+	"delete.unreachable":
+		"Impossible de joindre le serveur. Si votre compte a été supprimé, vous serez déconnecté.",
 	"privacy.link": "Confidentialité",
 
 	"plan.trial": "Essai",
@@ -78,14 +80,16 @@ const nl: Record<MessageKey, string> = {
 
 	"delete.title": "Mijn account verwijderen",
 	"delete.explanation":
-		"Uw account, uw abonnement en de geschiedenis van uw analyses worden gewist. De analyses van advertenties, die anoniem zijn, blijven bewaard.",
+		"Jouw account, jouw abonnement en de geschiedenis van je analyses worden gewist. De analyses van advertenties, die anoniem zijn, blijven bewaard.",
 	"delete.word": "VERWIJDEREN",
 	"delete.prompt": "Typ VERWIJDEREN om te bevestigen",
 	"delete.submit": "Definitief verwijderen",
 	"delete.submitting": "Verwijderen…",
-	"delete.success": "Uw account is verwijderd.",
+	"delete.success": "Je account is verwijderd.",
 	"delete.failure":
-		"Verwijderen is mislukt, uw account is niet gewijzigd. Probeer opnieuw.",
+		"Verwijderen is mislukt, je account is niet gewijzigd. Probeer opnieuw.",
+	"delete.unreachable":
+		"De server is niet bereikbaar. Als je account verwijderd is, word je afgemeld.",
 	"privacy.link": "Privacy",
 
 	"plan.trial": "Proef",
