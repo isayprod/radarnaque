@@ -23,6 +23,18 @@ const fr = {
 	"account.scansLeftOne": "{count} analyse IA restante",
 	"action.signOut": "Se déconnecter",
 
+	"delete.title": "Supprimer mon compte",
+	"delete.explanation":
+		"Votre compte, votre abonnement et l'historique de vos analyses seront effacés. Les analyses d'annonces, anonymes, sont conservées.",
+	"delete.word": "SUPPRIMER",
+	"delete.prompt": "Tapez SUPPRIMER pour confirmer",
+	"delete.submit": "Supprimer définitivement",
+	"delete.submitting": "Suppression…",
+	"delete.success": "Votre compte a été supprimé.",
+	"delete.failure":
+		"La suppression a échoué, votre compte n'a pas été modifié. Réessayez.",
+	"privacy.link": "Confidentialité",
+
 	"plan.trial": "Essai",
 	"plan.standard": "Standard",
 	"plan.premium": "Premium",
@@ -63,6 +75,18 @@ const nl: Record<MessageKey, string> = {
 	"account.scansLeft": "{count} AI-analyses over",
 	"account.scansLeftOne": "{count} AI-analyse over",
 	"action.signOut": "Afmelden",
+
+	"delete.title": "Mijn account verwijderen",
+	"delete.explanation":
+		"Uw account, uw abonnement en de geschiedenis van uw analyses worden gewist. De analyses van advertenties, die anoniem zijn, blijven bewaard.",
+	"delete.word": "VERWIJDEREN",
+	"delete.prompt": "Typ VERWIJDEREN om te bevestigen",
+	"delete.submit": "Definitief verwijderen",
+	"delete.submitting": "Verwijderen…",
+	"delete.success": "Uw account is verwijderd.",
+	"delete.failure":
+		"Verwijderen is mislukt, uw account is niet gewijzigd. Probeer opnieuw.",
+	"privacy.link": "Privacy",
 
 	"plan.trial": "Proef",
 	"plan.standard": "Standaard",

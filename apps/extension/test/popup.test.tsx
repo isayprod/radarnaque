@@ -611,6 +611,178 @@ describe("popup", () => {
 			]),
 		);
 	});
+
+	test("delete section hidden when signed out", async () => {
+		background({ "auth/state": () => signedOut });
+		render(<App />);
+		await screen.findByLabelText("Adresse email");
+
+		expect(screen.queryByText("Supprimer mon compte")).toBeNull();
+		expect(
+			screen.queryByLabelText("Tapez SUPPRIMER pour confirmer"),
+		).toBeNull();
+	});
+
+	test("delete section is collapsed by default when signed in", async () => {
+		background({ "auth/state": () => signedIn() });
+		render(<App />);
+
+		const title = await screen.findByText("Supprimer mon compte");
+		expect(title.closest("details")?.hasAttribute("open")).toBe(false);
+	});
+
+	test("delete button disabled until the word is typed (fr)", async () => {
+		background({ "auth/state": () => signedIn() });
+		const user = userEvent.setup();
+		render(<App />);
+		const input = await screen.findByLabelText(
+			"Tapez SUPPRIMER pour confirmer",
+		);
+		const button = screen.getByRole("button", {
+			name: "Supprimer définitivement",
+		}) as HTMLButtonElement;
+		expect(button.disabled).toBe(true);
+
+		await user.type(input, "supprim");
+		expect(button.disabled).toBe(true);
+
+		await user.clear(input);
+		await user.type(input, "  supprimer ");
+		expect(button.disabled).toBe(false);
+	});
+
+	test("delete word is VERWIJDEREN in nl", async () => {
+		await localePref.setValue("nl");
+		background({ "auth/state": () => signedIn() });
+		const user = userEvent.setup();
+		render(<App />);
+		const input = await screen.findByLabelText(
+			"Typ VERWIJDEREN om te bevestigen",
+		);
+		const button = screen.getByRole("button", {
+			name: "Definitief verwijderen",
+		}) as HTMLButtonElement;
+
+		await user.type(input, "SUPPRIMER");
+		expect(button.disabled).toBe(true);
+
+		await user.clear(input);
+		await user.type(input, "verwijderen");
+		expect(button.disabled).toBe(false);
+		expect(screen.getByText("Mijn account verwijderen")).toBeTruthy();
+	});
+
+	test("double click sends one account/delete", async () => {
+		let release: (response: BgResponse<unknown>) => void = () => {};
+		let deleted = false;
+		background({
+			"auth/state": () => (deleted ? signedOut : signedIn()),
+			"account/delete": () =>
+				new Promise<BgResponse<unknown>>((resolve) => {
+					release = resolve;
+				}) as unknown as BgResponse<unknown>,
+		});
+		const user = userEvent.setup();
+		render(<App />);
+		await user.type(
+			await screen.findByLabelText("Tapez SUPPRIMER pour confirmer"),
+			"SUPPRIMER",
+		);
+		const button = screen.getByRole("button", {
+			name: "Supprimer définitivement",
+		});
+
+		await user.dblClick(button);
+
+		expect(requestsOf("account/delete")).toEqual([{ type: "account/delete" }]);
+		const pending = await screen.findByRole("button", { name: "Suppression…" });
+		expect((pending as HTMLButtonElement).disabled).toBe(true);
+		deleted = true;
+		release(ok(null));
+		await screen.findByLabelText("Adresse email");
+		expect(requestsOf("account/delete")).toHaveLength(1);
+	});
+
+	test("success shows message then sign-in screen", async () => {
+		let deleted = false;
+		background({
+			"auth/state": () => (deleted ? signedOut : signedIn()),
+			"account/delete": () => {
+				deleted = true;
+				return ok(null);
+			},
+		});
+		const user = userEvent.setup();
+		render(<App />);
+		await user.type(
+			await screen.findByLabelText("Tapez SUPPRIMER pour confirmer"),
+			"SUPPRIMER",
+		);
+
+		await user.click(
+			screen.getByRole("button", { name: "Supprimer définitivement" }),
+		);
+
+		expect(await screen.findByLabelText("Adresse email")).toBeTruthy();
+		expect(screen.getByText("Votre compte a été supprimé.")).toBeTruthy();
+		expect(screen.queryByText("Supprimer mon compte")).toBeNull();
+	});
+
+	test("failure keeps the section and shows the error", async () => {
+		background({
+			"auth/state": () => signedIn(),
+			"account/delete": () => fail("unavailable"),
+		});
+		const user = userEvent.setup();
+		render(<App />);
+		const input = (await screen.findByLabelText(
+			"Tapez SUPPRIMER pour confirmer",
+		)) as HTMLInputElement;
+		await user.type(input, "SUPPRIMER");
+		const title = screen.getByText("Supprimer mon compte");
+		title.closest("details")?.setAttribute("open", "");
+
+		await user.click(
+			screen.getByRole("button", { name: "Supprimer définitivement" }),
+		);
+
+		expect(
+			await screen.findByText(
+				"La suppression a échoué, votre compte n'a pas été modifié. Réessayez.",
+			),
+		).toBeTruthy();
+		expect(title.closest("details")?.hasAttribute("open")).toBe(true);
+		expect(input.value).toBe("SUPPRIMER");
+		expect(
+			(
+				screen.getByRole("button", {
+					name: "Supprimer définitivement",
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(false);
+		expect(screen.queryByText("Votre compte a été supprimé.")).toBeNull();
+		expect(screen.getByText("Essai")).toBeTruthy();
+	});
+
+	test("privacy link points to /privacy with the active locale", async () => {
+		background({ "auth/state": () => signedOut });
+		const user = userEvent.setup();
+		render(<App />);
+
+		const fr = await screen.findByRole("link", { name: "Confidentialité" });
+		expect(fr.getAttribute("href")).toBe(
+			"http://localhost:8080/privacy/?lang=fr",
+		);
+		expect(fr.getAttribute("target")).toBe("_blank");
+		expect(fr.getAttribute("rel")).toContain("noopener");
+
+		await user.click(screen.getByRole("button", { name: "NL" }));
+
+		const nl = await screen.findByRole("link", { name: "Privacy" });
+		expect(nl.getAttribute("href")).toBe(
+			"http://localhost:8080/privacy/?lang=nl",
+		);
+	});
 });
 
 describe("i18n", () => {

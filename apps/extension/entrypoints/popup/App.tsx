@@ -10,6 +10,7 @@ import {
 } from "react";
 import { browser } from "wxt/browser";
 import { accessOf } from "../../lib/access";
+import { PUBLIC_URL } from "../../lib/config";
 import { isValidEmail, normalizeEmail } from "../../lib/email";
 import { detectLocale, errorMessage, type MessageKey, t } from "../../lib/i18n";
 import { type AuthState, sendToBackground } from "../../lib/messages";
@@ -47,6 +48,8 @@ export default function App() {
 	const [busy, setBusy] = useState(false);
 	const [errorCode, setErrorCode] = useState<string | null>(null);
 	const [resent, setResent] = useState(false);
+	// Compte supprimé : le message reste affiché sur l'écran de connexion.
+	const [deleted, setDeleted] = useState(false);
 	const emailRef = useRef<HTMLInputElement>(null);
 	const codeRef = useRef<HTMLInputElement>(null);
 	// Seule la dernière demande d'état compte (le watch du stockage en lance aussi).
@@ -143,6 +146,7 @@ export default function App() {
 		event.preventDefault();
 		if (busy) return;
 		setErrorCode(null);
+		setDeleted(false);
 		const address = normalizeEmail(email);
 		if (!isValidEmail(address)) {
 			setErrorCode("invalid_email");
@@ -220,6 +224,18 @@ export default function App() {
 		setMe(null);
 		setEmail("");
 		setView("signedOut");
+	}
+
+	async function onDeleted() {
+		latestState.current++;
+		void pendingSignIn.setValue(null);
+		setMe(null);
+		setEmail("");
+		setErrorCode(null);
+		setDeleted(true);
+		setView("signedOut");
+		// Relit l'état comme après une déconnexion (le service worker a déjà tout nettoyé).
+		await refresh();
 	}
 
 	function chooseLocale(next: Locale) {
@@ -334,7 +350,13 @@ export default function App() {
 			break;
 		case "signedIn":
 			content = me ? (
-				<Account me={me} locale={locale} busy={busy} onSignOut={onSignOut} />
+				<Account
+					me={me}
+					locale={locale}
+					busy={busy}
+					onSignOut={onSignOut}
+					onDeleted={onDeleted}
+				/>
 			) : null;
 			break;
 	}
@@ -366,9 +388,20 @@ export default function App() {
 				</fieldset>
 			</header>
 			{content}
-			<div aria-live="polite" className="min-h-5 text-sm">
+			<div aria-live="polite" className="min-h-5 space-y-1 text-sm">
+				{deleted && <p className="text-emerald-700">{tr("delete.success")}</p>}
 				{status}
 			</div>
+			<footer className="border-t border-slate-200 pt-3 text-xs">
+				<a
+					href={`${PUBLIC_URL}/privacy/?lang=${locale}`}
+					target="_blank"
+					rel="noopener noreferrer"
+					className="text-slate-500 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+				>
+					{tr("privacy.link")}
+				</a>
+			</footer>
 		</main>
 	);
 }
@@ -413,11 +446,13 @@ function Account({
 	locale,
 	busy,
 	onSignOut,
+	onDeleted,
 }: {
 	me: Me;
 	locale: Locale;
 	busy: boolean;
 	onSignOut: () => void;
+	onDeleted: () => void;
 }) {
 	// Une seule analyse (`full`) : son quota, limité par le plafond de l'essai ;
 	// rien pour un compte illimité (admin, superuser) ou sans abonnement.
@@ -445,6 +480,85 @@ function Account({
 			>
 				{t(locale, "action.signOut")}
 			</button>
+			<DeleteAccount locale={locale} onDeleted={onDeleted} />
 		</div>
+	);
+}
+
+/** Section repliable « Supprimer mon compte » : confirmation tapée, puis `account/delete`. */
+function DeleteAccount({
+	locale,
+	onDeleted,
+}: {
+	locale: Locale;
+	onDeleted: () => void;
+}) {
+	const [typed, setTyped] = useState("");
+	const [pending, setPending] = useState(false);
+	const [failed, setFailed] = useState(false);
+	// Garde synchrone : deux clics avant le rendu ne doivent envoyer qu'une demande.
+	const sending = useRef(false);
+
+	const confirmed =
+		typed.trim().toLocaleUpperCase(locale) === t(locale, "delete.word");
+
+	async function onSubmit(event: FormEvent) {
+		event.preventDefault();
+		if (!confirmed || sending.current) return;
+		sending.current = true;
+		setPending(true);
+		setFailed(false);
+		const response = await sendToBackground<null>({ type: "account/delete" });
+		if (!response.ok) {
+			sending.current = false;
+			setPending(false);
+			setFailed(true);
+			return;
+		}
+		// Le composant disparaît avec l'écran du compte : la garde reste donc fermée.
+		onDeleted();
+	}
+
+	return (
+		<details className="rounded-lg border border-slate-200 px-3 py-2">
+			<summary className="cursor-pointer text-sm font-medium text-slate-700">
+				{t(locale, "delete.title")}
+			</summary>
+			<form className="mt-3 space-y-3" noValidate onSubmit={onSubmit}>
+				<p className="text-xs text-slate-600">
+					{t(locale, "delete.explanation")}
+				</p>
+				<div className="space-y-1">
+					<label className="text-sm font-medium" htmlFor="delete-confirm">
+						{t(locale, "delete.prompt")}
+					</label>
+					<input
+						id="delete-confirm"
+						type="text"
+						autoComplete="off"
+						autoCapitalize="characters"
+						spellCheck={false}
+						className={inputClass}
+						value={typed}
+						readOnly={pending}
+						onChange={(event) => setTyped(event.target.value)}
+					/>
+				</div>
+				<button
+					type="submit"
+					className="w-full rounded-lg bg-red-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+					disabled={!confirmed || pending}
+				>
+					{pending
+						? t(locale, "delete.submitting")
+						: t(locale, "delete.submit")}
+				</button>
+				{failed && (
+					<p role="alert" className="text-sm text-red-700">
+						{t(locale, "delete.failure")}
+					</p>
+				)}
+			</form>
+		</details>
 	);
 }
