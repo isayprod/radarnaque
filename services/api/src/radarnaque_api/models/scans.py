@@ -8,7 +8,11 @@ from radarnaque_api.models.base import Base
 
 class ScanEvent(Base):
     __tablename__ = "scan_events"
-    __table_args__ = (Index("ix_scan_events_user_kind_time", "user_id", "scan_kind", "created_at"),)
+    __table_args__ = (
+        Index("ix_scan_events_user_kind_time", "user_id", "scan_kind", "created_at"),
+        # Purge à 12 mois : recherche par date seule.
+        Index("ix_scan_events_created_at", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("auth.user.id", ondelete="CASCADE"))
