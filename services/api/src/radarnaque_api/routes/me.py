@@ -17,7 +17,7 @@ from radarnaque_api.services.subscriptions import bootstrap_trial, get_active_su
 from radarnaque_api.services.usage import compute_usage, plan_features, plan_max_images
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("radarnaque.accounts")
 
 
 @router.get("/api/me", response_model=MeOut)
