@@ -2,7 +2,7 @@ import calendar
 from datetime import UTC, datetime
 
 
-def _add_months(anchor: datetime, months: int) -> datetime:
+def add_months(anchor: datetime, months: int) -> datetime:
     """`anchor` décalé de `months` mois ; le jour d'origine est plafonné à la fin du mois."""
     index = anchor.year * 12 + (anchor.month - 1) + months
     year, month0 = divmod(index, 12)
@@ -22,7 +22,7 @@ def current_period_start(anchor: datetime, now: datetime) -> datetime:
     if now <= anchor:
         return anchor
     months = (now.year - anchor.year) * 12 + (now.month - anchor.month)
-    candidate = _add_months(anchor, months)
+    candidate = add_months(anchor, months)
     if candidate > now:
-        candidate = _add_months(anchor, months - 1)
+        candidate = add_months(anchor, months - 1)
     return candidate

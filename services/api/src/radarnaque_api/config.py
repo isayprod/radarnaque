@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     # joignable sur le réseau interne de Docker (http://searxng:8080).
     search_backend: Literal["searxng", "none"] = "searxng"
     searxng_url: str = "http://127.0.0.1:8888"
+    # Purge quotidienne des scans de plus de 12 mois (tâche de fond de l'API) ; false dans les
+    # tests. La commande `radarnaque-purge` fait une passe quelle que soit cette valeur.
+    purge_enabled: bool = True
 
     @field_validator("internal_api_secret")
     @classmethod

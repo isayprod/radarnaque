@@ -1,7 +1,10 @@
+import asyncio
+import contextlib
 import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import FastAPI
@@ -16,6 +19,7 @@ from radarnaque_api.llm.client import LLMClientFactory
 from radarnaque_api.llm.providers import ensure_models_use_known_providers, load_providers
 from radarnaque_api.routes import billing, health, internal, me, scans
 from radarnaque_api.search import make_search_backend
+from radarnaque_api.services.purge import purge_forever
 from radarnaque_api.services.scans import ANALYSIS_TIMEOUT_S
 
 # En DEBUG, ces bibliothèques journalisent les URL et les corps des requêtes : l'annonce, les
@@ -61,6 +65,30 @@ def _debug_console(settings: Settings) -> None:
     logger.addHandler(handler)
 
 
+# Logger parent des journaux du projet (`radarnaque.purge`, `radarnaque.accounts`…). Sous
+# uvicorn, la racine n'a aucun gestionnaire : sans le sien, seuls les WARNING s'afficheraient
+# (gestionnaire de dernier recours de `logging`), jamais les lignes INFO de la purge ni de la
+# suppression d'un compte. Ces lignes ne portent aucun identifiant : affichées aussi en production.
+PROJECT_LOGGER = "radarnaque"
+_PROJECT_HANDLER_MARK = "radarnaque_console"
+
+
+def _project_console() -> None:
+    """Un seul gestionnaire console sur `radarnaque`, au niveau INFO. La propagation reste
+    active (la racine n'a pas de gestionnaire sous uvicorn ; caplog s'y branche en test).
+    `radarnaque.debug` ne propage pas (`_debug_console`) : ses lignes ne passent pas ici en
+    double. Idempotent : créer plusieurs applications (tests) n'ajoute rien."""
+    logger = logging.getLogger(PROJECT_LOGGER)
+    logger.setLevel(logging.INFO)
+    if any(getattr(h, _PROJECT_HANDLER_MARK, False) for h in logger.handlers):
+        return
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    setattr(handler, _PROJECT_HANDLER_MARK, True)
+    logger.addHandler(handler)
+
+
 def create_app(
     settings: Settings | None = None, *, jwks_fetcher: JwksFetcher | None = None
 ) -> FastAPI:
@@ -70,6 +98,7 @@ def create_app(
     settings = settings or Settings()  # type: ignore[call-arg]
     _quiet_http_loggers()
     _debug_console(settings)
+    _project_console()
     providers = load_providers(settings.providers_file)
 
     @asynccontextmanager
@@ -94,11 +123,24 @@ def create_app(
         # Un client par fournisseur, créé au premier scan ; jamais le client des photos.
         app.state.llm_clients = LLMClientFactory(providers, os.environ)
         app.state.llm_for = app.state.llm_clients
+        app.state.purge_task = None
         try:
             async with AsyncSession(app.state.engine) as session:
                 await ensure_models_use_known_providers(session, providers)
+            # Purge quotidienne des scans de plus de 12 mois (première passe après 60 s).
+            app.state.purge_task = (
+                asyncio.create_task(purge_forever(app.state.engine, lambda: datetime.now(UTC)))
+                if settings.purge_enabled
+                else None
+            )
             yield
         finally:
+            # Arrêtée avant la fermeture de l'engine. Une passe en cours s'interrompt : son lot
+            # en cours n'est pas validé, les précédents restent supprimés.
+            if app.state.purge_task is not None:
+                app.state.purge_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await app.state.purge_task
             await app.state.llm_clients.aclose()
             await app.state.http_images.aclose()
             if app.state.http_search is not None:

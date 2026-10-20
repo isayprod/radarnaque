@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 radarnaque-llm = "radarnaque_api.llm.cli:main"
+radarnaque-purge = "radarnaque_api.purge_cli:main"
 
 [dependency-groups]
 dev = [

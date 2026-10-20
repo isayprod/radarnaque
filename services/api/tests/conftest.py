@@ -96,6 +96,7 @@ def settings(pg_url: str) -> Settings:
         env="test",
         providers_file=API_ROOT / "providers.toml",
         search_backend="none",  # aucune requête réseau réelle dans les tests
+        purge_enabled=False,  # pas de tâche de fond : les tests de la purge l'appellent eux-mêmes
     )
 
 
