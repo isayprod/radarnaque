@@ -44,13 +44,15 @@ export type BgRequest =
 	| { type: "auth/verify-otp"; email: string; otp: string }
 	| { type: "auth/state" }
 	| { type: "auth/sign-out" }
+	/** Suppression du compte (RGPD) : réservé aux pages de l'extension, jamais à un content script. */
+	| { type: "account/delete" }
 	| { type: "content/access" }
 	/** Superuser : drapeau des logs de debug de la page, sans appel réseau hors session. */
 	| { type: "content/debug" }
 	| { type: "ui/open-popup" };
 
 /**
- * Seuls messages qu'un content script peut envoyer : jamais `auth/*`. Le scan passe par
+ * Seuls messages qu'un content script peut envoyer : jamais `auth/*` ni `account/*`. Le scan passe par
  * le port `scan/stream` (`SCAN_PORT`), soumis au même contrôle de l'émetteur.
  */
 export const CONTENT_SCRIPT_MESSAGES: ReadonlySet<BgRequest["type"]> = new Set<

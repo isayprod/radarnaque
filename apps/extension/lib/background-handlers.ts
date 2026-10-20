@@ -34,7 +34,7 @@ export interface HandlerDeps {
 		signOutRemote: typeof signOutRemote;
 	};
 	jwt: Pick<JwtProvider, "invalidate">;
-	api: { getMe(): Promise<Me> };
+	api: { getMe(): Promise<Me>; deleteMe(): Promise<void> };
 	/** Ouvre la popup de l'extension (`browser.action.openPopup()` en production). */
 	openPopup: () => Promise<void>;
 	/** R5 : vide les résultats IA gardés à la déconnexion (`clearAiResults`). */
@@ -154,6 +154,24 @@ export function createHandlers(
 		return ok(null);
 	}
 
+	/**
+	 * Suppression du compte : le nettoyage local n'a lieu qu'après un succès, ou un
+	 * `session_expired` (compte déjà absent). Toute autre erreur laisse la session intacte.
+	 */
+	async function deleteAccount(): Promise<BgResponse<null>> {
+		try {
+			await api.deleteMe();
+		} catch (error) {
+			if (!(error instanceof AuthError && error.code === "session_expired")) {
+				throw error;
+			}
+		}
+		await storeSession(null);
+		// Comme à la déconnexion : un échec du vidage ne bloque pas.
+		await deps.clearAiResults().catch(() => {});
+		return ok(null);
+	}
+
 	async function handle(req: BgRequest): Promise<BgResponse<unknown>> {
 		switch (req.type) {
 			case "auth/start": {
@@ -189,6 +207,8 @@ export function createHandlers(
 				await deps.clearAiResults().catch(() => {});
 				return ok(null);
 			}
+			case "account/delete":
+				return deleteAccount();
 			default:
 				return fail("unknown_message");
 		}

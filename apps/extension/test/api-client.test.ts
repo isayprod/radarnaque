@@ -112,6 +112,68 @@ describe("api client", () => {
 		});
 	});
 
+	test("deleteMe sends DELETE /api/me with bearer", async () => {
+		const jwt = fakeJwt("jwt-1");
+		const fetch = fetchSequence(new Response(null, { status: 204 }));
+		const api = createApiClient({ jwt, fetch, onUnauthenticated: vi.fn() });
+		await api.deleteMe();
+		const req = requestOf(fetch);
+		expect(req.url).toBe("http://localhost:8080/api/me");
+		expect(req.method).toBe("DELETE");
+		expect(req.headers.get("authorization")).toBe("Bearer jwt-1");
+		expect(req.credentials).toBe("omit");
+	});
+
+	test("deleteMe 204 resolves", async () => {
+		const jwt = fakeJwt("jwt-1");
+		const fetch = fetchSequence(new Response(null, { status: 204 }));
+		const onUnauthenticated = vi.fn();
+		const api = createApiClient({ jwt, fetch, onUnauthenticated });
+		await expect(api.deleteMe()).resolves.toBeUndefined();
+		expect(onUnauthenticated).not.toHaveBeenCalled();
+	});
+
+	test("deleteMe: 401 then 204 renews the JWT once; two 401 → session_expired", async () => {
+		const jwt = fakeJwt("old", "new");
+		const fetch = fetchSequence(
+			errorResponse(401, "unauthenticated"),
+			new Response(null, { status: 204 }),
+		);
+		const api = createApiClient({ jwt, fetch, onUnauthenticated: vi.fn() });
+		await expect(api.deleteMe()).resolves.toBeUndefined();
+		expect(jwt.invalidate).toHaveBeenCalledTimes(1);
+		expect(requestOf(fetch, 1).headers.get("authorization")).toBe("Bearer new");
+
+		const jwt2 = fakeJwt("old", "new");
+		const fetch2 = fetchSequence(
+			errorResponse(401, "unauthenticated"),
+			errorResponse(401, "unauthenticated"),
+		);
+		const onUnauthenticated = vi.fn();
+		const api2 = createApiClient({
+			jwt: jwt2,
+			fetch: fetch2,
+			onUnauthenticated,
+		});
+		await expect(api2.deleteMe()).rejects.toMatchObject({
+			code: "session_expired",
+		});
+		expect(fetch2).toHaveBeenCalledTimes(2);
+		expect(onUnauthenticated).toHaveBeenCalledTimes(1);
+	});
+
+	test("deleteMe 500 throws ApiRequestError", async () => {
+		const jwt = fakeJwt("jwt-1");
+		const fetch = fetchSequence(errorResponse(500, "internal_error"));
+		const onUnauthenticated = vi.fn();
+		const api = createApiClient({ jwt, fetch, onUnauthenticated });
+		const error = await api.deleteMe().catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(ApiRequestError);
+		expect((error as ApiRequestError).status).toBe(500);
+		expect(onUnauthenticated).not.toHaveBeenCalled();
+		expect(jwt.invalidate).not.toHaveBeenCalled();
+	});
+
 	test("network failure → AuthError network, session kept", async () => {
 		const jwt = fakeJwt("jwt-1");
 		const fetch = fetchSequence(new TypeError("Failed to fetch"));
