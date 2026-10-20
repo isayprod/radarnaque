@@ -6,11 +6,7 @@ Remarques relevées pendant les relectures de la phase 4a : suppression du compt
 
 Ces points ont été relevés en relecture de tâche et laissés pour une vague de corrections, après la relecture finale de la branche. Ceux que la vague finale a corrigés n'y figurent plus.
 
-- **Journal de la suppression (T1) :** la ligne `INFO` « compte supprimé » (logger `radarnaque_api.routes.me`) n'est sans doute pas visible sous uvicorn, dont la racine est en `WARNING`. Piste : la sortir sous un logger `radarnaque.*`, comme ceux de la purge.
-- **Passe de purge sautée (T2) :** quand le verrou consultatif est pris, la passe est sautée sans trace. Piste : une ligne `INFO`.
-- **Test de retour arrière (T2) :** ajouter un test « même transaction », avec un `DELETE` en échec après l'`UPDATE` de `purged_scans` : le compteur doit revenir en arrière.
-- **Commentaires de la messagerie (T3) :** celui de `guardSender` dit « jamais `auth/*` » et doit ajouter `account/*` ; la ligne du commentaire de `CONTENT_SCRIPT_MESSAGES` est trop longue.
-- **Déconnexion pendant une suppression (T4) :** « Se déconnecter » reste actif pendant une suppression. La déconnexion peut alors faire échouer la suppression sans l'afficher, ou une `session_expired` peut être prise pour un succès. Piste : désactiver l'un des deux boutons pendant l'autre.
+Aucun : la vague finale les a tous corrigés.
 
 ## À vérifier en direct avant la mise en ligne
 
@@ -22,7 +18,7 @@ Rien de ceci n'a été essayé hors des tests.
   - l'écran de connexion revient avec « Votre compte a été supprimé. » ;
   - un JWT encore valide (15 min) donne `401` ;
   - la pastille d'une annonce déjà analysée n'affiche plus l'ancien résultat IA (résultats gardés vidés).
-- **Suppression qui échoue :** couper l'API pendant la suppression : la session reste en place et la popup dit que rien n'a changé.
+- **Suppression qui échoue :** couper l'API pendant la suppression : la session reste en place, et la popup dit que rien n'a changé (erreur du serveur) ou qu'elle n'a pas pu joindre le serveur (réseau).
 - **Purge sur une base réelle :**
   - `uv run radarnaque-purge` sur une copie de la base de dev avec des événements de 13 mois et de 11 mois : seuls les premiers disparaissent ;
   - un essai qui avait fait 3 scans il y a 13 mois n'a toujours aucune analyse restante ;
@@ -46,7 +42,6 @@ Rien de ceci n'a été essayé hors des tests.
   - les scans purgés ne sont comptés que pour le type `full`.
 - **Purge (T2) :**
   - interblocage rare entre la purge et `DELETE /api/me` (sans dégât : l'une des deux transactions est annulée et reprise à la passe suivante) ;
-  - pas d'index sur `scan_events.created_at` : la purge lit toute la table, acceptable tant que le volume reste petit ;
   - écart passager d'affichage sur `/api/me` pendant une passe (le compteur et les événements sont lus à deux instants) ;
   - `suppress(CancelledError)` à l'arrêt de l'application.
 - **Popup, suppression (T4) :**
@@ -62,9 +57,9 @@ Rien de ceci n'a été essayé hors des tests.
 
 ## Décisions prises pendant l'exécution
 
-R1, R2 et R5 viennent des tâches 1 à 4 ; R3, R4 et R6 à R10 ont été prises à la tâche 5.
+R1, R2 et R5 viennent des tâches 1 à 4 ; R3, R4 et R6 à R10 ont été prises à la tâche 5. R11 vient de la vague finale.
 
-- **R1. Pas de limite de requêtes sur `DELETE /api/me` (T1) :** l'API ne limite que les scans (comptés sur `scan_events`), et la suppression est idempotente. Une seule suppression par compte, donc aucun abus possible. Coût si c'est faux : aucun abus constaté ; ajouter une limite par IP ou par utilisateur dans la route.
+- **R1. Pas de limite de requêtes sur `DELETE /api/me` (T1) :** l'API ne limite que les scans (comptés sur `scan_events`) ; la route exige un JWT valide et la suppression est idempotente. Le spec (§2) le dit. Une seule suppression par compte, donc aucun abus possible. Coût si c'est faux : aucun abus constaté ; ajouter une limite par IP ou par utilisateur dans la route.
 - **R2. `PURGE_ENABLED` non transmis par la composition (T2) :** `docker-compose.yml` ne le passe pas, donc la purge est toujours active en production. Voulu : on ne désactive pas la conservation limitée par oubli. Coût si c'est faux : une ligne dans le service `api`.
 - **R3. Nombre de scans purgés gardé dans l'abonnement (T2) :** `subscriptions.purged_scans` plutôt qu'une table d'archive. Il ne porte aucune donnée personnelle utile et la cascade l'efface avec le compte. Coût si c'est faux : une migration pour déplacer le compteur.
 - **R4. Suppression du compte et nouvel essai :** après une suppression, se reconnecter avec la même adresse crée un compte neuf, donc un nouvel essai de 3 analyses, puisque `purged_scans` part avec l'abonnement. C'est déjà possible avec une autre adresse email. Coût si c'est faux : garder une empreinte de l'email supprimé, ce qui est contraire à l'effacement ; ou accepter le contournement.
@@ -77,6 +72,7 @@ R1, R2 et R5 viennent des tâches 1 à 4 ; R3, R4 et R6 à R10 ont été prises 
 - **R8. Durée de conservation :** deux constantes séparées, `SCAN_RETENTION_MONTHS` (API) et `PRIVACY_RETENTION_MONTHS` (site), toutes deux à 12. Un test du site vérifie que celle du site vaut 12 (avec un renvoi à celle de l'API) ; aucun test ne compare les deux projets. Coût si c'est faux : une page qui annonce une durée différente de la purge.
 - **R9. Nombre de recherches affiché :** la page dit « jusqu'à 3 recherches », le défaut de `settings.max_web_searches`. Ce réglage est modifiable en base (de 0 à 5) : à mettre à jour dans la page si on le change en admin. Coût si c'est faux : un texte.
 - **R10. Effacement et sauvegardes :** la page ne promet plus un effacement « définitif » : les copies de sauvegarde chiffrées sont renouvelées, et la rétention distante n'est pas connue. Coût si c'est faux : une phrase à ajuster une fois la rétention du stockage distant connue.
+- **R11. `session_expired` pendant une suppression :** seul un `session_expired` venu d'une réponse de l'API vaut « compte supprimé ». Un `jwt.get()` refusé avant tout envoi (`SessionExpiredBeforeSendError` dans `api-client.ts`) reste une erreur : la session est effacée comme une session expirée, la popup affiche « Votre session a expiré ». Un `401` suivi d'un renouvellement refusé compte comme un succès : c'est le cas d'un compte déjà supprimé (sa session part avec lui). Coût si c'est faux : un compte supprimé dont la réponse s'est perdue, puis la popup rouverte après un redémarrage du service worker, affiche « session expirée » au lieu de « compte supprimé » ; l'utilisateur est déconnecté dans les deux cas.
 
 ## Déclarations du Chrome Web Store à préparer
 
