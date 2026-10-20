@@ -240,7 +240,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			kept: {
 				heading: "Les données que nous conservons sur vous",
-				body: "Nous conservons votre adresse email, votre abonnement et l'historique de vos analyses. Cet historique est supprimé après {months} mois. Pour l'essai, nous gardons seulement le nombre d'analyses déjà utilisées, sans leur contenu. Le temps d'une session de connexion, nous gardons aussi l'adresse IP et le navigateur utilisés : ils sont effacés à la fin de la session et à la suppression du compte.",
+				body: "Nous conservons votre adresse email, votre abonnement et l'historique de vos analyses. Cet historique est supprimé après {months} mois. Pour l'essai, nous gardons seulement le nombre d'analyses déjà utilisées, sans leur contenu. Le temps d'une session de connexion, nous gardons aussi l'adresse IP et le navigateur utilisés : ils sont effacés quand vous vous déconnectez et quand vous supprimez votre compte.",
 			},
 			listings: {
 				heading: "Les analyses d'annonces",
@@ -293,7 +293,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			kept: {
 				heading: "De gegevens die wij over u bewaren",
-				body: "Wij bewaren uw e-mailadres, uw abonnement en de geschiedenis van uw analyses. Die geschiedenis wordt na {months} maanden gewist. Voor de proef bewaren wij alleen het aantal reeds gebruikte analyses, zonder de inhoud. Zolang een aanmeldsessie loopt, bewaren wij ook het IP-adres en de browser die u gebruikt: die worden gewist aan het einde van de sessie en bij het verwijderen van uw account.",
+				body: "Wij bewaren uw e-mailadres, uw abonnement en de geschiedenis van uw analyses. Die geschiedenis wordt na {months} maanden gewist. Voor de proef bewaren wij alleen het aantal reeds gebruikte analyses, zonder de inhoud. Zolang een aanmeldsessie loopt, bewaren wij ook het IP-adres en de browser die u gebruikt: die worden gewist wanneer u zich afmeldt en wanneer u uw account verwijdert.",
 			},
 			listings: {
 				heading: "Analyses van advertenties",

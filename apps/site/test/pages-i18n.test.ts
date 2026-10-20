@@ -259,16 +259,18 @@ describe("privacy wording (spec 10)", () => {
 		expect(PRIVACY.nl.sections.kept.body).toMatch(/proef/);
 	});
 
-	it("kept names the session IP address and browser, erased at session end and deletion", () => {
+	it("kept names the session IP address and browser, erased at sign-out and deletion", () => {
 		const fr = PRIVACY.fr.sections.kept.body;
 		const nl = PRIVACY.nl.sections.kept.body;
 		expect(fr).toMatch(/session de connexion/);
 		expect(fr).toMatch(/adresse IP et le navigateur/);
-		expect(fr).toMatch(/fin de la session et à la suppression du compte/);
+		expect(fr).toMatch(
+			/quand vous vous déconnectez et quand vous supprimez votre compte/,
+		);
 		expect(nl).toMatch(/aanmeldsessie/);
 		expect(nl).toMatch(/IP-adres en de browser/);
 		expect(nl).toMatch(
-			/einde van de sessie en bij het verwijderen van uw account/,
+			/wanneer u zich afmeldt en wanneer u uw account verwijdert/,
 		);
 	});
 
