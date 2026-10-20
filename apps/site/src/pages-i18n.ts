@@ -220,7 +220,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			photos: {
 				heading: "Les photos de l'annonce",
-				body: "Toute analyse IA envoie les photos de l'annonce : 1 photo en Standard, jusqu'à 4 en Premium et pendant l'essai. Elles sont téléchargées par notre serveur, puis envoyées à l'IA.",
+				body: "Une analyse IA envoie les photos de l'annonce : 1 photo en Standard, jusqu'à 4 en Premium et pendant l'essai. Elles sont téléchargées par notre serveur, puis envoyées à l'IA.",
 			},
 			web: {
 				heading: "Recherches sur le web",
@@ -236,7 +236,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			hosting: {
 				heading: "Où sont traitées les données",
-				body: "Notre serveur est situé en Allemagne (Union européenne). Le fournisseur d'IA peut toutefois traiter les données hors de l'UE.",
+				body: "Notre serveur est situé en Allemagne (Union européenne). Le fournisseur d'IA peut toutefois traiter les données hors de l'UE. Les sauvegardes chiffrées de notre base sont aussi copiées vers un stockage externe. Votre adresse email est transmise à notre prestataire d'envoi d'emails (Resend) pour vous envoyer le lien et le code de connexion ; ce prestataire peut la traiter hors de l'UE.",
 			},
 			kept: {
 				heading: "Les données que nous conservons sur vous",
@@ -248,7 +248,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			erasure: {
 				heading: "Droit à l'effacement",
-				body: "Dans la popup de l'extension, « Supprimer mon compte » supprime votre utilisateur, vos abonnements et l'historique de vos analyses, tout de suite et définitivement. Pour toute autre demande, écrivez-nous à {email}.",
+				body: "Dans la popup de l'extension, « Supprimer mon compte » supprime votre utilisateur, vos abonnements et l'historique de vos analyses, tout de suite. Les copies de sauvegarde chiffrées qui contiennent encore ces données sont effacées au fil de leur renouvellement (14 jours sur notre serveur). Pour toute autre demande, écrivez-nous à {email}.",
 			},
 		},
 	},
@@ -273,7 +273,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			photos: {
 				heading: "De foto's van de advertentie",
-				body: "Elke AI-analyse stuurt de foto's van de advertentie mee: 1 foto bij Standard, maximaal 4 bij Premium en tijdens de proef. Ze worden door onze server gedownload en daarna naar de AI verstuurd.",
+				body: "Een AI-analyse stuurt de foto's van de advertentie mee: 1 foto bij Standard, maximaal 4 bij Premium en tijdens de proef. Ze worden door onze server gedownload en daarna naar de AI verstuurd.",
 			},
 			web: {
 				heading: "Zoekopdrachten op het web",
@@ -289,7 +289,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			hosting: {
 				heading: "Waar de gegevens worden verwerkt",
-				body: "Onze server staat in Duitsland (Europese Unie). De AI-aanbieder kan de gegevens wel buiten de EU verwerken.",
+				body: "Onze server staat in Duitsland (Europese Unie). De AI-aanbieder kan de gegevens wel buiten de EU verwerken. De versleutelde back-ups van onze database worden ook naar een externe opslag gekopieerd. Uw e-mailadres wordt doorgegeven aan onze aanbieder voor het verzenden van e-mails (Resend), om u de link en de inlogcode te sturen; die aanbieder kan het adres buiten de EU verwerken.",
 			},
 			kept: {
 				heading: "De gegevens die wij over u bewaren",
@@ -301,7 +301,7 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 			},
 			erasure: {
 				heading: "Recht op gegevenswissing",
-				body: "Met « Mijn account verwijderen » in de popup van de extensie worden uw gebruikersgegevens, uw abonnementen en de geschiedenis van uw analyses gewist, meteen en definitief. Voor elke andere vraag kunt u mailen naar {email}.",
+				body: "Met „Mijn account verwijderen” in de popup van de extensie worden uw gebruikersgegevens, uw abonnementen en de geschiedenis van uw analyses gewist, meteen. De versleutelde back-ups die deze gegevens nog bevatten, worden gewist naarmate ze worden vernieuwd (14 dagen op onze server). Voor elke andere vraag kunt u mailen naar {email}.",
 			},
 		},
 	},
