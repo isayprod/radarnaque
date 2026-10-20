@@ -31,6 +31,12 @@ export interface ApiClientOptions {
 
 export interface ApiClient {
 	getMe(): Promise<Me>;
+	/**
+	 * `DELETE /api/me` : suppression du compte (`204` sans corps). Un 401 passe par le
+	 * renouvellement du JWT, puis devient `session_expired` ; un autre refus lève
+	 * `ApiRequestError`.
+	 */
+	deleteMe(): Promise<void>;
 	/** `POST /api/scans` : le corps doit sortir de `toScanIn` (identité retirée, bornes). */
 	scan(body: ScanIn): Promise<AnalysisResult>;
 	/**
@@ -54,7 +60,7 @@ async function errorBody(res: Response): Promise<ApiErrorBody> {
 
 /** Méthode, corps JSON et signal d'une requête ; les en-têtes sont fixés par `send`. */
 interface SendInit {
-	method?: "GET" | "POST";
+	method?: "GET" | "POST" | "DELETE";
 	body?: string;
 	signal?: AbortSignal;
 }
@@ -117,6 +123,10 @@ export function createApiClient({
 
 	return {
 		getMe: () => requestJson<Me>("/api/me"),
+		async deleteMe() {
+			// Réponse 204 : aucun corps à lire.
+			await request("/api/me", { method: "DELETE" });
+		},
 		scan: (body) =>
 			requestJson<AnalysisResult>("/api/scans", {
 				method: "POST",

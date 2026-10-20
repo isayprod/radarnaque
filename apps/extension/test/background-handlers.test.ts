@@ -55,6 +55,7 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}) {
 	const jwt = { get: vi.fn<() => Promise<string>>(), invalidate: vi.fn() };
 	const api = {
 		getMe: vi.fn<() => Promise<Me>>(async () => trialMe),
+		deleteMe: vi.fn<() => Promise<void>>(async () => {}),
 		scanStream: vi.fn<
 			(body: ScanIn, signal: AbortSignal) => Promise<AsyncIterable<SseMessage>>
 		>(async () => sseMessages(sse("result", sampleAnalysis))),
@@ -180,6 +181,72 @@ describe("background handlers", () => {
 		expect(clear).toHaveBeenCalledTimes(1);
 		expect(await sessionToken.getValue()).toBeNull();
 		expect(jwt.invalidate).toHaveBeenCalled();
+	});
+
+	test("account/delete from popup deletes then clears session and ai results", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps, api, jwt, clearAiResults: clear } = makeDeps();
+		expect(await createHandlers(deps)({ type: "account/delete" })).toEqual({
+			ok: true,
+			data: null,
+		});
+		expect(api.deleteMe).toHaveBeenCalledTimes(1);
+		expect(await sessionToken.getValue()).toBeNull();
+		expect(jwt.invalidate).toHaveBeenCalled();
+		expect(clear).toHaveBeenCalledTimes(1);
+	});
+
+	test("account/delete: un échec du vidage des résultats IA ne bloque pas", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps, clearAiResults: clear } = makeDeps();
+		clear.mockRejectedValueOnce(new Error("indisponible"));
+		expect(await createHandlers(deps)({ type: "account/delete" })).toEqual({
+			ok: true,
+			data: null,
+		});
+		expect(await sessionToken.getValue()).toBeNull();
+	});
+
+	test("account/delete treats session_expired as done", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps, api, jwt, clearAiResults: clear } = makeDeps();
+		api.deleteMe.mockRejectedValueOnce(new AuthError("session_expired"));
+		expect(await createHandlers(deps)({ type: "account/delete" })).toEqual({
+			ok: true,
+			data: null,
+		});
+		expect(await sessionToken.getValue()).toBeNull();
+		expect(jwt.invalidate).toHaveBeenCalled();
+		expect(clear).toHaveBeenCalledTimes(1);
+	});
+
+	test("account/delete keeps session on 500", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps, api, jwt, clearAiResults: clear } = makeDeps();
+		api.deleteMe.mockRejectedValueOnce(
+			new ApiRequestError(500, {
+				error: { code: "internal_error", message: "", details: {} },
+			}),
+		);
+		expect(await createHandlers(deps)({ type: "account/delete" })).toEqual({
+			ok: false,
+			error: { code: "internal_error" },
+		});
+		expect(await sessionToken.getValue()).toBe("session-abc");
+		expect(jwt.invalidate).not.toHaveBeenCalled();
+		expect(clear).not.toHaveBeenCalled();
+	});
+
+	test("account/delete keeps session on network failure", async () => {
+		await sessionToken.setValue("session-abc");
+		const { deps, api, clearAiResults: clear } = makeDeps();
+		api.deleteMe.mockRejectedValueOnce(new AuthError("network"));
+		expect(await createHandlers(deps)({ type: "account/delete" })).toEqual({
+			ok: false,
+			error: { code: "network" },
+		});
+		expect(await sessionToken.getValue()).toBe("session-abc");
+		expect(clear).not.toHaveBeenCalled();
 	});
 
 	test("handlers: state without token → signedOut, no network call", async () => {
@@ -946,6 +1013,7 @@ describe("sender check", () => {
 		{ type: "auth/verify-otp", email: "a@b.be", otp: "123456" },
 		{ type: "auth/state" },
 		{ type: "auth/sign-out" },
+		{ type: "account/delete" },
 	];
 
 	function guarded() {
@@ -965,6 +1033,46 @@ describe("sender check", () => {
 			"content/debug",
 			"ui/open-popup",
 		]);
+	});
+
+	test("CONTENT_SCRIPT_MESSAGES does not contain account/delete", () => {
+		expect(CONTENT_SCRIPT_MESSAGES.has("account/delete")).toBe(false);
+	});
+
+	test("account/delete from content script is forbidden_sender without network", async () => {
+		const { deps, api, clearAiResults: clear } = makeDeps();
+		const guard = guardSender(
+			createHandlers(deps),
+			self,
+			(url) => adapterFor(url) !== null,
+		);
+		await sessionToken.setValue("session-abc");
+		for (const sender of [
+			listingPage,
+			{ ...listingPage, url: "https://www.facebook.com/marketplace/item/1/" },
+			{ ...popup, tab },
+		]) {
+			expect(await guard({ type: "account/delete" }, sender)).toEqual(
+				forbidden,
+			);
+		}
+		expect(api.deleteMe).not.toHaveBeenCalled();
+		expect(clear).not.toHaveBeenCalled();
+		expect(await sessionToken.getValue()).toBe("session-abc");
+	});
+
+	test("account/delete from the popup goes through the guard", async () => {
+		const { deps, api } = makeDeps();
+		const guard = guardSender(
+			createHandlers(deps),
+			self,
+			(url) => adapterFor(url) !== null,
+		);
+		expect(await guard({ type: "account/delete" }, popup)).toEqual({
+			ok: true,
+			data: null,
+		});
+		expect(api.deleteMe).toHaveBeenCalledTimes(1);
 	});
 
 	test("a popup-like sender (own id, extension page, no tab) is accepted for every message", async () => {
