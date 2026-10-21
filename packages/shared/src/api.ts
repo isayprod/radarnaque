@@ -188,6 +188,47 @@ export interface paths {
         patch: operations["update_settings_api_admin_ai_settings_patch"];
         trace?: never;
     };
+    "/api/admin/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Overview
+         * @description Cartes du jour et des 7 derniers jours civils de Bruxelles, abonnés actifs, coût du mois
+         *     et santé du service. Aucune donnée personnelle.
+         */
+        get: operations["overview_api_admin_dashboard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/dashboard/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily
+         * @description Un point par jour civil de Bruxelles, jours vides compris, du plus ancien au plus récent.
+         */
+        get: operations["daily_api_admin_dashboard_daily_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/offer": {
         parameters: {
             query?: never;
@@ -512,6 +553,13 @@ export interface components {
             /** Modelid */
             modelId: number;
         };
+        /** ActiveModelOut */
+        ActiveModelOut: {
+            /** Provider */
+            provider: string;
+            /** Slug */
+            slug: string;
+        };
         /**
          * AdminActionOut
          * @description Une ligne du journal des modifications faites depuis l'admin. `admin_email` vient de
@@ -778,6 +826,78 @@ export interface components {
             plan: "standard" | "premium";
         };
         /**
+         * DailyOut
+         * @description Un point par jour, jours vides compris, du plus ancien au plus récent.
+         */
+        DailyOut: {
+            /** Points */
+            points: components["schemas"]["DailyPointOut"][];
+        };
+        /**
+         * DailyPointOut
+         * @description Un jour civil de Bruxelles : scans réussis servis depuis le cache, appels au modèle,
+         *     scans en échec, et coût du jour en dollars.
+         */
+        DailyPointOut: {
+            /** Costusd */
+            costUsd: number;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Failed */
+            failed: number;
+            /** Fromcache */
+            fromCache: number;
+            /** Llm */
+            llm: number;
+        };
+        /**
+         * DashboardHealthOut
+         * @description `active_model` : modèle actif du type `full` (`None` sans modèle actif). `last_purge` :
+         *     dernière ligne `system.purge` du journal (`None` sans purge).
+         */
+        DashboardHealthOut: {
+            activeModel: components["schemas"]["ActiveModelOut"] | null;
+            lastPurge: components["schemas"]["LastPurgeOut"] | null;
+            search: components["schemas"]["SearchStatusOut"];
+        };
+        /** DashboardOut */
+        DashboardOut: {
+            health: components["schemas"]["DashboardHealthOut"];
+            last7Days: components["schemas"]["DashboardStatsOut"];
+            month: components["schemas"]["MonthCostOut"];
+            subscribers: components["schemas"]["SubscribersOut"];
+            today: components["schemas"]["DashboardStatsOut"];
+        };
+        /**
+         * DashboardStatsOut
+         * @description Les cartes du Tableau de bord sur une période. Parts et moyennes valent `None` quand leur
+         *     dénominateur est nul (aucun scan, aucun scan réussi, aucun appel). `from_cache_pct` et
+         *     `failed_pct` sont des pourcentages de 0 à 100. Coûts en dollars, lus dans `llm_calls`.
+         */
+        DashboardStatsOut: {
+            /** Avgcostusd */
+            avgCostUsd: number | null;
+            /** Avgwebsearches */
+            avgWebSearches: number | null;
+            /** Costusd */
+            costUsd: number;
+            /** Failedpct */
+            failedPct: number | null;
+            /** Fromcachepct */
+            fromCachePct: number | null;
+            /** Llmcalls */
+            llmCalls: number;
+            /** Scans */
+            scans: number;
+            /** Topfailures */
+            topFailures: components["schemas"]["TopFailureOut"][];
+            /** Websearches */
+            webSearches: number;
+        };
+        /**
          * DebugMessageOut
          * @description Message envoyé au LLM, en texte : chaque photo y est résumée (`[image n : N octets]`).
          */
@@ -826,6 +946,16 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** LastPurgeOut */
+        LastPurgeOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Deletedscans */
+            deletedScans: number;
         };
         /** ListingIn */
         ListingIn: {
@@ -949,6 +1079,17 @@ export interface components {
             tokensIn: number;
             /** Tokensout */
             tokensOut: number;
+        };
+        /**
+         * MonthCostOut
+         * @description Coût du mois civil et projection linéaire sur le mois entier (`None` pendant les
+         *     premières 24 h du mois).
+         */
+        MonthCostOut: {
+            /** Costusd */
+            costUsd: number;
+            /** Projectedusd */
+            projectedUsd: number | null;
         };
         /** MonthRangeIn */
         MonthRangeIn: {
@@ -1337,6 +1478,30 @@ export interface components {
             /** Weight */
             weight: number;
         };
+        /**
+         * SubscribersOut
+         * @description Abonnements `active` par plan, et comptes créés dans les 7 derniers jours civils.
+         */
+        SubscribersOut: {
+            /** Newaccounts7Days */
+            newAccounts7Days: number;
+            /** Premium */
+            premium: number;
+            /** Standard */
+            standard: number;
+            /** Trial */
+            trial: number;
+        };
+        /**
+         * TopFailureOut
+         * @description Un code d'erreur et le nombre de scans en échec qui le portent.
+         */
+        TopFailureOut: {
+            /** Code */
+            code: string;
+            /** Count */
+            count: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -1637,6 +1802,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiOverviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    overview_api_admin_dashboard_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardOut"];
+                };
+            };
+        };
+    };
+    daily_api_admin_dashboard_daily_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyOut"];
                 };
             };
             /** @description Validation Error */

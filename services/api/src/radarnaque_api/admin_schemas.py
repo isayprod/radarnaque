@@ -1,6 +1,6 @@
 """Schémas de l'API admin."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import Field, StringConstraints
@@ -277,3 +277,87 @@ class PublicOfferOut(CamelModel):
     trial: PublicPlanOut
     standard: PublicPlanOut
     premium: PublicPlanOut
+
+
+class TopFailureOut(CamelModel):
+    """Un code d'erreur et le nombre de scans en échec qui le portent."""
+
+    code: str
+    count: int
+
+
+class DashboardStatsOut(CamelModel):
+    """Les cartes du Tableau de bord sur une période. Parts et moyennes valent `None` quand leur
+    dénominateur est nul (aucun scan, aucun scan réussi, aucun appel). `from_cache_pct` et
+    `failed_pct` sont des pourcentages de 0 à 100. Coûts en dollars, lus dans `llm_calls`."""
+
+    scans: int
+    llm_calls: int
+    from_cache_pct: float | None
+    failed_pct: float | None
+    top_failures: list[TopFailureOut]
+    cost_usd: float
+    avg_cost_usd: float | None
+    web_searches: int
+    avg_web_searches: float | None
+
+
+class SubscribersOut(CamelModel):
+    """Abonnements `active` par plan, et comptes créés dans les 7 derniers jours civils."""
+
+    trial: int
+    standard: int
+    premium: int
+    new_accounts_7_days: int
+
+
+class MonthCostOut(CamelModel):
+    """Coût du mois civil et projection linéaire sur le mois entier (`None` pendant les
+    premières 24 h du mois)."""
+
+    cost_usd: float
+    projected_usd: float | None
+
+
+class ActiveModelOut(CamelModel):
+    provider: str
+    slug: str
+
+
+class LastPurgeOut(CamelModel):
+    at: datetime
+    deleted_scans: int
+
+
+class DashboardHealthOut(CamelModel):
+    """`active_model` : modèle actif du type `full` (`None` sans modèle actif). `last_purge` :
+    dernière ligne `system.purge` du journal (`None` sans purge)."""
+
+    active_model: ActiveModelOut | None
+    search: SearchStatusOut
+    last_purge: LastPurgeOut | None
+
+
+class DashboardOut(CamelModel):
+    today: DashboardStatsOut
+    last_7_days: DashboardStatsOut
+    subscribers: SubscribersOut
+    month: MonthCostOut
+    health: DashboardHealthOut
+
+
+class DailyPointOut(CamelModel):
+    """Un jour civil de Bruxelles : scans réussis servis depuis le cache, appels au modèle,
+    scans en échec, et coût du jour en dollars."""
+
+    date: date
+    from_cache: int
+    llm: int
+    failed: int
+    cost_usd: float
+
+
+class DailyOut(CamelModel):
+    """Un point par jour, jours vides compris, du plus ancien au plus récent."""
+
+    points: list[DailyPointOut]

@@ -19,6 +19,7 @@ from radarnaque_api.llm.client import LLMClientFactory
 from radarnaque_api.llm.providers import ensure_models_use_known_providers, load_providers
 from radarnaque_api.routes import (
     admin_ai,
+    admin_dashboard,
     admin_offer,
     admin_users,
     billing,
@@ -187,6 +188,7 @@ def create_app(
     app.include_router(internal.router)
     app.include_router(admin_users.router)
     app.include_router(admin_ai.router)
+    app.include_router(admin_dashboard.router)
     app.include_router(admin_offer.router)
     app.include_router(offer.router)
     return app
