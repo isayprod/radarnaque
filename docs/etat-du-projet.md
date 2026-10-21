@@ -195,14 +195,15 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
   - une ligne `admin_actions` par champ réellement changé (`offer.price_set`, `offer.quota_set`, `offer.feature_set`, `offer.max_images_set`, `offer.total_cap_set`), `details` = `{ plan, from, to }` ; des valeurs identiques donnent `200` sans aucune ligne, un plan inconnu `404` ;
   - une confirmation résume les changements ; un avertissement Stripe s'affiche quand change le prix d'un intervalle qui a un identifiant Stripe, et un rappel de mettre `/privacy` à jour quand les photos changent ;
   - l'effet est immédiat (les droits sont relus en base) ; historique des 20 dernières modifications.
-- **`GET /api/offer` (publique) :** prix, quotas, photos et icônes des trois plans. `Cache-Control: public, max-age=300` (la page peut avoir 5 minutes de retard sur une modification), pas de prix pour l'essai, aucun identifiant Stripe.
+- **`GET /api/offer` (publique) :** prix, quotas, photos et icônes des trois plans. `Cache-Control: public, max-age=300` (la page peut avoir 5 minutes de retard sur une modification), en plus d'un cache serveur de 60 s en mémoire que chaque enregistrement de l'admin vide ; pas de prix pour l'essai, aucun identifiant Stripe ; `scans` est le quota, limité par le plafond total quand il existe.
 - **Page `/pricing` :** réécrite sur l'offre `full` (3, 150 et 300 analyses ; 4, 1 et 4 photos), en FR et en NL. Elle lit `GET /api/offer` et garde des valeurs de secours si l'API ne répond pas ou renvoie un JSON inattendu ; un plan à 0 photo affiche « Pas de photo analysée ».
 - **Analyses :** `GET /api/admin/analyses` et `GET /api/admin/analyses/{id}`, en lecture seule, sans aucune donnée de compte.
   - liste de 50 analyses au plus, filtres (site, niveau, modèle, version du prompt, période, recherche web, partielle) et recherche dans le titre (3 caractères au moins) ; le filtre Site est codé en dur (les trois domaines) ;
   - le curseur `before` est un jeton opaque `"<date ISO>~<id>"`, pas un identifiant ;
   - détail : annonce (lien vers l'annonce si elle en a une, photos en liens et non en images à cause de la CSP), résultat FR et NL, raisons, recherches, appels au modèle, lien vers le texte du prompt (`/admin/ia/prompts/{id}`) ; coûts à 4 décimales ;
-  - migration 0008 : `listings.url`, sans query ni fragment, acceptée seulement si l'hôte est le domaine du site ou un sous-domaine ; les analyses d'avant la migration n'ont pas de lien.
-- **Erreurs :** un `DataError` de la base (caractère NUL, etc.) donne `422 invalid_request` ; les `409` de l'écran Utilisateurs portent `details.reason` (`self`, `last_admin`, `stripe`).
+  - migration 0008 : `listings.url`, sans query ni fragment, acceptée seulement si l'hôte est le domaine du site ou un sous-domaine, `user:pass@` retiré ; sinon l'URL déjà connue est conservée, et une annonce qui n'en a pas reste à `NULL` ; les analyses d'avant la migration n'ont pas de lien.
+  - filtres `from` et `to` bornés au 1er janvier 1970 et au 31 décembre 2100 (`422` au-delà) ; raisons affichées avec leur gravité en français (Grave, Attention, Information).
+- **Erreurs :** un `DataError` de la base (caractère NUL, etc.) donne `422 invalid_request`, avec une ligne de log `radarnaque.errors` (type de l'erreur et sqlstate, jamais la valeur) ; les `409` de l'écran Utilisateurs portent `details.reason` (`self`, `last_admin`, `stripe`).
 - Voir le [README](../README.md#administration-phase-4b) et le [suivi](superpowers/plans/2026-10-21-phase-4b-partie-2-suivi.md).
 
 ### Superuser de développement

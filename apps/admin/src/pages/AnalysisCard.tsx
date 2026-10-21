@@ -1,5 +1,5 @@
 import type { components } from "@radarnaque/shared";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { type AdminApi, ApiFailure } from "../api";
 import { Link } from "../components/Link";
 import { Section, Term } from "../components/ui";
@@ -8,6 +8,13 @@ import { useSession } from "../session";
 import { LEVELS } from "./Analyses";
 
 type Detail = components["schemas"]["AnalysisDetailOut"];
+
+/** Gravité d'une raison : libellé français et couleur (rouge, orange, gris). */
+const SEVERITIES = {
+	danger: { label: "Grave", className: "bg-red-50 text-red-700" },
+	warning: { label: "Attention", className: "bg-orange-50 text-orange-700" },
+	info: { label: "Information", className: "bg-slate-100 text-slate-600" },
+} as const;
 
 export function AnalysisCard({ id }: { id: number }) {
 	const session = useSession();
@@ -155,10 +162,10 @@ function CardView({ api, id }: { api: AdminApi; id: number }) {
 					{locales.map(({ code, label }) => {
 						const text = result.texts[code];
 						return text ? (
-							<div key={code} className="space-y-1">
+							<Fragment key={code}>
 								<Term label={`Résumé (${label})`}>{text.summary}</Term>
 								<Term label={`Conseil (${label})`}>{text.advice}</Term>
-							</div>
+							</Fragment>
 						) : null;
 					})}
 				</dl>
@@ -169,8 +176,10 @@ function CardView({ api, id }: { api: AdminApi; id: number }) {
 					<ol className="space-y-2 text-sm">
 						{result.reasons.map((reason) => (
 							<li key={reason.position}>
-								<span className="mr-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs">
-									{reason.severity}
+								<span
+									className={`mr-2 rounded px-1.5 py-0.5 text-xs ${SEVERITIES[reason.severity].className}`}
+								>
+									{SEVERITIES[reason.severity].label}
 								</span>
 								<span lang="fr">{reason.fr}</span>
 								<span className="text-slate-400"> / </span>
@@ -229,9 +238,10 @@ function CardView({ api, id }: { api: AdminApi; id: number }) {
 							</tr>
 						</thead>
 						<tbody>
-							{technical.calls.map((call) => (
+							{technical.calls.map((call, index) => (
 								<tr
-									key={`${call.createdAt}-${call.tokensIn}-${call.tokensOut}`}
+									// biome-ignore lint/suspicious/noArrayIndexKey: liste figée, sans identifiant d'appel
+									key={index}
 									className="border-t border-slate-100"
 								>
 									<td className="py-1 pr-4 whitespace-nowrap">

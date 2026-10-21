@@ -8,6 +8,8 @@ Le plan modifié est verrouillé (`FOR NO KEY UPDATE` sur sa ligne `plans`) : de
 simultanés du même plan se suivent. Les quotas et prix sont relus sous ce verrou pour écrire
 `from` dans le journal."""
 
+import time
+from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -34,6 +36,7 @@ CURRENCY = "EUR"
 PLAN_ORDER = ("trial", "standard", "premium")
 TRIAL = "trial"
 INTERVALS: tuple[BillingInterval, ...] = ("month", "year")
+PUBLIC_OFFER_TTL_SECONDS = 60.0
 
 
 async def load_plans(session: AsyncSession) -> list[OfferPlanOut]:
@@ -97,23 +100,53 @@ async def build_overview(session: AsyncSession) -> AdminOfferOut:
 
 
 async def public_offer(session: AsyncSession) -> PublicOfferOut:
-    """L'offre pour la page des prix : sans identifiant Stripe, sans prix pour l'essai."""
+    """L'offre pour la page des prix : sans identifiant Stripe, sans prix pour l'essai. `scans`
+    est le quota, limité par le plafond total quand il existe (l'essai : 5 scans de quota avec un
+    plafond de 3 en annonce 3)."""
     by_code = {p.code: p for p in await load_plans(session)}
 
     def public(code: str) -> PublicPlanOut:
         plan = by_code[code]
         month, year = plan.prices.get("month"), plan.prices.get("year")
+        scans = plan.quota
+        if plan.total_scan_cap is not None:
+            scans = min(scans, plan.total_scan_cap)
+        priced = code != TRIAL
         return PublicPlanOut(
-            scans=plan.quota,
+            scans=scans,
             max_images=plan.max_images,
             card_icons=plan.card_icons,
-            monthly_cents=None if month is None else month.amount_cents,
-            yearly_cents=None if year is None else year.amount_cents,
+            monthly_cents=None if month is None or not priced else month.amount_cents,
+            yearly_cents=None if year is None or not priced else year.amount_cents,
         )
 
     return PublicOfferOut(
         trial=public("trial"), standard=public("standard"), premium=public("premium")
     )
+
+
+class PublicOfferCache:
+    """Garde l'offre publique 60 s en mémoire du processus (la page des prix ne doit pas relire
+    la base à chaque visite). Un enregistrement de l'admin la vide aussitôt (`clear`). Modèle de
+    `SearchHealth` : horloge injectable."""
+
+    def __init__(self, *, now: Callable[[], float] = time.monotonic) -> None:
+        self._now = now
+        self._known: tuple[float, PublicOfferOut] | None = None
+        self._generation = 0
+
+    async def get(self, session: AsyncSession) -> PublicOfferOut:
+        if self._known is not None and self._now() - self._known[0] < PUBLIC_OFFER_TTL_SECONDS:
+            return self._known[1]
+        started, generation = self._now(), self._generation
+        offer = await public_offer(session)
+        if generation == self._generation:  # pas de `clear` pendant la lecture : sinon, périmée
+            self._known = (started, offer)
+        return offer
+
+    def clear(self) -> None:
+        self._known = None
+        self._generation += 1
 
 
 async def update_plan(

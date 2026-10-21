@@ -16,6 +16,10 @@ from radarnaque_api.services import admin_analyses
 router = APIRouter(prefix="/api/admin/analyses")
 
 ListLimit = Annotated[int, Query(ge=1, le=50)]
+# Bornes des filtres `from` et `to` : hors de cet intervalle, 422 (et non un dépassement de date
+# dans le calcul des bornes du jour).
+MIN_DAY = date(1970, 1, 1)
+MAX_DAY = date(2100, 12, 31)
 
 
 @router.get("", response_model=AnalysisListOut)
@@ -26,8 +30,8 @@ async def list_analyses(
     level: RiskLevel | None = None,
     model_id: Annotated[int | None, Query(alias="modelId")] = None,
     prompt_version_id: Annotated[int | None, Query(alias="promptVersionId")] = None,
-    day_from: Annotated[date | None, Query(alias="from")] = None,
-    day_to: Annotated[date | None, Query(alias="to")] = None,
+    day_from: Annotated[date | None, Query(alias="from", ge=MIN_DAY, le=MAX_DAY)] = None,
+    day_to: Annotated[date | None, Query(alias="to", ge=MIN_DAY, le=MAX_DAY)] = None,
     with_search: Annotated[bool | None, Query(alias="withSearch")] = None,
     partial: bool | None = None,
     q: Annotated[str | None, Query(min_length=3, max_length=200)] = None,

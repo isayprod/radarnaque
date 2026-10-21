@@ -403,3 +403,128 @@ async def test_public_offer_missing_price_is_null(client, pg_url):
     public = (await client.get("/api/offer")).json()
     assert public["premium"]["yearlyCents"] is None
     assert public["premium"]["monthlyCents"] == 699
+
+
+async def test_public_offer_trial_scans_capped_by_total_cap(client, bearer, admin, db):
+    # Quota 5 mais plafond total 3 : la page des prix annonce 3, ce que l'essai permet vraiment.
+    r = await _patch(client, bearer, admin, "trial", {"quota": 5})
+    assert r.status_code == 200
+    assert (await client.get("/api/offer")).json()["trial"]["scans"] == 3
+    # Plafond relevé au-dessus du quota : le quota l'emporte.
+    r = await _patch(client, bearer, admin, "trial", {"totalScanCap": 10})
+    assert r.status_code == 200
+    assert (await client.get("/api/offer")).json()["trial"]["scans"] == 5
+    # Plafond vidé : le quota seul.
+    r = await _patch(client, bearer, admin, "trial", {"totalScanCap": None})
+    assert r.status_code == 200
+    assert (await client.get("/api/offer")).json()["trial"]["scans"] == 5
+
+
+async def test_public_offer_cap_applies_to_every_plan(client, bearer, admin):
+    r = await _patch(client, bearer, admin, "standard", {"totalScanCap": 40})
+    assert r.status_code == 200
+    public = (await client.get("/api/offer")).json()
+    assert public["standard"]["scans"] == 40
+    assert public["premium"]["scans"] == 300
+
+
+async def test_public_offer_never_prices_the_trial(client, pg_url):
+    url = pg_url.replace("postgresql+psycopg://", "postgresql://", 1)
+    with psycopg.connect(url, autocommit=True) as conn:
+        conn.execute(
+            "insert into app.plan_prices(plan, interval, currency, amount_cents)"
+            " values ('trial', 'month', 'EUR', 100), ('trial', 'year', 'EUR', 1000)"
+        )
+    trial = (await client.get("/api/offer")).json()["trial"]
+    assert trial["monthlyCents"] is None and trial["yearlyCents"] is None
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+@pytest.fixture
+def clock(app) -> _Clock:
+    fake = _Clock()
+    app.state.public_offer_cache = admin_offer.PublicOfferCache(now=fake)
+    return fake
+
+
+@pytest.fixture
+def loads(monkeypatch) -> list[int]:
+    calls: list[int] = []
+    real = admin_offer.load_plans
+
+    async def counting(session):
+        calls.append(1)
+        return await real(session)
+
+    monkeypatch.setattr(admin_offer, "load_plans", counting)
+    return calls
+
+
+async def test_public_offer_is_cached_for_60_seconds(client, clock, loads):
+    first = (await client.get("/api/offer")).json()
+    clock.t += 59
+    second = (await client.get("/api/offer")).json()
+    assert second == first
+    assert len(loads) == 1
+    clock.t += 2  # 61 s après la première lecture
+    await client.get("/api/offer")
+    assert len(loads) == 2
+
+
+async def test_public_offer_cache_ignores_direct_database_changes_until_expiry(
+    client, clock, loads, pg_url
+):
+    assert (await client.get("/api/offer")).json()["standard"]["maxImages"] == 1
+    url = pg_url.replace("postgresql+psycopg://", "postgresql://", 1)
+    with psycopg.connect(url, autocommit=True) as conn:
+        conn.execute("update app.plans set max_images = 2 where code = 'standard'")
+    assert (await client.get("/api/offer")).json()["standard"]["maxImages"] == 1
+    clock.t += 61
+    assert (await client.get("/api/offer")).json()["standard"]["maxImages"] == 2
+
+
+async def test_patch_clears_the_public_cache(client, bearer, admin, clock, loads):
+    assert (await client.get("/api/offer")).json()["standard"]["scans"] == 150
+    r = await _patch(client, bearer, admin, "standard", {"quota": 175})
+    assert r.status_code == 200
+    # Aucune expiration : la nouvelle valeur est lue aussitôt.
+    assert (await client.get("/api/offer")).json()["standard"]["scans"] == 175
+
+
+async def test_refused_patch_keeps_the_public_cache(client, bearer, admin, clock, loads):
+    await client.get("/api/offer")
+    r = await _patch(client, bearer, admin, "trial", {"prices": {"month": 100}})
+    assert r.status_code == 422
+    n = len(loads)
+    await client.get("/api/offer")
+    assert len(loads) == n
+
+
+async def test_public_cache_drops_a_read_overtaken_by_a_clear(db, monkeypatch):
+    cache = admin_offer.PublicOfferCache()
+    real = admin_offer.public_offer
+
+    async def clearing_during_read(session):
+        offer = await real(session)
+        cache.clear()  # un enregistrement de l'admin arrive pendant la lecture
+        return offer
+
+    monkeypatch.setattr(admin_offer, "public_offer", clearing_during_read)
+    await cache.get(db)
+    monkeypatch.setattr(admin_offer, "public_offer", real)
+    calls: list[int] = []
+
+    async def counting(session):
+        calls.append(1)
+        return await real(session)
+
+    monkeypatch.setattr(admin_offer, "public_offer", counting)
+    await cache.get(db)
+    assert calls == [1]  # la lecture périmée n'a pas été gardée

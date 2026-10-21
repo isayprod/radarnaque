@@ -1,3 +1,5 @@
+import logging
+
 from radarnaque_api.errors import ApiError
 
 
@@ -44,3 +46,23 @@ async def test_nul_character_is_422(client, db, bearer, make_user):
         }
         assert "secret-slug" not in response.text
         assert "DataError" not in response.text
+
+
+async def test_data_error_is_logged_without_value(client, db, bearer, make_user, caplog):
+    admin = await make_user("nul-log@radarnaque.test", "admin")
+    slug = "x\u0000secret-slug"
+    with caplog.at_level(logging.WARNING, logger="radarnaque"):
+        r = await client.post(
+            "/api/admin/ai/models",
+            json={"provider": "stub", "slug": slug},
+            headers=bearer(admin),
+        )
+    assert r.status_code == 422
+    lines = [rec.getMessage() for rec in caplog.records if rec.name.startswith("radarnaque.")]
+    data_lines = [line for line in lines if line.startswith("DataError ")]
+    assert len(data_lines) == 1, lines
+    line = data_lines[0]
+    assert "sqlstate" in line
+    assert "secret-slug" not in line
+    assert "NUL" not in line and "0x00" not in line and "\x00" not in line
+    assert "secret-slug" not in caplog.text

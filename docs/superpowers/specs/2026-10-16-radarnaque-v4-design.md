@@ -409,7 +409,7 @@ analysis_web_searches(analysis_id FK ON DELETE CASCADE, position, query, aspect,
                       PK(analysis_id, position))
 ```
 
-- **`listings.url`** (migration 0008, phase 4b partie 2) : l'adresse de l'annonce, écrite à chaque scan sous la forme `scheme://host/path`, **sans query ni fragment**. Elle n'est acceptée que si son hôte est le domaine du site de l'annonce ou l'un de ses sous-domaines (sinon elle reste à `NULL`). Elle ne sert qu'à l'écran Analyses de l'admin. Une annonce scannée avant la migration garde `NULL` jusqu'à son prochain scan.
+- **`listings.url`** (migration 0008, phase 4b partie 2) : l'adresse de l'annonce, écrite à chaque scan sous la forme `scheme://host/path`, **sans query ni fragment**. Elle n'est acceptée que si son hôte est le domaine du site de l'annonce ou l'un de ses sous-domaines ; `user:pass@` est retiré. Sinon l'URL déjà connue est conservée, et une annonce qui n'en a pas reste à `NULL`. Elle ne sert qu'à l'écran Analyses de l'admin. Une annonce scannée avant la migration garde `NULL` jusqu'à son prochain scan.
 - **`analysis_web_searches`** ne garde que les recherches **réussies**, dans l'ordre. Elles s'affichent aussi quand l'analyse est servie depuis le cache. L'utilisateur voit les échecs en direct, pas ensuite.
 
 - **`content_hash`** = SHA-256 de la forme canonique de `{ title, description, price, priceType, images }`. Il est **toujours recalculé par le serveur**.
@@ -451,7 +451,7 @@ scan_failures(scan_event_id PK FK, error_code, created_at)
 | POST | `/api/billing/portal` | utilisateur | MVP : `501 billing_unavailable` |
 | POST | `/api/billing/webhooks/stripe` | Stripe | MVP : `501`, implémenté en phase 5 |
 | POST | `/api/internal/users/{id}/bootstrap` | service auth | création de l'abonnement d'essai (secret partagé) |
-| GET | `/api/offer` | public | prix, quotas, photos et icônes des trois plans, pour la page `/pricing` : `Cache-Control: public, max-age=300`, pas de prix pour l'essai, aucun identifiant Stripe. Le quota de l'essai est le quota par analyse, sans tenir compte de son plafond total (phase 4b partie 2) |
+| GET | `/api/offer` | public | prix, quotas, photos et icônes des trois plans, pour la page `/pricing` : `Cache-Control: public, max-age=300`, pas de prix pour l'essai (même si une ligne `plan_prices` existe), aucun identifiant Stripe. `scans` est le quota, limité par le plafond total quand il existe. Gardée 60 s en mémoire du processus ; un `PATCH /api/admin/offer/plans/{plan}` réussi vide ce cache (phase 4b partie 2) |
 | GET/POST/PATCH/DELETE | `/api/admin/*` | admin | voir §8 : `/api/admin/users` et `/api/admin/ai` (partie 1), `/api/admin/dashboard`, `/api/admin/offer` et `/api/admin/analyses` (partie 2) |
 
 Routes de la partie 2 de la phase 4b (toutes derrière `require_admin`, sauf `GET /api/offer`) :
