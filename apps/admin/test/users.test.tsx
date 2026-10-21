@@ -588,6 +588,51 @@ describe("fiche d'un utilisateur", () => {
 		expect(menu.value).toBe("standard");
 	});
 
+	it("failed plans show a message and disable the assignment", async () => {
+		const { sent } = fakeFetch({
+			...routeCard(card()),
+			"GET /api/admin/offer": () =>
+				apiError(500, "internal_error", "Erreur interne."),
+		});
+		renderAt("/admin/utilisateurs/u1");
+		await screen.findByText("alice@radarnaque.test");
+
+		expect(
+			await screen.findByText("Liste des plans indisponible."),
+		).toBeTruthy();
+		const button = screen.getByRole("button", {
+			name: "Attribuer un plan",
+		}) as HTMLButtonElement;
+		expect(button.disabled).toBe(true);
+		expect(
+			(screen.getByLabelText("Plan à attribuer") as HTMLSelectElement).disabled,
+		).toBe(true);
+		expect(sent("POST", "/api/admin/users/u1/plan")).toHaveLength(0);
+	});
+
+	it("empty plans disable the assignment and send nothing", async () => {
+		const { sent } = fakeFetch({
+			...routeCard(card()),
+			"GET /api/admin/offer": () => offer([]),
+		});
+		const user = userEvent.setup();
+		renderAt("/admin/utilisateurs/u1");
+		await screen.findByText("alice@radarnaque.test");
+		// La liste vide est arrivée quand aucun message d'échec ni option n'existe encore : on attend la requête.
+		await waitFor(() =>
+			expect(sent("GET", "/api/admin/offer")).toHaveLength(1),
+		);
+
+		const button = screen.getByRole("button", {
+			name: "Attribuer un plan",
+		}) as HTMLButtonElement;
+		expect(button.disabled).toBe(true);
+		await user.click(button);
+		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(screen.queryByText("Liste des plans indisponible.")).toBeNull();
+		expect(sent("POST", "/api/admin/users/u1/plan")).toHaveLength(0);
+	});
+
 	it("cancelling the confirmation sends nothing", async () => {
 		const { sent } = fakeFetch(routeCard(card()));
 		const user = userEvent.setup();

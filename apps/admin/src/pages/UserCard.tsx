@@ -7,12 +7,14 @@ import { Link } from "../components/Link";
 import {
 	actionMessage,
 	dangerButton,
+	ErrorLine,
+	field,
 	Section,
 	secondaryButton,
 	Term,
 } from "../components/ui";
 import { formatDateTime } from "../format";
-import { usePlans } from "../plans";
+import { usePlansState } from "../plans";
 import { useRoute } from "../router";
 import { useSession } from "../session";
 
@@ -47,7 +49,7 @@ function CardView({
 	const [loadError, setLoadError] = useState<string | null>(null);
 	const [dialog, setDialog] = useState<Dialog | null>(null);
 	const [actionError, setActionError] = useState<string | null>(null);
-	const plans = usePlans();
+	const { plans, failed: plansFailed } = usePlansState();
 	// Le plan choisi dans le menu ; sans choix, « standard » s'il existe, sinon le premier.
 	const [choice, setChoice] = useState<string | null>(null);
 
@@ -93,6 +95,8 @@ function CardView({
 			: plans?.includes("standard")
 				? "standard"
 				: (plans?.[0] ?? "");
+	// Sans plan connu (chargement, échec ou offre vide), rien à attribuer.
+	const canAssign = plans !== null && plans.length > 0;
 	const isOwn = card.email.toLowerCase() === ownEmail.toLowerCase();
 	const stripe = card.subscription?.provider === "stripe";
 	const base = `/api/admin/users/${encodeURIComponent(card.id)}`;
@@ -248,9 +252,9 @@ function CardView({
 					<select
 						id="plan-choice"
 						value={plan}
-						disabled={stripe || plans === null}
+						disabled={stripe || !canAssign}
 						onChange={(event) => setChoice(event.target.value)}
-						className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-60"
+						className={`${field} disabled:opacity-60`}
 					>
 						{(plans ?? []).map((code) => (
 							<option key={code} value={code}>
@@ -260,7 +264,7 @@ function CardView({
 					</select>
 					<button
 						type="button"
-						disabled={stripe || plans === null}
+						disabled={stripe || !canAssign}
 						onClick={() => setDialog("plan")}
 						className={secondaryButton}
 					>
@@ -269,6 +273,9 @@ function CardView({
 					{stripe && (
 						<span className="text-sm text-slate-500">Géré dans Stripe</span>
 					)}
+					<ErrorLine
+						message={plansFailed ? "Liste des plans indisponible." : null}
+					/>
 				</div>
 				{!isOwn && (
 					<div className="flex flex-wrap gap-3">
