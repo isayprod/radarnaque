@@ -17,9 +17,10 @@ from radarnaque_api.purge_cli import main as purge_main
 from radarnaque_api.services import purge
 from radarnaque_api.services.purge import (
     PURGE_LOCK_KEY,
+    PurgeReport,
     purge_forever,
-    purge_old_scans,
     retention_cutoff,
+    run_purge,
 )
 
 # Date fixe : « 11 mois et 29 jours » reste après la limite quel que soit le jour réel.
@@ -106,6 +107,35 @@ async def _purged_scans(db, uid: str) -> int:
     return await _scalar(db, "select purged_scans from app.subscriptions where user_id = :u", u=uid)
 
 
+async def _admin_action(db, at: datetime, action: str = "user.plan_set") -> int:
+    return await _scalar(
+        db,
+        "insert into app.admin_actions(action, created_at) values (:a, :at) returning id",
+        a=action,
+        at=at,
+    )
+
+
+async def _llm_call(db, analysis_id: int, at: datetime) -> int:
+    return await _scalar(
+        db,
+        "insert into app.llm_calls(created_at, analysis_id, model_id, prompt_version_id)"
+        " select :at, a.id, a.model_id, a.prompt_version_id from app.analyses a where a.id = :a"
+        " returning id",
+        at=at,
+        a=analysis_id,
+    )
+
+
+async def _system_purges(db) -> list[dict]:
+    """Les lignes `system.purge` du journal, relues après validation."""
+    await db.rollback()
+    rows = await db.execute(
+        text("select admin_user_id, details from app.admin_actions where action = 'system.purge'")
+    )
+    return [{"admin_user_id": r[0], "details": r[1]} for r in rows]
+
+
 def test_cutoff_calendar_months():
     assert retention_cutoff(datetime(2026, 10, 20, 9, 30, tzinfo=UTC)) == datetime(
         2025, 10, 20, 9, 30, tzinfo=UTC
@@ -126,7 +156,7 @@ async def test_purge_old_keeps_recent(app, db, make_user):
     analyses = await _scalar(db, "select count(*) from app.analyses")
     snapshots = await _scalar(db, "select count(*) from app.listing_snapshots")
 
-    assert await purge_old_scans(app.state.engine, NOW) == 2
+    assert (await run_purge(app.state.engine, NOW)).scans == 2
 
     assert await _ids(db, "app.scan_events", "id") == {recent_ok, recent_failed, at_cutoff}
     assert await _ids(db, "app.scan_results") == {recent_ok}
@@ -137,6 +167,81 @@ async def test_purge_old_keeps_recent(app, db, make_user):
     assert await _scalar(db, "select count(*) from app.listing_snapshots") == snapshots
 
 
+async def test_purge_old_admin_actions_and_llm_calls(app, db):
+    analysis_id = await _analysis(db, "llm")
+    old_action = await _admin_action(db, OLD)
+    recent_action = await _admin_action(db, RECENT)
+    await _llm_call(db, analysis_id, OLD)
+    recent_call = await _llm_call(db, analysis_id, RECENT)
+    await db.commit()
+    analyses = await _scalar(db, "select count(*) from app.analyses")
+
+    report = await run_purge(app.state.engine, NOW)
+
+    assert report == PurgeReport(scans=0, admin_actions=1, llm_calls=1)
+    remaining_actions = await _ids(db, "app.admin_actions", "id")
+    assert recent_action in remaining_actions and old_action not in remaining_actions
+    assert await _ids(db, "app.llm_calls", "id") == {recent_call}
+    assert await _scalar(db, "select count(*) from app.analyses") == analyses
+
+
+async def test_purge_writes_system_purge(app, db, make_user):
+    uid = await make_user("old@b.test")
+    analysis_id = await _analysis(db, "sp")
+    await _event(db, uid, OLD)
+    await _event(db, uid, OLD)
+    await _admin_action(db, OLD)
+    await _llm_call(db, analysis_id, OLD)
+    await db.commit()
+
+    await run_purge(app.state.engine, NOW)
+
+    assert await _system_purges(db) == [
+        {
+            "admin_user_id": None,
+            "details": {"deletedScans": 2, "deletedActions": 1, "deletedLlmCalls": 1},
+        }
+    ]
+
+
+async def test_purge_writes_system_purge_even_when_nothing_deleted(app, db):
+    assert await run_purge(app.state.engine, NOW) == PurgeReport(0, 0, 0)
+
+    assert await _system_purges(db) == [
+        {
+            "admin_user_id": None,
+            "details": {"deletedScans": 0, "deletedActions": 0, "deletedLlmCalls": 0},
+        }
+    ]
+
+
+async def test_system_purge_line_is_kept_by_its_own_pass(app, db):
+    """La ligne `system.purge` est écrite après les suppressions : elle ne se supprime pas
+    elle-même, et une passe suivante en ajoute une autre."""
+    await run_purge(app.state.engine, NOW)
+    await run_purge(app.state.engine, NOW)
+
+    assert len(await _system_purges(db)) == 2
+
+
+async def test_skipped_purge_writes_nothing(app, db, pg_url):
+    with psycopg.connect(_raw(pg_url), autocommit=True) as other:
+        other.execute("select pg_advisory_lock(%s)", (PURGE_LOCK_KEY,))
+        assert await run_purge(app.state.engine, NOW) is None
+        other.execute("select pg_advisory_unlock(%s)", (PURGE_LOCK_KEY,))
+
+    assert await _system_purges(db) == []
+
+
+async def test_failed_purge_writes_nothing(app, db, monkeypatch):
+    monkeypatch.setattr(purge, "_DELETE_LLM_CALLS", text("delete from app.table_absente"))
+
+    with pytest.raises(ProgrammingError):
+        await run_purge(app.state.engine, NOW)
+
+    assert await _system_purges(db) == []
+
+
 async def test_purge_batches(app, db, make_user, monkeypatch):
     monkeypatch.setattr(purge, "PURGE_BATCH", 2)
     uid = await make_user("old@b.test")
@@ -144,11 +249,11 @@ async def test_purge_batches(app, db, make_user, monkeypatch):
         await _event(db, uid, OLD)
     recent = await _event(db, uid, RECENT)
 
-    assert await purge_old_scans(app.state.engine, NOW) == 5
+    assert (await run_purge(app.state.engine, NOW)).scans == 5
 
     assert await _ids(db, "app.scan_events", "id") == {recent}
     # Plus rien à purger : une seconde passe ne supprime rien.
-    assert await purge_old_scans(app.state.engine, NOW) == 0
+    assert (await run_purge(app.state.engine, NOW)).scans == 0
 
 
 async def test_trial_keeps_quota_after_purge(app, client, db, make_user, bearer):
@@ -161,7 +266,7 @@ async def test_trial_keeps_quota_after_purge(app, client, db, make_user, bearer)
     before = (await client.get("/api/me", headers=bearer(uid))).json()
     assert before["totalCap"]["used"] == 3
 
-    assert await purge_old_scans(app.state.engine, NOW) == 4
+    assert (await run_purge(app.state.engine, NOW)).scans == 4
 
     assert await _purged_scans(db, uid) == 3
     body = (await client.get("/api/me", headers=bearer(uid))).json()
@@ -176,7 +281,7 @@ async def test_trial_counts_only_scans_since_period_start(app, db, make_user):
     await _event(db, uid, OLD - timedelta(days=1))  # avant le début de l'essai
     await _event(db, uid, OLD + timedelta(days=1))
 
-    assert await purge_old_scans(app.state.engine, NOW) == 2
+    assert (await run_purge(app.state.engine, NOW)).scans == 2
 
     assert await _purged_scans(db, uid) == 1
 
@@ -189,7 +294,7 @@ async def test_trial_of_other_user_untouched(app, db, make_user):
     await _event(db, old, OLD)
     await _event(db, other, RECENT)
 
-    assert await purge_old_scans(app.state.engine, NOW) == 1
+    assert (await run_purge(app.state.engine, NOW)).scans == 1
 
     assert await _purged_scans(db, old) == 1
     assert await _purged_scans(db, other) == 0
@@ -201,7 +306,7 @@ async def test_monthly_subscription_not_counted(app, db, make_user):
     for _ in range(2):
         await _event(db, uid, OLD)
 
-    assert await purge_old_scans(app.state.engine, NOW) == 2
+    assert (await run_purge(app.state.engine, NOW)).scans == 2
 
     assert await _purged_scans(db, uid) == 0
 
@@ -211,11 +316,11 @@ async def test_lock_skips_second_purge(app, db, make_user, pg_url):
     event_id = await _event(db, uid, OLD)
     with psycopg.connect(_raw(pg_url), autocommit=True) as other:
         other.execute("select pg_advisory_lock(%s)", (PURGE_LOCK_KEY,))
-        assert await purge_old_scans(app.state.engine, NOW) is None
+        assert await run_purge(app.state.engine, NOW) is None
         assert await _ids(db, "app.scan_events", "id") == {event_id}
         other.execute("select pg_advisory_unlock(%s)", (PURGE_LOCK_KEY,))
     # Verrou libéré : la passe suivante purge, puis libère le sien.
-    assert await purge_old_scans(app.state.engine, NOW) == 1
+    assert (await run_purge(app.state.engine, NOW)).scans == 1
     with psycopg.connect(_raw(pg_url), autocommit=True) as other:
         assert other.execute("select pg_try_advisory_lock(%s)", (PURGE_LOCK_KEY,)).fetchone() == (
             True,
@@ -228,7 +333,7 @@ async def test_lock_taken_logs_skipped_pass(app, db, make_user, pg_url, caplog):
     with psycopg.connect(_raw(pg_url), autocommit=True) as other:
         other.execute("select pg_advisory_lock(%s)", (PURGE_LOCK_KEY,))
         with caplog.at_level(logging.INFO, logger="radarnaque.purge"):
-            assert await purge_old_scans(app.state.engine, NOW) is None
+            assert await run_purge(app.state.engine, NOW) is None
         other.execute("select pg_advisory_unlock(%s)", (PURGE_LOCK_KEY,))
     records = [r for r in caplog.records if r.name == "radarnaque.purge"]
     assert [(r.levelno, r.getMessage()) for r in records] == [
@@ -245,7 +350,7 @@ async def test_failed_batch_rolls_back_counter_and_events(app, db, make_user, mo
     monkeypatch.setattr(purge, "_DELETE_BATCH", text("delete from app.table_absente"))
 
     with pytest.raises(ProgrammingError):
-        await purge_old_scans(app.state.engine, NOW)
+        await run_purge(app.state.engine, NOW)
 
     assert await _purged_scans(db, uid) == 0
     assert await _ids(db, "app.scan_events", "id") == events
@@ -256,7 +361,7 @@ async def test_purge_logs_count_without_identifier(app, db, make_user, caplog):
     for _ in range(2):
         await _event(db, uid, OLD)
     with caplog.at_level(logging.INFO, logger="radarnaque.purge"):
-        assert await purge_old_scans(app.state.engine, NOW) == 2
+        assert (await run_purge(app.state.engine, NOW)).scans == 2
     records = [r for r in caplog.records if r.name == "radarnaque.purge"]
     assert [(r.levelno, r.getMessage()) for r in records] == [
         (logging.INFO, "purge des scans : 2 scan_events supprimés")
@@ -283,7 +388,7 @@ async def test_purge_line_reaches_project_console(app, db, make_user):
     stream = io.StringIO()
     previous = handler.setStream(stream)
     try:
-        assert await purge_old_scans(app.state.engine, NOW) == 1
+        assert (await run_purge(app.state.engine, NOW)).scans == 1
     finally:
         handler.setStream(previous)
     assert "INFO radarnaque.purge purge des scans : 1 scan_events supprimés" in stream.getvalue()
@@ -303,7 +408,7 @@ async def test_purge_forever_survives_error(monkeypatch, caplog):
     broken = create_async_engine("postgresql+psycopg://u:secret-pw@127.0.0.1:1/x")
     calls: list[datetime] = []
     second_pass = asyncio.Event()
-    real = purge.purge_old_scans
+    real = purge.run_purge
 
     async def fake(engine, now):
         calls.append(now)
@@ -312,7 +417,7 @@ async def test_purge_forever_survives_error(monkeypatch, caplog):
         second_pass.set()
         return 0
 
-    monkeypatch.setattr(purge, "purge_old_scans", fake)
+    monkeypatch.setattr(purge, "run_purge", fake)
     with caplog.at_level(logging.WARNING, logger="radarnaque.purge"):
         task = asyncio.create_task(
             purge_forever(broken, lambda: NOW, first_delay_s=0, interval_s=0)
@@ -335,7 +440,7 @@ async def test_purge_forever_waits_first_delay(monkeypatch):
         calls.append(now)
         return 0
 
-    monkeypatch.setattr(purge, "purge_old_scans", fake)
+    monkeypatch.setattr(purge, "run_purge", fake)
     task = asyncio.create_task(purge_forever(None, lambda: NOW, first_delay_s=60))  # type: ignore[arg-type]
     await asyncio.sleep(0.05)
     task.cancel()
@@ -382,7 +487,10 @@ def _insert_old_event(pg_url: str) -> None:
 def test_cli_one_pass(cli_env, pg_url, capsys):
     _insert_old_event(pg_url)
     assert purge_main() == 0
-    assert capsys.readouterr().out.strip() == "scan_events supprimés : 1"
+    assert (
+        capsys.readouterr().out.strip()
+        == "scan_events supprimés : 1, admin_actions : 0, llm_calls : 0"
+    )
     with psycopg.connect(_raw(pg_url)) as conn:
         assert conn.execute("select count(*) from app.scan_events").fetchone() == (0,)
 

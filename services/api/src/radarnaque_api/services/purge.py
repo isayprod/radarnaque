@@ -1,14 +1,19 @@
 """Purge à 12 mois de l'historique des scans (`scan_events`, avec leurs `scan_results` et
-`scan_failures` par cascade). Les analyses et les snapshots d'annonces restent."""
+`scan_failures` par cascade), du journal de l'admin (`admin_actions`) et de la trace des appels
+au modèle (`llm_calls`). Les analyses et les snapshots d'annonces restent. Chaque passe qui a
+tourné écrit une ligne `system.purge` dans le journal."""
 
 import asyncio
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, insert, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.sql.expression import TextClause
 
+from radarnaque_api.models import AdminAction
 from radarnaque_api.services.periods import add_months
 
 SCAN_RETENTION_MONTHS = 12
@@ -44,6 +49,17 @@ _COUNT_LIFETIME_SCANS = text(
     """
 )
 _DELETE_BATCH = text("delete from app.scan_events where id = any(:ids)")
+_DELETE_ADMIN_ACTIONS = text("delete from app.admin_actions where created_at < :cutoff")
+_DELETE_LLM_CALLS = text("delete from app.llm_calls where created_at < :cutoff")
+
+
+@dataclass(frozen=True)
+class PurgeReport:
+    """Ce qu'une passe a supprimé."""
+
+    scans: int
+    admin_actions: int
+    llm_calls: int
 
 
 def retention_cutoff(now: datetime) -> datetime:
@@ -52,14 +68,44 @@ def retention_cutoff(now: datetime) -> datetime:
     return add_months(now, -SCAN_RETENTION_MONTHS)
 
 
-async def purge_old_scans(engine: AsyncEngine, now: datetime) -> int | None:
-    """Une passe : supprime les `scan_events` antérieurs à `retention_cutoff(now)`, par lots de
-    `PURGE_BATCH`, chacun dans sa transaction. Renvoie le nombre d'événements supprimés, ou
-    None sans rien faire si un autre processus tient déjà le verrou de la purge.
-
-    Un lot en échec lève l'exception : les lots précédents restent supprimés."""
-    cutoff = retention_cutoff(now)
+async def _purge_scans(engine: AsyncEngine, cutoff: datetime) -> int:
+    """Supprime les `scan_events` antérieurs à `cutoff`, par lots de `PURGE_BATCH`, chacun dans sa
+    transaction. Renvoie leur nombre. Un lot en échec lève l'exception : les lots précédents
+    restent supprimés."""
     total = 0
+    try:
+        while True:
+            async with engine.begin() as conn:
+                ids = list(
+                    (
+                        await conn.execute(_SELECT_BATCH, {"cutoff": cutoff, "batch": PURGE_BATCH})
+                    ).scalars()
+                )
+                if not ids:
+                    break
+                await conn.execute(_COUNT_LIFETIME_SCANS, {"ids": ids})
+                await conn.execute(_DELETE_BATCH, {"ids": ids})
+            total += len(ids)
+    finally:
+        logger.info("purge des scans : %d scan_events supprimés", total)
+    return total
+
+
+async def _delete_older(engine: AsyncEngine, query: TextClause, cutoff: datetime) -> int:
+    """Une suppression par date, dans sa transaction. Renvoie le nombre de lignes supprimées."""
+    async with engine.begin() as conn:
+        return (await conn.execute(query, {"cutoff": cutoff})).rowcount
+
+
+async def run_purge(engine: AsyncEngine, now: datetime) -> PurgeReport | None:
+    """Une passe : supprime les `scan_events`, les `admin_actions` et les `llm_calls` antérieurs à
+    `retention_cutoff(now)`, puis écrit la ligne `system.purge` avec les trois compteurs.
+    Renvoie ce qui a été supprimé, ou None sans rien faire si un autre processus tient déjà le
+    verrou de la purge.
+
+    Une étape en échec lève l'exception : les étapes précédentes restent supprimées, et la ligne
+    `system.purge` n'est pas écrite."""
+    cutoff = retention_cutoff(now)
     # Connexion dédiée au verrou de session, hors transaction : elle ne reste pas « idle in
     # transaction » pendant toute la passe.
     async with engine.connect() as lock_conn:
@@ -71,22 +117,22 @@ async def purge_old_scans(engine: AsyncEngine, now: datetime) -> int | None:
             logger.info("purge déjà en cours ailleurs, passe sautée")
             return None
         try:
-            while True:
-                async with engine.begin() as conn:
-                    ids = list(
-                        (
-                            await conn.execute(
-                                _SELECT_BATCH, {"cutoff": cutoff, "batch": PURGE_BATCH}
-                            )
-                        ).scalars()
+            scans = await _purge_scans(engine, cutoff)
+            actions = await _delete_older(engine, _DELETE_ADMIN_ACTIONS, cutoff)
+            llm_calls = await _delete_older(engine, _DELETE_LLM_CALLS, cutoff)
+            async with engine.begin() as conn:
+                await conn.execute(
+                    insert(AdminAction).values(
+                        admin_user_id=None,
+                        action="system.purge",
+                        details={
+                            "deletedScans": scans,
+                            "deletedActions": actions,
+                            "deletedLlmCalls": llm_calls,
+                        },
                     )
-                    if not ids:
-                        break
-                    await conn.execute(_COUNT_LIFETIME_SCANS, {"ids": ids})
-                    await conn.execute(_DELETE_BATCH, {"ids": ids})
-                total += len(ids)
+                )
         finally:
-            logger.info("purge des scans : %d scan_events supprimés", total)
             try:
                 await lock_conn.execute(select(func.pg_advisory_unlock(PURGE_LOCK_KEY)))
             except BaseException:
@@ -94,7 +140,7 @@ async def purge_old_scans(engine: AsyncEngine, now: datetime) -> int | None:
                 # session Postgres le libère.
                 await lock_conn.invalidate()
                 raise
-    return total
+    return PurgeReport(scans=scans, admin_actions=actions, llm_calls=llm_calls)
 
 
 async def purge_forever(
@@ -110,7 +156,7 @@ async def purge_forever(
     await asyncio.sleep(first_delay_s)
     while True:
         try:
-            await purge_old_scans(engine, now())
+            await run_purge(engine, now())
         except Exception as exc:
             logger.warning(
                 "purge des scans en échec (%s), nouvel essai plus tard", type(exc).__name__
