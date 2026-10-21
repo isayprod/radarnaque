@@ -4,6 +4,88 @@
  */
 
 export interface paths {
+    "/api/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Users
+         * @description Les comptes, du plus récent au plus ancien. `q` : sous-chaîne de l'email, casse ignorée
+         *     (3 caractères au moins) ; `plan` : un code d'offre, ou `none` ; `before` : curseur.
+         */
+        get: operations["list_users_api_admin_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get User */
+        get: operations["get_user_api_admin_users__user_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete User
+         * @description Supprime le compte et ses données (cascade), comme `DELETE /api/me`.
+         */
+        delete: operations["delete_user_api_admin_users__user_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{user_id}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign Plan
+         * @description Attribue un plan (abonnement `manual`) ; l'abonnement actif est terminé.
+         */
+        post: operations["assign_plan_api_admin_users__user_id__plan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{user_id}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Role
+         * @description Nomme ou retire un admin (jamais soi-même, jamais le dernier).
+         */
+        post: operations["set_role_api_admin_users__user_id__role_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/billing/checkout": {
         parameters: {
             query?: never;
@@ -177,6 +259,150 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AdminActionOut
+         * @description Une ligne du journal des modifications faites depuis l'admin. `admin_email` vient de
+         *     `auth.user` (affichage seulement) ; il est `None` quand l'admin a été supprimé.
+         */
+        AdminActionOut: {
+            /** Action */
+            action: string;
+            /** Adminemail */
+            adminEmail: string | null;
+            /** Adminuserid */
+            adminUserId: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            };
+            /** Id */
+            id: number;
+            /** Targetuserid */
+            targetUserId: string | null;
+        };
+        /** AdminPlanIn */
+        AdminPlanIn: {
+            /** Plan */
+            plan: string;
+        };
+        /** AdminRoleIn */
+        AdminRoleIn: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "user";
+        };
+        /** AdminSubscriptionOut */
+        AdminSubscriptionOut: {
+            /** Id */
+            id: number;
+            /** Periodend */
+            periodEnd: string | null;
+            /**
+             * Periodstart
+             * Format: date-time
+             */
+            periodStart: string;
+            /** Plan */
+            plan: string;
+            /** Provider */
+            provider: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * AdminUsageOut
+         * @description Consommation de l'abonnement actif, comme `GET /api/me`. `purged_scans` : scans de
+         *     l'essai effacés par la purge, comptés dans le quota.
+         */
+        AdminUsageOut: {
+            /**
+             * Periodstart
+             * Format: date-time
+             */
+            periodStart: string;
+            /** Purgedscans */
+            purgedScans: number;
+            /** Quotas */
+            quotas: components["schemas"]["QuotaOut"][];
+            totalCap: components["schemas"]["QuotaOut"] | null;
+        };
+        /**
+         * AdminUserListOut
+         * @description Page de la liste, du plus récent au plus ancien ; `next_before` est à passer en `before`
+         *     pour la page suivante (`None` : plus rien).
+         */
+        AdminUserListOut: {
+            /** Items */
+            items: components["schemas"]["AdminUserRowOut"][];
+            /** Nextbefore */
+            nextBefore: string | null;
+        };
+        /**
+         * AdminUserOut
+         * @description Fiche d'un compte.
+         */
+        AdminUserOut: {
+            /** Actions */
+            actions: components["schemas"]["AdminActionOut"][];
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Email */
+            email: string;
+            /** Emailverified */
+            emailVerified: boolean;
+            /** Id */
+            id: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "user" | "admin" | "superuser";
+            /** Scans */
+            scans: components["schemas"]["ScanHistoryItemOut"][];
+            subscription: components["schemas"]["AdminSubscriptionOut"] | null;
+            /** Subscriptions */
+            subscriptions: components["schemas"]["AdminSubscriptionOut"][];
+            usage: components["schemas"]["AdminUsageOut"] | null;
+        };
+        /**
+         * AdminUserRowOut
+         * @description Une ligne de la liste des comptes. `used` et `remaining` sont ceux du quota `full` de
+         *     l'abonnement actif ; `None` sans abonnement actif.
+         */
+        AdminUserRowOut: {
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Email */
+            email: string;
+            /** Id */
+            id: string;
+            /** Lastscanat */
+            lastScanAt: string | null;
+            /** Plan */
+            plan: string | null;
+            /** Remaining */
+            remaining: number | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "user" | "admin" | "superuser";
+            /** Used */
+            used: number | null;
+        };
         /** AnalysisReasonOut */
         AnalysisReasonOut: {
             /**
@@ -605,6 +831,171 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_users_api_admin_users_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                role?: ("user" | "admin" | "superuser") | null;
+                plan?: string | null;
+                before?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_user_api_admin_users__user_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_user_api_admin_users__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assign_plan_api_admin_users__user_id__plan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminPlanIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_role_api_admin_users__user_id__role_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminRoleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     checkout_api_billing_checkout_post: {
         parameters: {
             query?: never;
