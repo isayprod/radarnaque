@@ -105,25 +105,32 @@ async def valid_analysis_id(
     )
 
 
+def listing_url(listing: ListingIn) -> str:
+    """`scheme://host/path` de l'annonce : la query et le fragment peuvent porter des traceurs, et
+    d'éventuels identifiants (`user:pass@`) ne sont pas conservés."""
+    url = listing.url
+    return f"{url.scheme}://{url.host}{url.path or ''}"
+
+
 async def upsert_snapshot(
     session: AsyncSession, site_id: int, listing: ListingIn, at: datetime
 ) -> tuple[int, str]:
-    """Annonce, snapshot et images (`INSERT … ON CONFLICT DO NOTHING`, puis relecture), puis
-    commit. Renvoie l'identifiant du snapshot et son empreinte de contenu. Le titre et la
-    description sont masqués **avant** l'empreinte et l'enregistrement (règle R9), comme dans le
-    message envoyé au LLM : aucun contact n'est stocké."""
+    """Annonce, snapshot et images, puis commit. L'annonce est insérée, ou son URL mise à jour
+    (`ON CONFLICT (site_id, external_id) DO UPDATE`) ; le snapshot et ses images le sont par
+    `INSERT … ON CONFLICT DO NOTHING`, puis relecture. Renvoie l'identifiant du snapshot et son
+    empreinte de contenu. Le titre et la description sont masqués **avant** l'empreinte et
+    l'enregistrement (règle R9), comme dans le message envoyé au LLM : aucun contact n'est
+    stocké."""
     title = mask_contacts(listing.title)
     description = mask_contacts(listing.description)
-    await session.execute(
-        insert(Listing)
-        .values(site_id=site_id, external_id=listing.external_id)
-        .on_conflict_do_nothing()
+    stmt = insert(Listing).values(
+        site_id=site_id, external_id=listing.external_id, url=listing_url(listing)
     )
     listing_id = (
         await session.execute(
-            select(Listing.id).where(
-                Listing.site_id == site_id, Listing.external_id == listing.external_id
-            )
+            stmt.on_conflict_do_update(
+                index_elements=["site_id", "external_id"], set_={"url": stmt.excluded.url}
+            ).returning(Listing.id)
         )
     ).scalar_one()
     digest = content_hash(listing, title, description)

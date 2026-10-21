@@ -21,6 +21,9 @@ class Listing(Base):
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     site_id: Mapped[int] = mapped_column(ForeignKey("app.sites.id"))
     external_id: Mapped[str]
+    # `scheme://host/path` de la dernière annonce scannée (sans query ni fragment) ; NULL pour une
+    # annonce scannée avant la migration 0008.
+    url: Mapped[str | None]
 
 
 class ListingSnapshot(Base):

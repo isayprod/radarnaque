@@ -188,6 +188,45 @@ export interface paths {
         patch: operations["update_settings_api_admin_ai_settings_patch"];
         trace?: never;
     };
+    "/api/admin/analyses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Analyses
+         * @description Les analyses, de la plus récente à la plus ancienne. `from` et `to` : jours civils de
+         *     Bruxelles (`YYYY-MM-DD`), bornes incluses ; `q` : sous-chaîne du titre, casse ignorée (3
+         *     caractères au moins) ; `before` : identifiant de la dernière analyse de la page précédente.
+         */
+        get: operations["list_analyses_api_admin_analyses_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/analyses/{analysis_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Analysis */
+        get: operations["get_analysis_api_admin_analyses__analysis_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/dashboard": {
         parameters: {
             query?: never;
@@ -754,6 +793,92 @@ export interface components {
             /** Ratelimitperminute */
             rateLimitPerMinute: number;
         };
+        /**
+         * AnalysisCallOut
+         * @description Un appel au modèle (`llm_calls`).
+         */
+        AnalysisCallOut: {
+            /** Costusd */
+            costUsd: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Imagesanalyzed */
+            imagesAnalyzed: number;
+            /** Tokensin */
+            tokensIn: number;
+            /** Tokensout */
+            tokensOut: number;
+            /** Websearches */
+            webSearches: number;
+        };
+        /** AnalysisDetailOut */
+        AnalysisDetailOut: {
+            listing: components["schemas"]["AnalysisListingOut"];
+            result: components["schemas"]["AnalysisDetailResultOut"];
+            /** Searches */
+            searches: components["schemas"]["AnalysisSearchOut"][];
+            technical: components["schemas"]["AnalysisTechnicalOut"];
+            usage: components["schemas"]["AnalysisUsageOut"];
+        };
+        /** AnalysisDetailResultOut */
+        AnalysisDetailResultOut: {
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "low" | "medium" | "high";
+            /** Professional */
+            professional: boolean;
+            /** Reasons */
+            reasons: components["schemas"]["AnalysisReasonRowOut"][];
+            /** Score */
+            score: number;
+            /** Texts */
+            texts: {
+                [key: string]: components["schemas"]["AnalysisTextOut"];
+            };
+        };
+        /**
+         * AnalysisListOut
+         * @description `next_before` : identifiant de la dernière analyse de la page, `None` à la dernière page.
+         */
+        AnalysisListOut: {
+            /** Items */
+            items: components["schemas"]["AnalysisRowOut"][];
+            /** Nextbefore */
+            nextBefore: number | null;
+        };
+        /**
+         * AnalysisListingOut
+         * @description L'annonce du snapshot. `url` est `None` pour une annonce scannée avant la migration 0008 ;
+         *     la description est déjà masquée (contacts).
+         */
+        AnalysisListingOut: {
+            /**
+             * Capturedat
+             * Format: date-time
+             */
+            capturedAt: string;
+            /** Currency */
+            currency: string | null;
+            /** Description */
+            description: string;
+            /** Externalid */
+            externalId: string;
+            /** Images */
+            images: string[];
+            /** Pricecents */
+            priceCents: number | null;
+            /** Site */
+            site: string;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string | null;
+        };
         /** AnalysisReasonOut */
         AnalysisReasonOut: {
             /**
@@ -762,6 +887,20 @@ export interface components {
              */
             severity: "info" | "warning" | "danger";
             text: components["schemas"]["LocalizedTextOut"];
+        };
+        /** AnalysisReasonRowOut */
+        AnalysisReasonRowOut: {
+            /** Fr */
+            fr: string;
+            /** Nl */
+            nl: string;
+            /** Position */
+            position: number;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "warning" | "danger";
         };
         /** AnalysisResultOut */
         AnalysisResultOut: {
@@ -795,6 +934,111 @@ export interface components {
             summary: components["schemas"]["LocalizedTextOut"];
             /** Websearches */
             webSearches: components["schemas"]["WebSearchOut"][];
+        };
+        /**
+         * AnalysisRowOut
+         * @description Une ligne de la liste des analyses. `created_at` est la date du dernier appel au modèle ;
+         *     `cost_usd` additionne tous les appels (`llm_calls`) ; `served` compte les `scan_results` qui
+         *     pointent vers l'analyse.
+         */
+        AnalysisRowOut: {
+            /** Costusd */
+            costUsd: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Id */
+            id: number;
+            /** Imagesanalyzed */
+            imagesAnalyzed: number;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "low" | "medium" | "high";
+            /** Llmcalls */
+            llmCalls: number;
+            model: components["schemas"]["ActiveModelOut"];
+            /** Modelid */
+            modelId: number;
+            /** Partial */
+            partial: boolean;
+            /** Professional */
+            professional: boolean;
+            /** Promptversion */
+            promptVersion: number;
+            /** Promptversionid */
+            promptVersionId: number;
+            /** Score */
+            score: number;
+            /** Served */
+            served: number;
+            /** Site */
+            site: string;
+            /** Title */
+            title: string;
+            /** Websearches */
+            webSearches: number;
+        };
+        /** AnalysisSearchOut */
+        AnalysisSearchOut: {
+            /** Aspect */
+            aspect: string;
+            /** Position */
+            position: number;
+            /** Query */
+            query: string;
+        };
+        /**
+         * AnalysisTechnicalOut
+         * @description Contexte technique. Tokens et coût sont ceux du dernier appel (ceux de l'analyse) ;
+         *     `calls` liste tous les appels, du plus récent au plus ancien.
+         */
+        AnalysisTechnicalOut: {
+            /** Calls */
+            calls: components["schemas"]["AnalysisCallOut"][];
+            /** Costusd */
+            costUsd: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Imagesanalyzed */
+            imagesAnalyzed: number;
+            /** Inputhash */
+            inputHash: string;
+            model: components["schemas"]["ActiveModelOut"];
+            /** Promptversion */
+            promptVersion: number;
+            /** Promptversionid */
+            promptVersionId: number;
+            /** Tokensin */
+            tokensIn: number;
+            /** Tokensout */
+            tokensOut: number;
+        };
+        /** AnalysisTextOut */
+        AnalysisTextOut: {
+            /** Advice */
+            advice: string;
+            /** Summary */
+            summary: string;
+        };
+        /**
+         * AnalysisUsageOut
+         * @description Nombre de services de l'analyse, et dates du premier et du dernier (`None` si jamais
+         *     servie). Jamais le demandeur.
+         */
+        AnalysisUsageOut: {
+            /** Firstservedat */
+            firstServedAt: string | null;
+            /** Lastservedat */
+            lastServedAt: string | null;
+            /** Served */
+            served: number;
         };
         /**
          * BillingUrlOut
@@ -1802,6 +2046,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiOverviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_analyses_api_admin_analyses_get: {
+        parameters: {
+            query?: {
+                site?: string | null;
+                level?: ("low" | "medium" | "high") | null;
+                modelId?: number | null;
+                promptVersionId?: number | null;
+                from?: string | null;
+                to?: string | null;
+                withSearch?: boolean | null;
+                partial?: boolean | null;
+                q?: string | null;
+                before?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_analysis_api_admin_analyses__analysis_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analysis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisDetailOut"];
                 };
             };
             /** @description Validation Error */

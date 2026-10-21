@@ -577,6 +577,236 @@
         "title": "AiSettingsOut",
         "type": "object"
       },
+      "AnalysisCallOut": {
+        "description": "Un appel au mod\u00e8le (`llm_calls`).",
+        "properties": {
+          "costUsd": {
+            "title": "Costusd",
+            "type": "number"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "imagesAnalyzed": {
+            "title": "Imagesanalyzed",
+            "type": "integer"
+          },
+          "tokensIn": {
+            "title": "Tokensin",
+            "type": "integer"
+          },
+          "tokensOut": {
+            "title": "Tokensout",
+            "type": "integer"
+          },
+          "webSearches": {
+            "title": "Websearches",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "createdAt",
+          "tokensIn",
+          "tokensOut",
+          "costUsd",
+          "imagesAnalyzed",
+          "webSearches"
+        ],
+        "title": "AnalysisCallOut",
+        "type": "object"
+      },
+      "AnalysisDetailOut": {
+        "properties": {
+          "listing": {
+            "$ref": "#/components/schemas/AnalysisListingOut"
+          },
+          "result": {
+            "$ref": "#/components/schemas/AnalysisDetailResultOut"
+          },
+          "searches": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisSearchOut"
+            },
+            "title": "Searches",
+            "type": "array"
+          },
+          "technical": {
+            "$ref": "#/components/schemas/AnalysisTechnicalOut"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/AnalysisUsageOut"
+          }
+        },
+        "required": [
+          "listing",
+          "result",
+          "searches",
+          "technical",
+          "usage"
+        ],
+        "title": "AnalysisDetailOut",
+        "type": "object"
+      },
+      "AnalysisDetailResultOut": {
+        "properties": {
+          "level": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "professional": {
+            "title": "Professional",
+            "type": "boolean"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisReasonRowOut"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "texts": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AnalysisTextOut"
+            },
+            "propertyNames": {
+              "enum": [
+                "fr",
+                "nl"
+              ]
+            },
+            "title": "Texts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "score",
+          "level",
+          "professional",
+          "texts",
+          "reasons"
+        ],
+        "title": "AnalysisDetailResultOut",
+        "type": "object"
+      },
+      "AnalysisListOut": {
+        "description": "`next_before` : identifiant de la derni\u00e8re analyse de la page, `None` \u00e0 la derni\u00e8re page.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisRowOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextBefore": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextbefore"
+          }
+        },
+        "required": [
+          "items",
+          "nextBefore"
+        ],
+        "title": "AnalysisListOut",
+        "type": "object"
+      },
+      "AnalysisListingOut": {
+        "description": "L'annonce du snapshot. `url` est `None` pour une annonce scann\u00e9e avant la migration 0008 ;\nla description est d\u00e9j\u00e0 masqu\u00e9e (contacts).",
+        "properties": {
+          "capturedAt": {
+            "format": "date-time",
+            "title": "Capturedat",
+            "type": "string"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "externalId": {
+            "title": "Externalid",
+            "type": "string"
+          },
+          "images": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Images",
+            "type": "array"
+          },
+          "priceCents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricecents"
+          },
+          "site": {
+            "title": "Site",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "site",
+          "externalId",
+          "url",
+          "title",
+          "description",
+          "priceCents",
+          "currency",
+          "images",
+          "capturedAt"
+        ],
+        "title": "AnalysisListingOut",
+        "type": "object"
+      },
       "AnalysisReasonOut": {
         "properties": {
           "severity": {
@@ -597,6 +827,39 @@
           "text"
         ],
         "title": "AnalysisReasonOut",
+        "type": "object"
+      },
+      "AnalysisReasonRowOut": {
+        "properties": {
+          "fr": {
+            "title": "Fr",
+            "type": "string"
+          },
+          "nl": {
+            "title": "Nl",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "danger"
+            ],
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position",
+          "severity",
+          "fr",
+          "nl"
+        ],
+        "title": "AnalysisReasonRowOut",
         "type": "object"
       },
       "AnalysisResultOut": {
@@ -689,6 +952,248 @@
           "remaining"
         ],
         "title": "AnalysisResultOut",
+        "type": "object"
+      },
+      "AnalysisRowOut": {
+        "description": "Une ligne de la liste des analyses. `created_at` est la date du dernier appel au mod\u00e8le ;\n`cost_usd` additionne tous les appels (`llm_calls`) ; `served` compte les `scan_results` qui\npointent vers l'analyse.",
+        "properties": {
+          "costUsd": {
+            "title": "Costusd",
+            "type": "number"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "imagesAnalyzed": {
+            "title": "Imagesanalyzed",
+            "type": "integer"
+          },
+          "level": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "llmCalls": {
+            "title": "Llmcalls",
+            "type": "integer"
+          },
+          "model": {
+            "$ref": "#/components/schemas/ActiveModelOut"
+          },
+          "modelId": {
+            "title": "Modelid",
+            "type": "integer"
+          },
+          "partial": {
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "professional": {
+            "title": "Professional",
+            "type": "boolean"
+          },
+          "promptVersion": {
+            "title": "Promptversion",
+            "type": "integer"
+          },
+          "promptVersionId": {
+            "title": "Promptversionid",
+            "type": "integer"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "served": {
+            "title": "Served",
+            "type": "integer"
+          },
+          "site": {
+            "title": "Site",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "webSearches": {
+            "title": "Websearches",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "createdAt",
+          "site",
+          "title",
+          "score",
+          "level",
+          "professional",
+          "modelId",
+          "model",
+          "promptVersionId",
+          "promptVersion",
+          "imagesAnalyzed",
+          "webSearches",
+          "costUsd",
+          "llmCalls",
+          "served",
+          "partial"
+        ],
+        "title": "AnalysisRowOut",
+        "type": "object"
+      },
+      "AnalysisSearchOut": {
+        "properties": {
+          "aspect": {
+            "title": "Aspect",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position",
+          "query",
+          "aspect"
+        ],
+        "title": "AnalysisSearchOut",
+        "type": "object"
+      },
+      "AnalysisTechnicalOut": {
+        "description": "Contexte technique. Tokens et co\u00fbt sont ceux du dernier appel (ceux de l'analyse) ;\n`calls` liste tous les appels, du plus r\u00e9cent au plus ancien.",
+        "properties": {
+          "calls": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisCallOut"
+            },
+            "title": "Calls",
+            "type": "array"
+          },
+          "costUsd": {
+            "title": "Costusd",
+            "type": "number"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "imagesAnalyzed": {
+            "title": "Imagesanalyzed",
+            "type": "integer"
+          },
+          "inputHash": {
+            "title": "Inputhash",
+            "type": "string"
+          },
+          "model": {
+            "$ref": "#/components/schemas/ActiveModelOut"
+          },
+          "promptVersion": {
+            "title": "Promptversion",
+            "type": "integer"
+          },
+          "promptVersionId": {
+            "title": "Promptversionid",
+            "type": "integer"
+          },
+          "tokensIn": {
+            "title": "Tokensin",
+            "type": "integer"
+          },
+          "tokensOut": {
+            "title": "Tokensout",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model",
+          "promptVersionId",
+          "promptVersion",
+          "tokensIn",
+          "tokensOut",
+          "costUsd",
+          "imagesAnalyzed",
+          "inputHash",
+          "createdAt",
+          "calls"
+        ],
+        "title": "AnalysisTechnicalOut",
+        "type": "object"
+      },
+      "AnalysisTextOut": {
+        "properties": {
+          "advice": {
+            "title": "Advice",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "advice"
+        ],
+        "title": "AnalysisTextOut",
+        "type": "object"
+      },
+      "AnalysisUsageOut": {
+        "description": "Nombre de services de l'analyse, et dates du premier et du dernier (`None` si jamais\nservie). Jamais le demandeur.",
+        "properties": {
+          "firstServedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Firstservedat"
+          },
+          "lastServedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastservedat"
+          },
+          "served": {
+            "title": "Served",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "served",
+          "firstServedAt",
+          "lastServedAt"
+        ],
+        "title": "AnalysisUsageOut",
         "type": "object"
       },
       "BillingUrlOut": {
@@ -3042,6 +3547,260 @@
           }
         },
         "summary": "Update Settings"
+      }
+    },
+    "/api/admin/analyses": {
+      "get": {
+        "description": "Les analyses, de la plus r\u00e9cente \u00e0 la plus ancienne. `from` et `to` : jours civils de\nBruxelles (`YYYY-MM-DD`), bornes incluses ; `q` : sous-cha\u00eene du titre, casse ignor\u00e9e (3\ncaract\u00e8res au moins) ; `before` : identifiant de la derni\u00e8re analyse de la page pr\u00e9c\u00e9dente.",
+        "operationId": "list_analyses_api_admin_analyses_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "site",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Site"
+            }
+          },
+          {
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Level"
+            }
+          },
+          {
+            "in": "query",
+            "name": "modelId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Modelid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "promptVersionId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Promptversionid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "withSearch",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Withsearch"
+            }
+          },
+          {
+            "in": "query",
+            "name": "partial",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Partial"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 3,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Analyses"
+      }
+    },
+    "/api/admin/analyses/{analysis_id}": {
+      "get": {
+        "operationId": "get_analysis_api_admin_analyses__analysis_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Analysis"
       }
     },
     "/api/admin/dashboard": {

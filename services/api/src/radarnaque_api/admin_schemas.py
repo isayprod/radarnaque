@@ -5,7 +5,14 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field, StringConstraints
 
-from radarnaque_api.schemas import CamelInModel, CamelModel, QuotaOut, ScanHistoryItemOut
+from radarnaque_api.schemas import (
+    CamelInModel,
+    CamelModel,
+    QuotaOut,
+    RiskLevel,
+    ScanHistoryItemOut,
+    Severity,
+)
 
 
 class AdminActionOut(CamelModel):
@@ -361,3 +368,126 @@ class DailyOut(CamelModel):
     """Un point par jour, jours vides compris, du plus ancien au plus récent."""
 
     points: list[DailyPointOut]
+
+
+# --- Analyses (lecture seule) -------------------------------------------------------------
+# Aucune de ces réponses ne porte d'email ni d'identifiant d'utilisateur : une analyse n'est pas
+# une donnée personnelle et l'écran ne la relie jamais à un compte.
+
+Locale = Literal["fr", "nl"]
+
+
+class AnalysisRowOut(CamelModel):
+    """Une ligne de la liste des analyses. `created_at` est la date du dernier appel au modèle ;
+    `cost_usd` additionne tous les appels (`llm_calls`) ; `served` compte les `scan_results` qui
+    pointent vers l'analyse."""
+
+    id: int
+    created_at: datetime
+    site: str
+    title: str
+    score: int
+    level: RiskLevel
+    professional: bool
+    model_id: int
+    model: ActiveModelOut
+    prompt_version_id: int
+    prompt_version: int
+    images_analyzed: int
+    web_searches: int
+    cost_usd: float
+    llm_calls: int
+    served: int
+    partial: bool
+
+
+class AnalysisListOut(CamelModel):
+    """`next_before` : identifiant de la dernière analyse de la page, `None` à la dernière page."""
+
+    items: list[AnalysisRowOut]
+    next_before: int | None
+
+
+class AnalysisListingOut(CamelModel):
+    """L'annonce du snapshot. `url` est `None` pour une annonce scannée avant la migration 0008 ;
+    la description est déjà masquée (contacts)."""
+
+    site: str
+    external_id: str
+    url: str | None
+    title: str
+    description: str
+    price_cents: int | None
+    currency: str | None
+    images: list[str]
+    captured_at: datetime
+
+
+class AnalysisTextOut(CamelModel):
+    summary: str
+    advice: str
+
+
+class AnalysisReasonRowOut(CamelModel):
+    position: int
+    severity: Severity
+    fr: str
+    nl: str
+
+
+class AnalysisDetailResultOut(CamelModel):
+    score: int
+    level: RiskLevel
+    professional: bool
+    texts: dict[Locale, AnalysisTextOut]
+    reasons: list[AnalysisReasonRowOut]
+
+
+class AnalysisSearchOut(CamelModel):
+    position: int
+    query: str
+    aspect: str
+
+
+class AnalysisCallOut(CamelModel):
+    """Un appel au modèle (`llm_calls`)."""
+
+    created_at: datetime
+    tokens_in: int
+    tokens_out: int
+    cost_usd: float
+    images_analyzed: int
+    web_searches: int
+
+
+class AnalysisTechnicalOut(CamelModel):
+    """Contexte technique. Tokens et coût sont ceux du dernier appel (ceux de l'analyse) ;
+    `calls` liste tous les appels, du plus récent au plus ancien."""
+
+    model: ActiveModelOut
+    prompt_version_id: int
+    prompt_version: int
+    tokens_in: int
+    tokens_out: int
+    cost_usd: float
+    images_analyzed: int
+    input_hash: str
+    created_at: datetime
+    calls: list[AnalysisCallOut]
+
+
+class AnalysisUsageOut(CamelModel):
+    """Nombre de services de l'analyse, et dates du premier et du dernier (`None` si jamais
+    servie). Jamais le demandeur."""
+
+    served: int
+    first_served_at: datetime | None
+    last_served_at: datetime | None
+
+
+class AnalysisDetailOut(CamelModel):
+    listing: AnalysisListingOut
+    result: AnalysisDetailResultOut
+    searches: list[AnalysisSearchOut]
+    technical: AnalysisTechnicalOut
+    usage: AnalysisUsageOut
