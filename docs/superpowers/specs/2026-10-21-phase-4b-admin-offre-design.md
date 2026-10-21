@@ -32,7 +32,14 @@ Un tableau par plan : essai, Standard et Premium.
 
 ## 4. Page des prix du site
 
-La page `/pricing` lit aujourd'hui des prix codés en dur. Dans cette phase, elle les lit au chargement de la page, par une nouvelle route publique `GET /api/offer` (prix, quotas, photos et fonctionnalités des plans payants, sans authentification, avec un cache HTTP de 5 min). Si la route ne répond pas, la page garde ses valeurs actuelles.
+- **Constat :** la page `/pricing` lit des valeurs codées en dur (`PLANS`, `apps/site/src/pages-i18n.ts`) et décrit encore l'offre d'avant la phase 3d : des analyses « de texte » (150 en Standard, 1 000 en Premium) et des analyses « avec photos » (0 et 100). La base décrit l'offre actuelle : un seul type d'analyse `full`, 150 par mois en Standard et 300 en Premium, avec 1 photo par analyse en Standard et jusqu'à 4 en Premium et pendant l'essai.
+- **Réécriture des textes** (FR et NL), sur le modèle actuel :
+  - essai : « {scans} analyses offertes au total » ;
+  - Standard et Premium : « {scans} analyses par mois » et « {photos} photo(s) analysée(s) par annonce » ;
+  - Premium : « Icônes sur les résultats de recherche », affiché seulement quand le plan a `card_icons`.
+- **Valeurs de secours :** `PLANS` reprend l'offre actuelle de la base (prix inchangés ; quotas 3, 150 et 300 ; photos 4, 1 et 4 ; icônes pour l'essai et Premium). Elles ne servent que si l'API ne répond pas.
+- **Lecture :** au chargement, la page appelle une nouvelle route publique `GET /api/offer` (prix, quotas, photos et fonctionnalités des trois plans, sans authentification, avec un cache HTTP de 5 min) et remplace les valeurs de secours. Si la route ne répond pas, la page garde ses valeurs de secours.
+- **Page `/privacy` :** elle annonce « 1 photo en Standard, jusqu'à 4 en Premium et pendant l'essai » en texte fixe. Quand `max_images` change, un avertissement rappelle de mettre la page à jour, comme pour `max_web_searches` dans l'écran IA.
 
 ## 5. API
 
@@ -47,6 +54,9 @@ La page `/pricing` lit aujourd'hui des prix codés en dur. Dans cette phase, ell
   - baisser le quota Premium donne 0 restant à un abonné qui l'a dépassé ;
   - retirer `card_icons` donne `403` sur un scan depuis une carte.
 - **Journal :** une ligne par champ modifié, dans la même transaction.
-- **`GET /api/offer` :** pas de données de l'essai sauf son quota, cache de 5 min, aucune authentification.
-- **Page des prix :** elle affiche les valeurs de l'API, et ses valeurs par défaut si l'API ne répond pas.
-- **Interface :** formulaire, confirmation récapitulative, avertissement Stripe.
+- **`GET /api/offer` :** pas de prix pour l'essai, cache de 5 min, aucune authentification, aucun `stripe_price_id`.
+- **Page des prix :**
+  - elle affiche les valeurs de l'API, et ses valeurs de secours si l'API ne répond pas ;
+  - plus aucun texte « analyses de texte » ni « analyses avec photos », en FR comme en NL ;
+  - la ligne des icônes suit `card_icons`.
+- **Interface :** formulaire, confirmation récapitulative, avertissement Stripe, avertissement `/privacy` quand les photos changent.
