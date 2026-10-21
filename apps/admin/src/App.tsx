@@ -2,7 +2,9 @@ import type { MouseEvent } from "react";
 import { AccessDenied } from "./pages/AccessDenied";
 import { NotFound } from "./pages/NotFound";
 import { SignIn } from "./pages/SignIn";
-import { hrefOf, type Route, useRoute } from "./router";
+import { UserCard } from "./pages/UserCard";
+import { Users } from "./pages/Users";
+import { hrefOf, isPlainLeftClick, type Route, useRoute } from "./router";
 import { useSession } from "./session";
 
 type NavItem = {
@@ -36,6 +38,10 @@ function title(route: Route): string {
 
 function Content({ route }: { route: Route }) {
 	switch (route.name) {
+		case "users":
+			return <Users />;
+		case "user":
+			return <UserCard id={route.id} />;
 		case "notFound":
 			return <NotFound />;
 		default:
@@ -66,18 +72,8 @@ function Shell({
 }) {
 	const [route, navigate] = useRoute();
 
-	// Clic simple : navigation interne ; Ctrl, Cmd, Maj ou clic milieu gardent le
-	// comportement du navigateur (nouvel onglet).
 	const onNavigate = (event: MouseEvent<HTMLAnchorElement>, target: Route) => {
-		if (
-			event.button !== 0 ||
-			event.metaKey ||
-			event.ctrlKey ||
-			event.shiftKey ||
-			event.altKey
-		) {
-			return;
-		}
+		if (!isPlainLeftClick(event)) return;
 		event.preventDefault();
 		navigate(target);
 	};
