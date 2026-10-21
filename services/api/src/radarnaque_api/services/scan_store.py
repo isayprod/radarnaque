@@ -18,6 +18,7 @@ from radarnaque_api.models import (
     AnalysisWebSearch,
     Listing,
     ListingSnapshot,
+    LlmCall,
     Model,
     PromptVersion,
     ScanKind,
@@ -175,7 +176,9 @@ async def save_analysis(
     clé (règle R4) : sa ligne est mise à jour, ses textes, raisons et recherches web remplacés,
     et les anciens `scan_results` continuent d'y pointer. `images_analyzed` : photos réellement
     envoyées au modèle. `created_at` est la date de l'événement qui la
-    produit (règle R8). À appeler sous le verrou consultatif de la clé ; ne valide pas."""
+    produit (règle R8). Écrit aussi une ligne `llm_calls` : une par appel au modèle, insertion
+    comme rafraîchissement, dans la même transaction. À appeler sous le verrou consultatif de la
+    clé ; ne valide pas."""
     analysis = result.analysis
     values = {
         "rules_version": scan.rules.version,
@@ -255,6 +258,19 @@ async def save_analysis(
                 for position, search in enumerate(result.searches)
             ],
         )
+    session.add(
+        LlmCall(
+            created_at=at,
+            analysis_id=analysis_id,
+            model_id=key.model_id,
+            prompt_version_id=key.prompt_version_id,
+            tokens_in=result.tokens_in,
+            tokens_out=result.tokens_out,
+            cost_usd_micros=result.cost_usd_micros,
+            images_analyzed=images_analyzed,
+            web_searches=len(result.searches),
+        )
+    )
     return analysis_id
 
 
