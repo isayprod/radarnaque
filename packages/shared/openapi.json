@@ -1,6 +1,390 @@
 {
   "components": {
     "schemas": {
+      "AdminActionOut": {
+        "description": "Une ligne du journal des modifications faites depuis l'admin. `admin_email` vient de\n`auth.user` (affichage seulement) ; il est `None` quand l'admin a \u00e9t\u00e9 supprim\u00e9.",
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "adminEmail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adminemail"
+          },
+          "adminUserId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adminuserid"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "title": "Details",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "targetUserId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targetuserid"
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "adminUserId",
+          "adminEmail",
+          "targetUserId",
+          "details",
+          "createdAt"
+        ],
+        "title": "AdminActionOut",
+        "type": "object"
+      },
+      "AdminPlanIn": {
+        "additionalProperties": false,
+        "properties": {
+          "plan": {
+            "title": "Plan",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan"
+        ],
+        "title": "AdminPlanIn",
+        "type": "object"
+      },
+      "AdminRoleIn": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "AdminRoleIn",
+        "type": "object"
+      },
+      "AdminSubscriptionOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "periodEnd": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periodend"
+          },
+          "periodStart": {
+            "format": "date-time",
+            "title": "Periodstart",
+            "type": "string"
+          },
+          "plan": {
+            "title": "Plan",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "plan",
+          "status",
+          "provider",
+          "periodStart",
+          "periodEnd"
+        ],
+        "title": "AdminSubscriptionOut",
+        "type": "object"
+      },
+      "AdminUsageOut": {
+        "description": "Consommation de l'abonnement actif, comme `GET /api/me`. `purged_scans` : scans de\nl'essai effac\u00e9s par la purge, compt\u00e9s dans le quota.",
+        "properties": {
+          "periodStart": {
+            "format": "date-time",
+            "title": "Periodstart",
+            "type": "string"
+          },
+          "purgedScans": {
+            "title": "Purgedscans",
+            "type": "integer"
+          },
+          "quotas": {
+            "items": {
+              "$ref": "#/components/schemas/QuotaOut"
+            },
+            "title": "Quotas",
+            "type": "array"
+          },
+          "totalCap": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuotaOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "periodStart",
+          "quotas",
+          "totalCap",
+          "purgedScans"
+        ],
+        "title": "AdminUsageOut",
+        "type": "object"
+      },
+      "AdminUserListOut": {
+        "description": "Page de la liste, du plus r\u00e9cent au plus ancien ; `next_before` est \u00e0 passer en `before`\npour la page suivante (`None` : plus rien).",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminUserRowOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextBefore": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextbefore"
+          }
+        },
+        "required": [
+          "items",
+          "nextBefore"
+        ],
+        "title": "AdminUserListOut",
+        "type": "object"
+      },
+      "AdminUserOut": {
+        "description": "Fiche d'un compte.",
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/AdminActionOut"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "emailVerified": {
+            "title": "Emailverified",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "admin",
+              "superuser"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "scans": {
+            "items": {
+              "$ref": "#/components/schemas/ScanHistoryItemOut"
+            },
+            "title": "Scans",
+            "type": "array"
+          },
+          "subscription": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminSubscriptionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subscriptions": {
+            "items": {
+              "$ref": "#/components/schemas/AdminSubscriptionOut"
+            },
+            "title": "Subscriptions",
+            "type": "array"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminUsageOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "emailVerified",
+          "createdAt",
+          "role",
+          "subscription",
+          "usage",
+          "subscriptions",
+          "scans",
+          "actions"
+        ],
+        "title": "AdminUserOut",
+        "type": "object"
+      },
+      "AdminUserRowOut": {
+        "description": "Une ligne de la liste des comptes. `used` et `remaining` sont ceux du quota `full` de\nl'abonnement actif ; `None` sans abonnement actif.",
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lastScanAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastscanat"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan"
+          },
+          "remaining": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "admin",
+              "superuser"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "role",
+          "plan",
+          "used",
+          "remaining",
+          "createdAt",
+          "lastScanAt"
+        ],
+        "title": "AdminUserRowOut",
+        "type": "object"
+      },
       "AnalysisReasonOut": {
         "properties": {
           "severity": {
@@ -1210,6 +1594,294 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/admin/users": {
+      "get": {
+        "description": "Les comptes, du plus r\u00e9cent au plus ancien. `q` : sous-cha\u00eene de l'email, casse ignor\u00e9e\n(3 caract\u00e8res au moins) ; `plan` : un code d'offre, ou `none` ; `before` : curseur.",
+        "operationId": "list_users_api_admin_users_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 3,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "role",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "user",
+                    "admin",
+                    "superuser"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Role"
+            }
+          },
+          {
+            "in": "query",
+            "name": "plan",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 50,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plan"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Users"
+      }
+    },
+    "/api/admin/users/{user_id}": {
+      "delete": {
+        "description": "Supprime le compte et ses donn\u00e9es (cascade), comme `DELETE /api/me`.",
+        "operationId": "delete_user_api_admin_users__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete User"
+      },
+      "get": {
+        "operationId": "get_user_api_admin_users__user_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get User"
+      }
+    },
+    "/api/admin/users/{user_id}/plan": {
+      "post": {
+        "description": "Attribue un plan (abonnement `manual`) ; l'abonnement actif est termin\u00e9.",
+        "operationId": "assign_plan_api_admin_users__user_id__plan_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminPlanIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Assign Plan"
+      }
+    },
+    "/api/admin/users/{user_id}/role": {
+      "post": {
+        "description": "Nomme ou retire un admin (jamais soi-m\u00eame, jamais le dernier).",
+        "operationId": "set_role_api_admin_users__user_id__role_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRoleIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Role"
+      }
+    },
     "/api/billing/checkout": {
       "post": {
         "operationId": "checkout_api_billing_checkout_post",
