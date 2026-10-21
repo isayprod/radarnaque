@@ -11,12 +11,19 @@ from radarnaque_api.admin_schemas import (
     AiOverviewOut,
     AiSettingsIn,
     ModelIn,
+    ModelTestOut,
     PromptIn,
     PromptTextOut,
+    SearchTestIn,
+    SearchTestOut,
 )
 from radarnaque_api.auth.deps import AdminContext, require_admin
 from radarnaque_api.db import get_session
-from radarnaque_api.services import admin_ai
+from radarnaque_api.errors import ApiError
+from radarnaque_api.models import Model
+from radarnaque_api.services import admin_ai, ai_probes
+from radarnaque_api.services.scan_store import active_setup
+from radarnaque_api.services.scans import SCAN_KIND
 
 router = APIRouter(prefix="/api/admin/ai")
 
@@ -27,6 +34,8 @@ async def _overview(request: Request, session: AsyncSession) -> AiOverviewOut:
         providers=request.app.state.providers,
         settings=request.app.state.settings,
         environ=os.environ,
+        search_health=request.app.state.search_health,
+        search=request.app.state.search,
     )
 
 
@@ -126,3 +135,47 @@ async def update_settings(
     await admin_ai.update_settings(session, admin_id=admin.user.id, changes=body)
     await session.commit()
     return await _overview(request, session)
+
+
+def _too_many_probes() -> ApiError:
+    return ApiError(429, "rate_limited", "Trop d'essais en une heure, réessayez plus tard.")
+
+
+@router.post("/models/{model_id}/test", response_model=ModelTestOut)
+async def test_model(
+    request: Request,
+    model_id: int,
+    admin: Annotated[AdminContext, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ModelTestOut:
+    """Essaie un modèle avec le prompt actif sur une annonce fictive, sans outil ni photo. Rien
+    n'est écrit. 10 essais par heure et par admin. Une erreur du fournisseur rend `200` avec
+    `ok: false`."""
+    state = request.app.state
+    if not state.model_test_limiter.hit(admin.user.id):
+        raise _too_many_probes()
+    model = await session.get(Model, model_id)
+    if model is None:
+        raise ApiError(404, "not_found", "Modèle introuvable.")
+    setup = await active_setup(session, SCAN_KIND)
+    if setup is None:
+        raise ApiError(409, "conflict", "Aucune version de prompt active.")
+    # Fin de la lecture avant l'appel au modèle : aucune connexion n'est gardée pendant l'essai.
+    # Le modèle est détaché d'abord : le rollback ne le périme pas.
+    session.expunge(model)
+    await session.rollback()
+    return await ai_probes.probe_model(state, model, setup.system_prompt)
+
+
+@router.post("/search-test", response_model=SearchTestOut)
+async def test_search(
+    request: Request,
+    body: SearchTestIn,
+    admin: Annotated[AdminContext, Depends(require_admin)],
+) -> SearchTestOut:
+    """Interroge le moteur de recherche sans passer par le cache. 30 essais par heure et par
+    admin. La requête n'est ni journalisée ni enregistrée."""
+    state = request.app.state
+    if not state.search_test_limiter.hit(admin.user.id):
+        raise _too_many_probes()
+    return await ai_probes.probe_search(state.search, body.query)

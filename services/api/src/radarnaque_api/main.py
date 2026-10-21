@@ -19,6 +19,7 @@ from radarnaque_api.llm.client import LLMClientFactory
 from radarnaque_api.llm.providers import ensure_models_use_known_providers, load_providers
 from radarnaque_api.routes import admin_ai, admin_users, billing, health, internal, me, scans
 from radarnaque_api.search import make_search_backend
+from radarnaque_api.services.ai_probes import SearchHealth
 from radarnaque_api.services.purge import purge_forever
 from radarnaque_api.services.rate_window import SlidingWindowLimiter
 from radarnaque_api.services.scans import ANALYSIS_TIMEOUT_S
@@ -120,6 +121,12 @@ def create_app(
             None
             if app.state.http_search is None
             else make_search_backend(settings, app.state.http_search)
+        )
+        # Disponibilité de SearXNG (`/healthz`), pour l'écran IA de l'admin.
+        app.state.search_health = (
+            None
+            if app.state.http_search is None
+            else SearchHealth(app.state.http_search, settings.searxng_url)
         )
         # Un client par fournisseur, créé au premier scan ; jamais le client des photos.
         app.state.llm_clients = LLMClientFactory(providers, os.environ)

@@ -48,7 +48,10 @@ class SearchUnavailable(Exception):
 
 
 class SearchBackend(Protocol):
-    async def search(self, query: str) -> list[SearchHit]:  # lève SearchUnavailable
+    async def search(
+        self, query: str, *, fresh: bool = False
+    ) -> list[SearchHit]:  # lève SearchUnavailable
+        """`fresh` : ni lecture ni écriture du cache (essai de l'admin)."""
         ...
 
 
@@ -108,7 +111,8 @@ def _parse_hits(body: object) -> list[SearchHit]:
 class SearxngBackend:
     """SearXNG via `GET /search?format=json`. Cache en mémoire de l'API : 24 h, 1 000 requêtes
     au plus, clé = requête normalisée (minuscules, espaces réduits) et langue. Un échec n'est
-    jamais mis en cache, ni une réponse sans résultat exploitable."""
+    jamais mis en cache, ni une réponse sans résultat exploitable. `search(q, fresh=True)` ne lit ni
+    n'écrit le cache."""
 
     def __init__(
         self,
@@ -122,11 +126,18 @@ class SearxngBackend:
         self._now = now
         self._cache: OrderedDict[tuple[str, str], tuple[float, list[SearchHit]]] = OrderedDict()
 
-    async def search(self, query: str) -> list[SearchHit]:
+    @property
+    def cache_entries(self) -> int:
+        """Nombre d'entrées en cache (périmées comprises, tant qu'elles n'ont pas été évincées)."""
+        return len(self._cache)
+
+    async def search(self, query: str, *, fresh: bool = False) -> list[SearchHit]:
         # Masquage ici aussi (idempotent) : rien ne part vers SearXNG sans passer par clean_query.
         query = clean_query(query)
         if not query:
             return []
+        if fresh:  # essai de l'admin : le moteur est interrogé, le cache reste intact
+            return await self._fetch(query)
         key = _cache_key(query)
         cached = self._cache.get(key)
         if cached is not None and self._now() - cached[0] < CACHE_TTL_SECONDS:
