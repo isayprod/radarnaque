@@ -127,4 +127,61 @@ describe("createApi", () => {
 		expect(onForbidden).not.toHaveBeenCalled();
 		expect(onSignedOut).not.toHaveBeenCalled();
 	});
+	describe("concurrent requests", () => {
+		const later = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+		// Le faux serveur répond selon le jeton présenté.
+		function setupConcurrent(accepted: string[], tokens: Array<string | null>) {
+			const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+				const headers = init?.headers as Record<string, string>;
+				const token = headers.authorization.replace("Bearer ", "");
+				return accepted.includes(token)
+					? json({ ok: token })
+					: json({ error: { code: "unauthenticated" } }, 401);
+			});
+			vi.stubGlobal("fetch", fetchMock);
+			const fetchToken = vi.fn(async () => {
+				await later();
+				return tokens.shift() ?? null;
+			});
+			const onSignedOut = vi.fn();
+			const api = createApi({ fetchToken, onSignedOut, onForbidden: vi.fn() });
+			return { api, fetchMock, fetchToken, onSignedOut };
+		}
+
+		it("asks for one token when the first requests run together", async () => {
+			const { api, fetchToken } = setupConcurrent(["jwt-1"], ["jwt-1"]);
+			await Promise.all([api.get("/api/admin/a"), api.get("/api/admin/b")]);
+			expect(fetchToken).toHaveBeenCalledTimes(1);
+		});
+
+		it("renews once when two requests get a 401 together", async () => {
+			const { api, fetchToken, onSignedOut } = setupConcurrent(
+				["new"],
+				["old", "new"],
+			);
+			const results = await Promise.all([
+				api.get("/api/admin/a"),
+				api.get("/api/admin/b"),
+			]);
+			expect(results).toEqual([{ ok: "new" }, { ok: "new" }]);
+			// Un jeton initial, un seul renouvellement.
+			expect(fetchToken).toHaveBeenCalledTimes(2);
+			expect(onSignedOut).not.toHaveBeenCalled();
+		});
+
+		it("signs out once when two requests get a second 401 together", async () => {
+			const { api, fetchToken, onSignedOut } = setupConcurrent(
+				[],
+				["old", "new"],
+			);
+			const results = await Promise.allSettled([
+				api.get("/api/admin/a"),
+				api.get("/api/admin/b"),
+			]);
+			expect(results.map((r) => r.status)).toEqual(["rejected", "rejected"]);
+			expect(fetchToken).toHaveBeenCalledTimes(2);
+			expect(onSignedOut).toHaveBeenCalledTimes(1);
+		});
+	});
 });

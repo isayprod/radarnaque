@@ -42,6 +42,26 @@ export function createApi(deps: {
 	onForbidden: () => void;
 }): AdminApi {
 	let jwt: string | null = null;
+	// Renouvellement partagé : toutes les requêtes en attente d'un jeton (premier appel ou
+	// 401) attendent la même demande, au lieu d'en lancer une chacune.
+	let renewing: Promise<string | null> | null = null;
+	let ended = false;
+
+	const renew = (): Promise<string | null> => {
+		if (!renewing) {
+			const pending: Promise<string | null> = deps
+				.fetchToken()
+				.then((token) => {
+					jwt = token;
+					return token;
+				})
+				.finally(() => {
+					if (renewing === pending) renewing = null;
+				});
+			renewing = pending;
+		}
+		return renewing;
+	};
 
 	const call = (method: Method, path: string, body: unknown, token: string) =>
 		fetch(path, {
@@ -54,9 +74,13 @@ export function createApi(deps: {
 			credentials: "same-origin",
 		});
 
+	// `onSignedOut` n'est appelé qu'une fois, quel que soit le nombre de requêtes en échec.
 	const signedOut = (): never => {
 		jwt = null;
-		deps.onSignedOut();
+		if (!ended) {
+			ended = true;
+			deps.onSignedOut();
+		}
 		throw new ApiFailure(401, "unauthenticated");
 	};
 
@@ -65,13 +89,17 @@ export function createApi(deps: {
 		path: string,
 		body?: unknown,
 	): Promise<T> {
-		jwt ??= await deps.fetchToken();
-		if (!jwt) return signedOut();
-		let res = await call(method, path, body, jwt);
+		if (ended) return signedOut();
+		const used = jwt ?? (await renew());
+		if (!used) return signedOut();
+		let res = await call(method, path, body, used);
 		if (res.status === 401) {
-			jwt = await deps.fetchToken();
-			if (!jwt) return signedOut();
-			res = await call(method, path, body, jwt);
+			// Le jeton refusé est invalidé une fois ; si un autre appel l'a déjà remplacé
+			// (ou le remplace en ce moment), on rejoue avec le courant sans le redemander.
+			if (jwt === used) jwt = null;
+			const fresh = jwt ?? (await renew());
+			if (!fresh) return signedOut();
+			res = await call(method, path, body, fresh);
 			if (res.status === 401) return signedOut();
 		}
 		if (!res.ok) {

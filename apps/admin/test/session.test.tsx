@@ -174,6 +174,37 @@ describe("session", () => {
 		expect(await screen.findByText("Code invalide ou expiré.")).toBeTruthy();
 	});
 
+	it("re-enables sign-in with a message when the session is not established after a valid code", async () => {
+		fakeFetch({
+			"GET /auth/token": () => json({}, 401),
+			"POST /auth/start": () => json({ ok: true }),
+			"POST /auth/sign-in/email-otp": () => json({ ok: true }),
+		});
+		const user = userEvent.setup();
+		renderApp();
+		await user.type(await screen.findByLabelText("Adresse email"), "a@b.test");
+		await user.click(screen.getByRole("button", { name: "Recevoir un code" }));
+		await user.type(
+			await screen.findByLabelText("Code à 6 chiffres"),
+			"123456",
+		);
+		await user.click(screen.getByRole("button", { name: "Se connecter" }));
+		expect(
+			await screen.findByText("Service indisponible, réessayez plus tard."),
+		).toBeTruthy();
+		const submit = screen.getByRole("button", {
+			name: "Se connecter",
+		}) as HTMLButtonElement;
+		expect(submit.disabled).toBe(false);
+		expect(
+			(
+				screen.getByRole("button", {
+					name: "Changer d'adresse",
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(false);
+	});
+
 	it("ordinary user sees access denied and no admin call", async () => {
 		const { calls } = fakeFetch({
 			"GET /auth/token": () => json({ token: "jwt-1" }),

@@ -59,9 +59,11 @@ export function SignIn({ linkError }: { linkError: boolean }) {
 		setError(null);
 		try {
 			await verifyCode(sentTo, code);
-			await refresh();
+			// Code accepté mais session non établie (cookie absent, /auth/token en échec).
+			if (!(await refresh())) setError(messageOf(null));
 		} catch (e) {
 			setError(messageOf(e));
+		} finally {
 			setBusy(false);
 		}
 	}
