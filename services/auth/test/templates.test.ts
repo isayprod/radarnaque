@@ -30,6 +30,34 @@ describe("renderSignInEmail", () => {
 		expect(nl.html).toContain("10 minuten");
 	});
 
+	test("la variante admin parle de la page d'administration, pas de l'extension", () => {
+		const m = renderSignInEmail({
+			locale: "fr",
+			url: "https://x/auth/magic-link/verify?token=t",
+			otp: "123456",
+			target: "admin",
+		});
+		const intro =
+			"Pour vous connecter à l'administration de Radarnaque, cliquez sur le lien ci-dessous ou saisissez le code dans la page d'administration.";
+		expect(m.text).toContain(intro);
+		expect(m.html).toContain(intro.replaceAll("'", "&#39;"));
+		expect(m.text).not.toContain("extension");
+		expect(m.html).not.toContain("extension");
+		expect(m.text).toContain("123456");
+		expect(m.text).toContain("10 minutes");
+	});
+
+	test("la variante admin est toujours en français", () => {
+		const m = renderSignInEmail({
+			locale: "nl",
+			url: "u",
+			otp: "1",
+			target: "admin",
+		});
+		expect(m.subject).toBe("Votre connexion à Radarnaque");
+		expect(m.html).toContain('lang="fr"');
+	});
+
 	test("escapes interpolated values in the HTML", () => {
 		const m = renderSignInEmail({
 			locale: "fr",

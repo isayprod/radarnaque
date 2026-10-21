@@ -4,6 +4,15 @@ import type { Auth } from "./auth";
 import type { Mailer } from "./mail/mailer";
 import { renderSignInEmail } from "./mail/templates";
 
+/** D'où vient la demande de connexion : l'extension (défaut) ou la page d'administration. */
+export type SignInTarget = "extension" | "admin";
+
+/** `undefined` → `"extension"` ; `null` si la valeur n'est pas une cible connue. */
+export function parseTarget(value: unknown): SignInTarget | null {
+	if (value === undefined) return "extension";
+	return value === "extension" || value === "admin" ? value : null;
+}
+
 export interface SignInBagValue {
 	url?: string;
 	otp?: string;
@@ -42,7 +51,8 @@ export async function onOtp(otp: string, _email: string): Promise<void> {
 
 /**
  * Crée le lien magique et le code OTP pour `email` (déjà normalisé), puis envoie
- * **un seul** email qui contient les deux.
+ * **un seul** email qui contient les deux. Pour `target: "admin"`, le lien mène à `/admin/`
+ * et l'email est en français quelle que soit `locale` (l'admin n'a pas de NL).
  */
 export async function startSignIn(
 	auth: Auth,
@@ -51,12 +61,25 @@ export async function startSignIn(
 		email,
 		locale,
 		headers,
-	}: { email: string; locale: Locale; headers: Headers },
+		target,
+	}: {
+		email: string;
+		locale: Locale;
+		headers: Headers;
+		target: SignInTarget;
+	},
 ): Promise<void> {
 	const bag: SignInBagValue = {};
 	await signInBag.run(bag, async () => {
 		await auth.api.signInMagicLink({
-			body: { email, callbackURL: "/auth/callback" },
+			body:
+				target === "admin"
+					? {
+							email,
+							callbackURL: "/admin/",
+							errorCallbackURL: "/admin/?erreur=lien",
+						}
+					: { email, callbackURL: "/auth/callback" },
 			headers,
 		});
 		await auth.api.sendVerificationOTP({ body: { email, type: "sign-in" } });
@@ -69,6 +92,6 @@ export async function startSignIn(
 		throw new Error("startSignIn : code OTP non reçu de Better Auth");
 	await mailer.send({
 		to: email,
-		...renderSignInEmail({ locale, url: bag.url, otp: bag.otp }),
+		...renderSignInEmail({ locale, url: bag.url, otp: bag.otp, target }),
 	});
 }
