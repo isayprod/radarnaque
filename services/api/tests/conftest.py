@@ -24,7 +24,10 @@ create schema if not exists app;
 create table if not exists auth."user" (
     id text primary key,
     email text not null unique,
-    role text not null default 'user'
+    role text not null default 'user',
+    -- Mêmes types que la base de dev (Better Auth 1.7 sur Postgres : timestamptz, boolean).
+    "createdAt" timestamptz not null default now(),
+    "emailVerified" boolean not null default false
 );
 -- Tables de Better Auth qui référencent l'utilisateur (colonnes réduites à l'essentiel).
 create table if not exists auth.session (

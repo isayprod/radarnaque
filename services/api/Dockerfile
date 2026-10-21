@@ -29,4 +29,4 @@ RUN useradd --system --uid 10001 --no-create-home radarnaque
 USER radarnaque
 
 EXPOSE 8000
-CMD ["uvicorn", "--factory", "radarnaque_api.main:create_app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+CMD ["uvicorn", "--factory", "radarnaque_api.main:create_app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--no-access-log"]
