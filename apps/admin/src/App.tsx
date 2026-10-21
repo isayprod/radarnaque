@@ -1,4 +1,5 @@
 import { Link } from "./components/Link";
+import { secondaryButton } from "./components/ui";
 import { AccessDenied } from "./pages/AccessDenied";
 import { Ai } from "./pages/Ai";
 import { NotFound } from "./pages/NotFound";
@@ -134,7 +135,7 @@ function Shell({
 						<button
 							type="button"
 							onClick={() => void onSignOut()}
-							className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+							className={secondaryButton}
 						>
 							Se déconnecter
 						</button>

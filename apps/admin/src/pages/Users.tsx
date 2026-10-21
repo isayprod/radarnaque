@@ -4,7 +4,7 @@ import type { AdminApi } from "../api";
 import { Link } from "../components/Link";
 import { field, secondaryButton } from "../components/ui";
 import { formatDateTime } from "../format";
-import { usePlans } from "../plans";
+import { usePlansState } from "../plans";
 import { useSession } from "../session";
 
 type UserList = components["schemas"]["AdminUserListOut"];
@@ -31,7 +31,7 @@ function listPath(
 }
 
 function UserList({ api }: { api: AdminApi }) {
-	const plans = usePlans();
+	const { plans, failed: plansFailed } = usePlansState();
 	const [input, setInput] = useState("");
 	// Terme réellement envoyé : au moins 3 caractères, 300 ms après la dernière frappe.
 	const [q, setQ] = useState<string | null>(null);
@@ -149,6 +149,11 @@ function UserList({ api }: { api: AdminApi }) {
 						))}
 						<option value="none">Aucun</option>
 					</select>
+					{plansFailed && (
+						<p className="text-xs text-red-700">
+							Liste des plans indisponible.
+						</p>
+					)}
 				</div>
 			</div>
 
