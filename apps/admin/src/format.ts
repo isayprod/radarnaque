@@ -19,3 +19,13 @@ export function formatUsd(value: number | null, decimals: 2 | 4 = 2): string {
 	});
 	return `${amount} $`;
 }
+
+const euros = new Intl.NumberFormat("fr-BE", {
+	style: "currency",
+	currency: "EUR",
+});
+
+/** Un montant en centimes, affiché en euros (« 2,99 € »). */
+export function formatEuros(cents: number): string {
+	return euros.format(cents / 100);
+}
