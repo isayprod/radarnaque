@@ -4432,7 +4432,7 @@
     },
     "/api/offer": {
       "get": {
-        "description": "Quotas, photos, ic\u00f4nes et prix des trois plans. Publique, sans identifiant Stripe ;\ngard\u00e9e cinq minutes par les caches.",
+        "description": "Quotas, photos, ic\u00f4nes et prix des trois plans. Publique, sans identifiant Stripe ;\ngard\u00e9e cinq minutes par les caches, et 60 s en m\u00e9moire par le serveur (vid\u00e9e par chaque\nenregistrement de l'admin).",
         "operationId": "offer_api_offer_get",
         "responses": {
           "200": {

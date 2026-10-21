@@ -614,7 +614,7 @@ origine que l'API et l'auth. Interface en français. La barre latérale a cinq �
 La page `/pricing` du site (FR et NL) affiche l'offre en cours. Elle lit `GET /api/offer`, une
 route publique sans authentification : prix, quotas, photos et icônes des trois plans, sans prix
 pour l'essai et sans identifiant Stripe. La réponse a `Cache-Control: public, max-age=300` : après
-une modification dans l'écran Offre, la page peut avoir 5 minutes de retard. Si l'API ne répond
+une modification dans l'écran Offre, la page peut avoir 5 minutes de retard (le serveur garde en plus l'offre 60 s en mémoire, et l'enregistrement vide ce cache). Si l'API ne répond
 pas, la page garde des valeurs de secours (3, 150 et 300 analyses ; 4, 1 et 4 photos).
 
 ```sh

@@ -1,9 +1,12 @@
+import logging
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DataError
+
+logger = logging.getLogger("radarnaque.errors")
 
 
 class ApiError(Exception):
@@ -45,9 +48,15 @@ def install_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(DataError)
-    async def _data_error(_request: Request, _exc: DataError) -> JSONResponse:
+    async def _data_error(_request: Request, exc: DataError) -> JSONResponse:
         # Valeur que Postgres refuse (un caractère NUL, par exemple) : 422, sans jamais renvoyer
-        # la valeur reçue ni le texte de Postgres.
+        # la valeur reçue ni le texte de Postgres. Le journal ne garde que le type de l'erreur
+        # du pilote et son sqlstate, pour qu'un 422 inattendu laisse une trace.
+        logger.warning(
+            "DataError %s (sqlstate %s)",
+            type(exc.orig).__name__,
+            getattr(exc.orig, "sqlstate", None),
+        )
         return JSONResponse(
             status_code=422, content=error_body("invalid_request", "Requête invalide.")
         )

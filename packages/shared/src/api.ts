@@ -517,7 +517,8 @@ export interface paths {
         /**
          * Offer
          * @description Quotas, photos, icônes et prix des trois plans. Publique, sans identifiant Stripe ;
-         *     gardée cinq minutes par les caches.
+         *     gardée cinq minutes par les caches, et 60 s en mémoire par le serveur (vidée par chaque
+         *     enregistrement de l'admin).
          */
         get: operations["offer_api_offer_get"];
         put?: never;

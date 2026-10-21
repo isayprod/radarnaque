@@ -578,6 +578,31 @@ async def test_from_after_to_is_422(client, bearer, admin, db):
     assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_request"
 
 
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"from": "0001-01-01"},
+        {"to": "9999-12-31"},
+        {"from": "0001-01-01", "to": "9999-12-31"},
+        {"from": "1969-12-31"},
+        {"to": "2101-01-01"},
+    ],
+)
+async def test_extreme_dates_are_422_never_500(client, bearer, admin, params):
+    r = await client.get("/api/admin/analyses", params=params, headers=bearer(admin))
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "invalid_request"
+
+
+async def test_date_bounds_are_accepted(client, bearer, admin):
+    r = await client.get(
+        "/api/admin/analyses",
+        params={"from": "1970-01-01", "to": "2100-12-31"},
+        headers=bearer(admin),
+    )
+    assert r.status_code == 200, r.text
+
+
 async def test_served_count(client, bearer, admin, db, make_user):
     consumer = await make_user("client@radarnaque.test")
     served = await _make_analysis(db, ext="a", created_at=BASE)

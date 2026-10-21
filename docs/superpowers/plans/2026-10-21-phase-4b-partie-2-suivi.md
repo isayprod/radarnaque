@@ -4,14 +4,16 @@ Remarques relevées pendant la partie 2 de la phase 4b : écrans Tableau de bord
 
 ## Corrections prévues avant fusion
 
-Aucune pour l'instant. La relecture finale de la branche peut en ajouter.
+Aucune. La vague issue de la relecture finale a corrigé : les dates extrêmes des filtres `from` et `to` de l'écran Analyses (`422` au lieu d'une `500`), le log du `DataError` (type et sqlstate seulement), le quota public de l'essai (limité par son plafond total, sans prix) avec un cache serveur de 60 s sur `GET /api/offer`, la gravité des raisons en français dans le détail d'une analyse, un HTML invalide dans ce détail, et les docs.
 
 ## Décisions prises pendant l'exécution
 
 À garder en tête en relisant ou en faisant évoluer les écrans.
 
 - **Curseur des analyses :** `before` est un jeton opaque `"<date ISO>~<id>"`, pas un identifiant. La liste est triée par date du dernier appel au modèle, et une analyse rafraîchie remonte en tête : un simple identifiant ne suffisait pas à paginer sans trou ni doublon.
-- **URL de l'annonce (`listings.url`, migration 0008) :** sans query ni fragment, acceptée seulement si l'hôte est le domaine du site ou un sous-domaine. Sinon elle reste à `NULL`.
+- **URL de l'annonce (`listings.url`, migration 0008) :** sans query ni fragment, acceptée seulement si l'hôte est le domaine du site ou un sous-domaine. Sinon l'URL déjà connue est conservée, et une annonce qui n'en a pas reste à `NULL` ; `user:pass@` est retiré.
+- **Cache serveur de `GET /api/offer` :** l'offre publique est gardée 60 s en mémoire du processus (`PublicOfferCache`, horloge injectable, comme `SearchHealth`). Un `PATCH /api/admin/offer/plans/{plan}` réussi la vide, donc la nouvelle valeur sort aussitôt côté serveur ; le cache HTTP de 5 minutes reste devant. Avec plusieurs processus, chacun garde son cache jusqu'à 60 s.
+- **Quota public de l'essai :** `scans` vaut le quota, limité par `total_scan_cap` quand il existe (pour tous les plans) ; l'essai n'a jamais de prix publié.
 - **Affichage des nombres :** les pourcentages du Tableau de bord sont arrondis à l'entier ; le coût moyen par appel est affiché à 4 décimales, ainsi que les coûts de l'écran Analyses.
 - **Avertissement Stripe :** il s'affiche quand change le prix d'un intervalle qui a un identifiant Stripe, pas à chaque enregistrement.
 - **Photos des analyses :** ce sont des liens, pas des images (la politique de sécurité de contenu de l'admin les bloquerait).
@@ -55,9 +57,7 @@ Rien de ceci n'a été essayé hors des tests.
 - **Projection du mois linéaire :** `coût du mois × (durée du mois / durée écoulée)`. Elle ne tient compte ni des jours de la semaine ni d'un pic récent, et reste « — » pendant les 24 premières heures du mois. C'est une indication, pas une prévision.
 - **Analyses d'avant la migration 0008 :** elles n'ont pas de lien vers l'annonce. Le lien apparaît au prochain scan de l'annonce.
 - **`/privacy` en texte fixe :** la page annonce « 1 photo en Standard, jusqu'à 4 en Premium et pendant l'essai » et « jusqu'à 3 recherches ». L'écran Offre avertit quand les photos changent, l'écran IA quand les recherches changent, mais rien ne met la page à jour toute seule.
-- **`GET /api/offer` en retard de 5 minutes :** après une modification de l'offre, la page `/pricing` peut garder l'ancienne valeur jusqu'à 5 minutes (cache HTTP).
-- **`GET /api/offer` et le plafond de l'essai :** il donne le quota de l'essai (3) sans tenir compte de son plafond total (`total_scan_cap`). Si l'admin règle un plafond inférieur au quota, la page l'ignore.
-- **`DataError` sans log serveur :** le gestionnaire qui répond `422 invalid_request` (caractère NUL, etc.) n'écrit rien dans les logs du serveur. Un problème de données venu d'un client est invisible côté serveur.
+- **`GET /api/offer` en retard de 5 minutes :** après une modification de l'offre, la page `/pricing` peut garder l'ancienne valeur jusqu'à 5 minutes (cache HTTP, le cache serveur de 60 s étant vidé par l'enregistrement).
 - **Scan sans issue :** un scan encore en cours, sans résultat ni échec, compte dans la carte « Analyses » mais dans aucune barre du graphique. Les barres de la journée ne s'additionnent donc pas toujours à la carte tant qu'un scan est en cours.
 - **Filtre Site en dur :** l'écran Analyses propose les trois domaines connus ; un nouveau site demande de modifier l'écran.
 - **Photos en liens :** les photos d'une analyse ne s'affichent pas dans l'écran (politique de sécurité de contenu stricte) ; on les ouvre dans un nouvel onglet.

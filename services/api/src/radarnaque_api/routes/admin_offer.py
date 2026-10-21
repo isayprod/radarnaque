@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from radarnaque_api.admin_schemas import AdminOfferOut, OfferPlanIn
@@ -25,6 +25,7 @@ async def overview(
 
 @router.patch("/plans/{plan}", response_model=AdminOfferOut)
 async def update_plan(
+    request: Request,
     plan: str,
     body: OfferPlanIn,
     admin: Annotated[AdminContext, Depends(require_admin)],
@@ -35,4 +36,5 @@ async def update_plan(
     laisse 0 scan restant."""
     await admin_offer.update_plan(session, admin_id=admin.user.id, plan_code=plan, changes=body)
     await session.commit()
+    request.app.state.public_offer_cache.clear()  # la page des prix relit l'offre aussitôt
     return await admin_offer.build_overview(session)

@@ -170,6 +170,12 @@ function detail(over: Partial<Detail> = {}): Detail {
 					fr: "Deuxième raison FR",
 					nl: "Tweede reden NL",
 				},
+				{
+					position: 3,
+					severity: "warning",
+					fr: "Troisième raison FR",
+					nl: "Derde reden NL",
+				},
 			],
 		},
 		searches: [
@@ -578,15 +584,32 @@ describe("détail d'une analyse", () => {
 			within(result).getByText("Samenvatting in het Nederlands"),
 		).toBeTruthy();
 		expect(within(result).getByText("Advies NL")).toBeTruthy();
+		// HTML valide : dans la liste de définitions, un groupe `div` ne contient que dt et dd.
+		for (const group of result.querySelectorAll("dl > div")) {
+			expect(group.querySelector(":scope > div")).toBeNull();
+		}
 		const reasons = within(result)
 			.getAllByRole("listitem")
 			.map((item) => item.textContent ?? "");
-		expect(reasons).toHaveLength(2);
+		expect(reasons).toHaveLength(3);
 		expect(reasons[0]).toContain("Première raison FR");
 		expect(reasons[0]).toContain("Eerste reden NL");
-		expect(reasons[0]).toContain("danger");
+		expect(reasons[0]).toContain("Grave");
+		expect(reasons[0]).not.toContain("danger");
 		expect(reasons[1]).toContain("Deuxième raison FR");
-		expect(reasons[1]).toContain("info");
+		expect(reasons[1]).toContain("Information");
+		expect(reasons[2]).toContain("Attention");
+		expect(reasons[2]).not.toContain("warning");
+		// Une couleur par gravité (rouge, orange, gris).
+		expect(within(result).getByText("Attention").className).toContain(
+			"text-orange-700",
+		);
+		expect(within(result).getByText("Grave").className).toContain(
+			"text-red-700",
+		);
+		expect(within(result).getByText("Information").className).toContain(
+			"text-slate-600",
+		);
 
 		const searches = within(
 			screen.getByRole("region", { name: "Recherches web" }),

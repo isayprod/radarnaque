@@ -31,6 +31,7 @@ from radarnaque_api.routes import (
     scans,
 )
 from radarnaque_api.search import make_search_backend
+from radarnaque_api.services.admin_offer import PublicOfferCache
 from radarnaque_api.services.ai_probes import SearchHealth
 from radarnaque_api.services.purge import purge_forever
 from radarnaque_api.services.rate_window import SlidingWindowLimiter
@@ -171,6 +172,7 @@ def create_app(
     app.state.settings = settings
     app.state.providers = providers
     app.state.billing = ManualBillingProvider()
+    app.state.public_offer_cache = PublicOfferCache()  # `GET /api/offer` : 60 s en mémoire
     app.state.analysis_timeout_s = ANALYSIS_TIMEOUT_S  # délai total d'une analyse (réduit en test)
     app.state.jwt_verifier = JwtVerifier(
         jwks_fetcher or http_jwks_fetcher(settings.jwks_url),
