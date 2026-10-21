@@ -251,6 +251,8 @@ describe("session", () => {
 				),
 		});
 		const user = userEvent.setup();
+		// Une page sans appel : la racine /admin/ (tableau de bord) en ferait d'elle-même.
+		window.history.replaceState(null, "", "/admin/introuvable");
 		renderApp();
 		await user.click(await screen.findByRole("button", { name: "Charger" }));
 		expect(

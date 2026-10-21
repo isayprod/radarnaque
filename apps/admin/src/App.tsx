@@ -2,6 +2,7 @@ import { Link } from "./components/Link";
 import { secondaryButton } from "./components/ui";
 import { AccessDenied } from "./pages/AccessDenied";
 import { Ai } from "./pages/Ai";
+import { Dashboard } from "./pages/Dashboard";
 import { NotFound } from "./pages/NotFound";
 import { SignIn } from "./pages/SignIn";
 import { UserCard } from "./pages/UserCard";
@@ -60,9 +61,11 @@ function title(route: Route): string {
 	}
 }
 
-// Tableau de bord, offre et analyses n'ont pas encore d'écran : contenu vide.
+// Offre et analyses n'ont pas encore d'écran : contenu vide.
 function Content({ route }: { route: Route }) {
 	switch (route.name) {
+		case "dashboard":
+			return <Dashboard />;
 		case "users":
 			return <Users />;
 		case "user":
