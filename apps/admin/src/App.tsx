@@ -1,6 +1,9 @@
 import type { MouseEvent } from "react";
+import { AccessDenied } from "./pages/AccessDenied";
 import { NotFound } from "./pages/NotFound";
+import { SignIn } from "./pages/SignIn";
 import { hrefOf, type Route, useRoute } from "./router";
+import { useSession } from "./session";
 
 type NavItem = {
 	label: string;
@@ -41,6 +44,26 @@ function Content({ route }: { route: Route }) {
 }
 
 export function App() {
+	const session = useSession();
+	switch (session.status) {
+		case "loading":
+			return <p className="p-6 text-sm text-slate-500">Chargement…</p>;
+		case "signedOut":
+			return <SignIn linkError={session.linkError} />;
+		case "denied":
+			return <AccessDenied />;
+		case "ready":
+			return <Shell email={session.email} onSignOut={session.signOut} />;
+	}
+}
+
+function Shell({
+	email,
+	onSignOut,
+}: {
+	email: string;
+	onSignOut: () => Promise<void>;
+}) {
 	const [route, navigate] = useRoute();
 
 	// Clic simple : navigation interne ; Ctrl, Cmd, Maj ou clic milieu gardent le
@@ -89,8 +112,18 @@ export function App() {
 				</ul>
 			</nav>
 			<div className="flex min-w-0 flex-1 flex-col">
-				<header className="border-b border-slate-200 px-6 py-4">
+				<header className="flex items-center justify-between gap-4 border-b border-slate-200 px-6 py-4">
 					<h1 className="text-xl font-semibold">{title(route)}</h1>
+					<div className="flex items-center gap-3 text-sm">
+						<span className="break-all text-slate-600">{email}</span>
+						<button
+							type="button"
+							onClick={() => void onSignOut()}
+							className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+						>
+							Se déconnecter
+						</button>
+					</div>
 				</header>
 				<main className="flex-1 p-6">
 					<Content route={route} />
