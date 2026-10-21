@@ -45,7 +45,8 @@ function evenCeil(value: number): number {
 /**
  * Analyses par jour en barres empilées (cache, appel, échec) et coût du jour en ligne sur l'axe
  * de droite. Un scan sans issue compte dans la carte « Analyses » mais dans aucune série : une
- * barre peut donc être plus courte que le total du jour.
+ * barre peut donc être plus courte que le total du jour. Le SVG est une image pour les lecteurs
+ * d'écran : les valeurs par jour sont aussi dans un tableau repliable.
  */
 export function DailyChart({ points }: { points: DailyPoint[] }) {
 	const count = Math.max(points.length, 1);
@@ -180,6 +181,36 @@ export function DailyChart({ points }: { points: DailyPoint[] }) {
 					Coût IA du jour
 				</li>
 			</ul>
+
+			<details className="text-sm">
+				<summary className="cursor-pointer text-slate-600">
+					Voir les données
+				</summary>
+				<div className="mt-2 max-h-80 overflow-auto">
+					<table className="w-full text-left text-xs">
+						<thead className="text-slate-500">
+							<tr>
+								<th className="py-1 pr-4 font-medium">Date</th>
+								<th className="py-1 pr-4 font-medium">Depuis le cache</th>
+								<th className="py-1 pr-4 font-medium">Avec appel</th>
+								<th className="py-1 pr-4 font-medium">En échec</th>
+								<th className="py-1 font-medium">Coût</th>
+							</tr>
+						</thead>
+						<tbody>
+							{points.map((point) => (
+								<tr key={point.date} className="border-t border-slate-100">
+									<td className="py-1 pr-4">{shortDate(point.date)}</td>
+									<td className="py-1 pr-4">{point.fromCache}</td>
+									<td className="py-1 pr-4">{point.llm}</td>
+									<td className="py-1 pr-4">{point.failed}</td>
+									<td className="py-1">{formatUsd(point.costUsd)}</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+			</details>
 		</div>
 	);
 }
