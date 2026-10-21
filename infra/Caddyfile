@@ -1,7 +1,8 @@
 # Caddy de production : une seule origine. SITE_ADDRESS vaut radarnaque.mostconsult.be
 # (HTTPS automatique) ; http://localhost pour un essai local sans TLS.
 # auth et api sont joints sur le réseau interne de docker compose ; le site compilé
-# est dans l'image (/srv/site). Les routes sont celles de Caddyfile.dev.
+# est dans l'image (/srv/site), l'admin aussi (/srv/admin, servi sous /admin/). Les routes sont
+# celles de Caddyfile.dev.
 #
 # Pas de trusted_proxies : Caddy remplace X-Forwarded-For par l'IP réelle du client, donc
 # le limiteur par IP du service auth ne peut pas être usurpé par un en-tête fourni.
@@ -62,6 +63,25 @@
 			max_size 1MB
 		}
 		reverse_proxy api:8000
+	}
+
+	# Application d'administration (SPA) : /admin/* → /srv/admin, repli sur index.html.
+	redir /admin /admin/ 308
+	handle /admin/* {
+		header {
+			Content-Security-Policy "default-src 'self'; frame-ancestors 'none'"
+			X-Frame-Options DENY
+			Referrer-Policy no-referrer
+		}
+		# Deux matchers exclusifs : Caddy trie les directives `header` par matcher, un
+		# `Cache-Control` sans matcher écraserait celui des assets.
+		@adminAssets path /admin/assets/*
+		@adminPages not path /admin/assets/*
+		header @adminAssets Cache-Control "public, max-age=31536000, immutable"
+		header @adminPages Cache-Control no-store
+		root * /srv
+		try_files {path} /admin/index.html
+		file_server
 	}
 
 	handle {
