@@ -190,6 +190,31 @@ describe("liste des utilisateurs", () => {
 		expect(listCalls()[3].url.searchParams.get("role")).toBe("admin");
 	});
 
+	it("a failed reload of a new filter clears the list and its cursor", async () => {
+		const { listCalls } = fakeFetch({
+			...base,
+			"GET /api/admin/users": ({ url }) =>
+				url.searchParams.get("role") === "admin"
+					? apiError(500, "internal_error", "Erreur.")
+					: json({ items: [row()], nextBefore: "u1" }),
+		});
+		const user = userEvent.setup();
+		renderAt("/admin/utilisateurs");
+		await screen.findByText("alice@radarnaque.test");
+		expect(screen.getByRole("button", { name: "Page suivante" })).toBeTruthy();
+
+		await user.selectOptions(screen.getByLabelText("Rôle"), "admin");
+		expect(
+			await screen.findByText("Impossible de charger la liste."),
+		).toBeTruthy();
+		expect(screen.queryByText("alice@radarnaque.test")).toBeNull();
+		// Sans curseur périmé, aucune page suivante ne peut partir avec le nouveau filtre.
+		expect(screen.queryByRole("button", { name: "Page suivante" })).toBeNull();
+		expect(listCalls().some((c) => c.url.searchParams.has("before"))).toBe(
+			false,
+		);
+	});
+
 	it("opens the card of a row", async () => {
 		fakeFetch({
 			...base,

@@ -500,6 +500,30 @@ describe("Better Auth admin routes", () => {
 		expect(impersonate.status).toBe(404);
 		expect((await json(impersonate)).error?.code).toBe("not_found");
 	});
+
+	test("path variants of /auth/admin/* never reach Better Auth admin routes", async () => {
+		const h = setup();
+		const email = uniqueEmail("admin-variants");
+		const signIn = await otpSignIn(h, email);
+		expect(signIn.status).toBe(200);
+		const cookie = signIn.headers
+			.getSetCookie()
+			.map((c) => c.split(";")[0])
+			.join("; ");
+		await pool.query(`UPDATE "user" SET role = 'admin' WHERE email = $1`, [
+			email,
+		]);
+
+		for (const path of [
+			"/auth//admin/list-users",
+			"/auth/Admin/list-users",
+			"/auth/%61dmin/list-users",
+			"/auth/x/../admin/list-users",
+		]) {
+			const res = await call(h, path, { headers: { cookie } });
+			expect(res.status, path).toBe(404);
+		}
+	});
 });
 
 describe("user creation hook", () => {

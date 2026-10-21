@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from radarnaque_api.models import Subscription
 from radarnaque_api.services import admin_users
@@ -475,7 +476,7 @@ async def test_last_admin_is_checked_under_the_lock(client, db, bearer, make_use
     b = await make_user("b@radarnaque.test", "admin")
     # Une transaction concurrente (comme la commande `admin:revoke`) tient le verrou.
     await db.execute(
-        text("select id from auth.\"user\" where role = 'admin' order by id for update")
+        text("select id from auth.\"user\" where role = 'admin' order by id for no key update")
     )
     pending = asyncio.create_task(
         client.post(f"/api/admin/users/{a}/role", json={"role": "user"}, headers=bearer(b))
@@ -489,6 +490,56 @@ async def test_last_admin_is_checked_under_the_lock(client, db, bearer, make_use
     assert r.json()["error"]["code"] == "conflict"
     assert await _count_actions(db) == 0
     assert await _scalar(db, 'select role from auth."user" where id = :i', i=a) == "admin"
+
+
+async def test_journal_insert_does_not_wait_for_a_no_key_update_lock(db, make_user):
+    """Le journal d'un admin prend un `FOR KEY SHARE` sur sa ligne (clé étrangère) : il ne doit
+    pas attendre un `FOR NO KEY UPDATE` tenu par un retrait de rôle. `lock_timeout` court : si
+    le verrou était `FOR UPDATE`, l'insertion échouerait."""
+    actor = await make_user("acteur@radarnaque.test", "admin")
+    engine = db.bind
+    async with AsyncSession(engine) as holder:
+        await holder.execute(
+            text('select id from auth."user" where id = :i for no key update'), {"i": actor}
+        )
+        await db.execute(text("set local lock_timeout = '500ms'"))
+        await db.execute(
+            text("insert into app.admin_actions(admin_user_id, action) values (:i, 'user.plan_set')"),
+            {"i": actor},
+        )
+        await db.commit()
+        await holder.rollback()
+    assert await _scalar(db, "select count(*) from app.admin_actions") == 1
+
+
+async def test_plan_and_role_removal_do_not_deadlock_across_admins(client, db, bearer, make_user):
+    """Croisement : l'admin A attribue un plan à l'admin C (verrou sur C) pendant que l'admin B
+    retire un rôle (verrou sur tous les admins par id : il tient A, attend C). A écrit ensuite son
+    journal, qui prend un `FOR KEY SHARE` sur la ligne de A : tenue en `FOR NO KEY UPDATE` par B,
+    cette ligne ne bloque pas A (avec `FOR UPDATE`, c'était un interblocage et un 500)."""
+    ids = sorted([await make_user(f"{n}@radarnaque.test", "admin") for n in "abc"])
+    a, b, c = ids  # B verrouille dans cet ordre : a, puis b, puis il attend c
+    async with AsyncSession(db.bind) as acting_as_a:
+        # L'attribution de A, vue de l'extérieur : elle tient déjà le verrou sur C.
+        await acting_as_a.execute(
+            text('select id from auth."user" where id = :i for no key update'), {"i": c}
+        )
+        pending = asyncio.create_task(
+            client.post(f"/api/admin/users/{c}/role", json={"role": "user"}, headers=bearer(b))
+        )
+        await asyncio.sleep(0.5)
+        assert not pending.done()  # B tient a et b, attend c
+        await acting_as_a.execute(text("set local lock_timeout = '2s'"))
+        await acting_as_a.execute(
+            text("insert into app.admin_actions(admin_user_id, action) values (:i, 'user.plan_set')"),
+            {"i": a},
+        )
+        await acting_as_a.commit()
+    r = await asyncio.wait_for(pending, timeout=10)
+    assert r.status_code == 200, r.text
+    await db.rollback()
+    assert await _scalar(db, 'select role from auth."user" where id = :i', i=c) == "user"
+    assert await _scalar(db, "select count(*) from app.admin_actions") == 2
 
 
 async def test_role_superuser_is_422(client, db, bearer, admin, make_user):

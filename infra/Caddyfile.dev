@@ -50,18 +50,27 @@
 
 	# Application d'administration (SPA) : /admin/* → /srv/admin, repli sur index.html.
 	redir /admin /admin/ 308
+
+	# Assets compilés (noms avec empreinte) : jamais de repli sur index.html, un fichier
+	# absent donne un vrai 404. Déclaré avant /admin/*.
+	handle /admin/assets/* {
+		header {
+			Content-Security-Policy "default-src 'self'; frame-ancestors 'none'"
+			X-Frame-Options DENY
+			Referrer-Policy no-referrer
+			Cache-Control "public, max-age=31536000, immutable"
+		}
+		root * /srv
+		file_server
+	}
+
 	handle /admin/* {
 		header {
 			Content-Security-Policy "default-src 'self'; frame-ancestors 'none'"
 			X-Frame-Options DENY
 			Referrer-Policy no-referrer
+			Cache-Control no-store
 		}
-		# Deux matchers exclusifs : Caddy trie les directives `header` par matcher, un
-		# `Cache-Control` sans matcher écraserait celui des assets.
-		@adminAssets path /admin/assets/*
-		@adminPages not path /admin/assets/*
-		header @adminAssets Cache-Control "public, max-age=31536000, immutable"
-		header @adminPages Cache-Control no-store
 		root * /srv
 		try_files {path} /admin/index.html
 		file_server
