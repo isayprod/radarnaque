@@ -1,6 +1,6 @@
 # Radarnaque v4 — État du projet
 
-*Au 20 octobre 2026.* Ce document résume ce qui a été construit, où le trouver, et ce qu'il reste à faire.
+*Au 21 octobre 2026.* Ce document résume ce qui a été construit, où le trouver, et ce qu'il reste à faire.
 
 Les autres documents :
 - le démarrage pas à pas est dans le [README](../README.md) ;
@@ -25,11 +25,12 @@ Radarnaque est une extension Chrome, Edge et Brave qui signale les annonces susp
 | — | Superuser de développement (logs de debug, relance sans cache) | `feat/superuser-debug` (au-dessus de 3c) | terminée, non poussée |
 | 3d | Recherche web (SearXNG), réflexion, photos obligatoires (un seul type d'analyse), analyse en direct dans la pastille | `feat/phase-3d` (au-dessus de `feat/superuser-debug`) | terminée, non poussée |
 | 4a | RGPD : suppression du compte, purge à 12 mois, page `/privacy` à jour | `feat/phase-4a` (au-dessus de `feat/phase-3d`) | terminée, non poussée |
-| 4b | Administration (SPA admin, `/api/admin/*`, suppression d'un compte par l'admin) | — | à faire |
+| 4b, partie 1 | Administration : socle (SPA `apps/admin`, connexion, droits, journal), écrans Utilisateurs et IA | `feat/phase-4b` (au-dessus de `main`, où 4a est fusionnée) | terminée, non poussée |
+| 4b, partie 2 | Administration : Tableau de bord, Offre (dont `/pricing`) et Analyses | — | à faire |
 | 5 | Paiement Stripe | — | à faire (les routes répondent 501) |
 | — | Passe de design (identité visuelle, maquettes) | — | à faire en dernier |
 
-Les phases 3b, 3c et 3d n'ont pas encore été essayées sur les vrais sites. Les vérifications à faire sont listées dans les suivis [3b](superpowers/plans/2026-10-18-phase-3b-suivi.md), [3c](superpowers/plans/2026-10-18-phase-3c-suivi.md), [3d](superpowers/plans/2026-10-19-phase-3d-suivi.md) et [4a](superpowers/plans/2026-10-20-phase-4a-suivi.md). Les phases 3d et 4a ont aussi une liste de corrections prévues avant leur fusion.
+Les phases 3b, 3c et 3d n'ont pas encore été essayées sur les vrais sites. Les vérifications à faire sont listées dans les suivis [3b](superpowers/plans/2026-10-18-phase-3b-suivi.md), [3c](superpowers/plans/2026-10-18-phase-3c-suivi.md), [3d](superpowers/plans/2026-10-19-phase-3d-suivi.md), [4a](superpowers/plans/2026-10-20-phase-4a-suivi.md) et [4b partie 1](superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md). Les phases 3d et 4a ont aussi une liste de corrections prévues avant leur fusion.
 
 ## Architecture
 
@@ -38,6 +39,7 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
    content scripts                /auth/*                         sessions, JWT EdDSA, admin
    service worker                 /api/*        ──►  api   (FastAPI, Python 3.13, :8000)
    popup                          /auth/callback ─►  site  (Vite statique)
+                                  /admin/*      ──►  admin (SPA Vite statique)
                                                          │
                                                   PostgreSQL (schéma auth + schéma app en 3NF)
                                                          │
@@ -45,9 +47,9 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
                                                   SearXNG (recherche web, réseau interne)
 ```
 
-- **Dépôt public :** https://github.com/isayprod/radarnaque. Le monorepo utilise pnpm (`apps/extension`, `apps/site`, `services/auth`, `packages/shared`) et uv (`services/api`).
+- **Dépôt public :** https://github.com/isayprod/radarnaque. Le monorepo utilise pnpm (`apps/extension`, `apps/site`, `apps/admin`, `services/auth`, `packages/shared`) et uv (`services/api`).
 - **Hébergement prévu :** un serveur en Allemagne, avec le domaine `radarnaque.mostconsult.be`. Les emails partent par Resend.
-- **En dev :** Caddy écoute sur `http://localhost:8080`, Postgres sur le port 5433, SearXNG sur 8888, l'auth sur 3000, l'API sur 8000 et le serveur WXT sur 3100. `pnpm dev` lance tout.
+- **En dev :** Caddy écoute sur `http://localhost:8080`, Postgres sur le port 5433, SearXNG sur 8888, l'auth sur 3000, l'API sur 8000 et le serveur WXT sur 3100. `pnpm dev` lance tout, y compris la compilation en continu de l'admin (`http://localhost:8080/admin/`).
 
 ## Ce qui fonctionne
 
@@ -146,13 +148,38 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
   - sur `204` ou `401`, le service worker efface la session, le JWT et les résultats IA gardés ;
   - sur une autre erreur (500, réseau), il ne touche à rien et la popup dit que le compte n'a pas été modifié.
 - **Purge à 12 mois :**
-  - une tâche de fond de l'API (lancée 60 s après le démarrage, puis toutes les 24 h) supprime les `scan_events` de plus de 12 mois (`SCAN_RETENTION_MONTHS`), par lots de 5 000 ;
+  - une tâche de fond de l'API (lancée 60 s après le démarrage, puis toutes les 24 h) supprime les `scan_events` de plus de 12 mois (`SCAN_RETENTION_MONTHS`), par lots de 5 000 (depuis la phase 4b, la même passe, `run_purge`, purge aussi `admin_actions` et `llm_calls`) ;
   - `pg_try_advisory_lock` : un seul processus purge à la fois ;
   - `PURGE_ENABLED=false` la désactive (valeur par défaut des tests) ;
   - `uv run radarnaque-purge` fait une passe à la main ;
-  - le journal `INFO` ne donne que le nombre d'événements supprimés.
+  - le journal `INFO` ne donne que les nombres supprimés.
 - **Essai préservé :** avant de supprimer, la purge ajoute les scans réussis de l'essai à `subscriptions.purged_scans` (migration 0006). Le plafond total en tient compte : un essai ne retrouve pas ses 3 analyses.
 - **Page `/privacy` :** FR et NL à jour, avec les sections photos (toute analyse), recherches sur le web, résultat gardé 24 h dans le navigateur, conservation (seul le nombre d'analyses de l'essai reste après 12 mois), hébergement (sauvegardes chiffrées copiées vers un stockage externe, Resend pour les emails de connexion) et effacement.
+
+### Administration (phase 4b, partie 1)
+- **Application :** `apps/admin` (Vite, React, Tailwind), servie par Caddy sous `/admin/`, en production comme en dev (`http://localhost:8080/admin/`). Interface en français, JWT gardé en mémoire. `pnpm dev:admin` (compilation en continu) est lancé par `pnpm dev`. Caddy ajoute sur `/admin/*` une politique de sécurité de contenu stricte, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` et `Cache-Control: no-store` (sauf `/admin/assets/*`).
+- **Connexion :** lien magique ou code à 6 chiffres, par `/auth/start` avec `target: "admin"` (lien vers `/admin/`, email qui parle de la « page d'administration », `400 invalid_target` pour une autre valeur). Un utilisateur sans le rôle voit « Accès réservé aux administrateurs ». Un `403 admin_required` en cours de session affiche le même écran, sans nouvelle tentative.
+- **Droits :** `require_admin` (`auth.user.role = 'admin'`, relu en base à chaque requête ; superuser accepté hors production). Les routes `/auth/admin/*` de Better Auth répondent `404` : tout passe par `/api/admin/*`.
+- **Premier admin :**
+  - en dev : `pnpm admin:grant <email>` et `pnpm admin:revoke <email>` (le dernier admin ne se retire pas : code 3) ;
+  - en production : `docker compose exec auth node --import tsx scripts/admin-role.ts grant <email>`.
+- **Journal :**
+  - migration 0007 : `admin_actions` (une ligne par modification, écrite dans la même transaction, `details` en `{ from, to }`, jamais d'email) et `llm_calls` (une ligne par appel au modèle, écrite par `save_analysis`, reprise des analyses existantes) ;
+  - une ligne `INFO` par modification sous `radarnaque.admin`, sans email ni identifiant ;
+  - uvicorn tourne avec `--no-access-log` (Dockerfile et `dev:api`).
+- **Utilisateurs :**
+  - recherche par email (3 caractères au moins, sous-chaîne, `%` et `_` traités comme des caractères), liste paginée par curseur ;
+  - fiche : abonnement actif, consommation, historique, 20 derniers scans, journal ;
+  - actions : attribuer un plan (provider `manual`, `409` si l'abonnement actif vient de Stripe), nommer ou retirer un admin (pas soi-même, pas le dernier), supprimer le compte (confirmation par la saisie de l'email, pas soi-même).
+- **IA :**
+  - fournisseurs de `providers.toml` en lecture seule (état de la clé, jamais sa valeur) ;
+  - ajout d'un modèle (slug de 1 à 200 caractères, sans espace) ;
+  - modèle actif et versions du prompt (200 à 20 000 caractères, jamais modifiées, numéros qui se suivent) ;
+  - réglages : `cache_ttl_hours` 1–168, `rate_limit_per_minute` 1–600, `max_web_searches` 0–5 ;
+  - essai du modèle (annonce fictive, hors quota et hors cache) : 10 par heure et par admin ;
+  - état du moteur de recherche (`GET {SEARXNG_URL}/healthz`, 3 s, gardé 60 s : `ok`, `down`, `disabled`) et essai de recherche hors cache : 30 par heure et par admin.
+- **Barre latérale :** seulement Utilisateurs et IA ; le Tableau de bord, l'Offre et les Analyses viennent en partie 2.
+- Voir le [README](../README.md#administration-phase-4b) et le [suivi](superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md).
 
 ### Superuser de développement
 - **Rôle `superuser`, réservé au développement :** aucun quota ni limite de requêtes, traité comme un compte **Premium** (plan, fonctionnalités, 4 photos). Il s'attribue avec `DEV_SUPERUSER_EMAIL` (`infra/.env`) ou `pnpm dev:superuser <email>`. L'API l'ignore en production.
@@ -180,10 +207,11 @@ Coût estimé avec `google/gemini-3.1-flash-lite` : environ 1,1 ¢ par analyse a
 
 | Partie | Tests | Commande |
 |---|---|---|
-| API | 787 | `pnpm test:api` |
-| Extension | 1075 | `pnpm --filter extension test` |
-| Auth | 66 | `pnpm --filter auth test` |
-| Site | 46 | `pnpm --filter site test` |
+| API | 907 | `pnpm test:api` |
+| Extension | 1085 | `pnpm --filter extension test` |
+| Auth | 88 | `pnpm --filter auth test` |
+| Site | 50 | `pnpm --filter site test` |
+| Admin | 61 | `pnpm --filter admin test` |
 | Scripts | 16 | `pnpm test:scripts` |
 | Bout en bout | connexion et scan (en flux) | `pnpm e2e:login`, `pnpm e2e:scan` |
 
@@ -201,12 +229,13 @@ Coût estimé avec `google/gemini-3.1-flash-lite` : environ 1,1 ¢ par analyse a
 - **Réflexion :** `reasoning_effort` (`none`, `low`, `medium`, `high`) est une option de chaque fournisseur de `services/api/providers.toml`. Redémarrer l'API après l'avoir changée.
 - **Sans recherche web :** `SEARCH_BACKEND=none` dans `infra/.env` retire l'outil de recherche.
 - **Essayer le flux :** `pnpm e2e:scan` affiche chaque événement à son arrivée ; `--no-stream` utilise la route sans flux.
-- **Base de dev :** l'API applique les migrations au démarrage (`pnpm dev:api`). La migration 0005 de la phase 3d crée le type `full`, retire les quotas `text` et `image` et ajoute `plans.max_images`. La migration 0006 de la phase 4a ajoute `subscriptions.purged_scans`.
-- **Purge :** `PURGE_ENABLED=false` dans `infra/.env` coupe la tâche de fond en dev ; `radarnaque-purge` fait une passe à la main (voir le [README](../README.md)).
+- **Base de dev :** l'API applique les migrations au démarrage (`pnpm dev:api`). La migration 0005 de la phase 3d crée le type `full`, retire les quotas `text` et `image` et ajoute `plans.max_images`. La migration 0006 de la phase 4a ajoute `subscriptions.purged_scans`. La migration 0007 de la phase 4b crée `admin_actions` et `llm_calls`.
+- **Purge :** `PURGE_ENABLED=false` dans `infra/.env` coupe la tâche de fond en dev ; `radarnaque-purge` fait une passe à la main et affiche `scan_events supprimés : N, admin_actions : N, llm_calls : N` (voir le [README](../README.md)).
+- **Admin :** `http://localhost:8080/admin/` ; `pnpm admin:grant <email>` donne le rôle admin à un compte existant (voir le [README](../README.md#administration-phase-4b)).
 
 ## Points ouverts avant une mise en ligne
 
-1. Passer les corrections prévues avant la fusion des phases 3d et 4a (voir leurs suivis), après la relecture finale de la branche.
+1. Passer les corrections prévues avant la fusion des phases 3d, 4a et 4b partie 1 (voir leurs suivis), après la relecture finale de la branche.
 2. Essayer les phases 3b, 3c et 3d sur les vrais sites, avec les listes des suivis.
 3. Relever la valeur réelle de `sellerType` pour un professionnel sur 2ememain.
 4. Lancer `pnpm e2e:scan` contre OpenRouter (le fournisseur de production), avec Gemini : sortie stricte et outils ensemble, réflexion recopiée d'un tour à l'autre, flux derrière Caddy.
@@ -215,5 +244,6 @@ Coût estimé avec `google/gemini-3.1-flash-lite` : environ 1,1 ¢ par analyse a
 7. Publier `/privacy` : la phase 4a est faite (`DELETE /api/me`, purge à 12 mois, textes à jour). Reste à confirmer l'adresse `privacy@mostconsult.be` et à vérifier la rétention des sauvegardes distantes.
 8. Essayer la suppression du compte et la purge sur la vraie pile (voir le [suivi 4a](superpowers/plans/2026-10-20-phase-4a-suivi.md)).
 9. Préparer les déclarations du Chrome Web Store (liste dans le suivi 4a).
-10. Faire la phase 4b : l'administration, avec la suppression d'un compte par l'admin.
-11. Faire la passe de design.
+10. Essayer l'admin (partie 1) sur la vraie pile, avec les vérifications du [suivi 4b partie 1](superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md) : connexion par lien et par code, essais du modèle et de la recherche, en-têtes de Caddy, présence de `scripts/` dans l'image auth.
+11. Faire la partie 2 de la phase 4b : Tableau de bord, Offre (dont `/pricing`) et Analyses.
+12. Faire la passe de design.

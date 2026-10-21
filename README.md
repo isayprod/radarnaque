@@ -5,8 +5,8 @@
 Prérequis : Node 24, pnpm 10.26.1, Docker, uv.
 
 En dev, tout passe par une seule origine, `http://localhost:8080` (Caddy, dans Docker) :
-`/auth/*` → service auth (hôte, port 3000), `/api/*` → API (hôte, port 8000), le reste →
-`apps/site/dist`. Seuls Postgres, Caddy et SearXNG (le moteur de recherche web des analyses,
+`/auth/*` → service auth (hôte, port 3000), `/api/*` → API (hôte, port 8000), `/admin/*` →
+`apps/admin/dist`, le reste → `apps/site/dist`. Seuls Postgres, Caddy et SearXNG (le moteur de recherche web des analyses,
 `http://127.0.0.1:8888`, configuré par `infra/searxng/settings.yml`) tournent dans Docker, liés à
 `127.0.0.1`.
 
@@ -55,9 +55,10 @@ colorés :
 - `[api]` : `alembic upgrade head`, puis API (port 8000), lancée **seulement après** la
   réponse 200 de `GET /auth/health` (attente de 120 s au plus, sinon l'API ne démarre pas) ;
 - `[site]` : `vite build --watch` vers `apps/site/dist` ;
+- `[admin]` : `vite build --watch` vers `apps/admin/dist`, servi sur `http://localhost:8080/admin/` ;
 - `[ext]` : wxt, qui ouvre un Chrome avec l'extension (`Opened browser`).
 
-Un seul Ctrl+C arrête les 4 processus ; si l'un d'eux s'arrête en erreur, les autres sont
+Un seul Ctrl+C arrête les 5 processus ; si l'un d'eux s'arrête en erreur, les autres sont
 arrêtés aussi et la commande sort avec un code non nul. Postgres, Caddy et SearXNG restent lancés ;
 `pnpm dev:stop` les arrête (les données Postgres sont conservées).
 
@@ -73,7 +74,8 @@ docker compose -f infra/docker-compose.dev.yml up -d caddy searxng   # :8080 (Ca
 pnpm dev:auth    # terminal 1 : migrations Better Auth, puis service auth (port 3000)
 pnpm dev:api     # terminal 2 : alembic upgrade head, puis API (port 8000)
 pnpm dev:site    # terminal 3 : vite build --watch vers apps/site/dist
-pnpm dev:ext     # terminal 4 : wxt (extension en mode dev)
+pnpm dev:admin   # terminal 4 : vite build --watch vers apps/admin/dist (http://localhost:8080/admin/)
+pnpm dev:ext     # terminal 5 : wxt (extension en mode dev)
 ```
 
 Dans ce mode, l'ordre est important : au tout premier démarrage, lancer `dev:auth` et
@@ -567,13 +569,15 @@ Chaque analyse peut réfléchir et chercher sur le web. Les deux se règlent san
   connexion avec « Votre compte a été supprimé. ». Se reconnecter avec la même adresse crée un
   compte neuf, donc un nouvel essai.
 - **Purge :** l'API supprime les scans de plus de 12 mois (`SCAN_RETENTION_MONTHS`, par lots de
-  5 000). La tâche de fond démarre 60 s après l'API, puis tourne toutes les 24 h ; un verrou
+  5 000), ainsi que les lignes du journal de l'admin (`admin_actions`) et des appels au modèle
+  (`llm_calls`) de plus de 12 mois, puis écrit une ligne `system.purge` par passe. La tâche de fond démarre 60 s après l'API, puis tourne toutes les 24 h ; un verrou
   consultatif PostgreSQL empêche deux processus de purger en même temps. L'essai garde son plafond
   de 3 analyses : le nombre de scans purgés est ajouté à `subscriptions.purged_scans`.
 - **`PURGE_ENABLED`** (`infra/.env`, `true` par défaut) coupe la tâche de fond. Les tests le
   mettent à `false`. La composition de production ne le transmet pas : la purge y reste active.
 - **`radarnaque-purge`** fait une passe tout de suite, quelle que soit `PURGE_ENABLED`, et affiche
-  `scan_events supprimés : <n>` (ou « purge déjà en cours ailleurs ») :
+  `scan_events supprimés : <n>, admin_actions : <n>, llm_calls : <n>` (ou « purge déjà en cours
+  ailleurs ») :
 
 ```sh
 cd services/api && uv run --env-file ../../infra/.env radarnaque-purge
@@ -584,6 +588,56 @@ cd services/api && uv run --env-file ../../infra/.env radarnaque-purge
 - **Page `/privacy` :** `http://localhost:8080/privacy/?lang=fr` (ou `nl`) ; la popup y mène par
   « Confidentialité ».
 
+## Administration (phase 4b)
+
+L'admin est une application à part (`apps/admin`), servie par Caddy sous `/admin/` sur la même
+origine que l'API et l'auth. Interface en français. En partie 1, elle a deux écrans :
+Utilisateurs (recherche, fiche, plan, rôle, suppression) et IA (fournisseurs, modèles, prompts,
+réglages, essais du modèle et de la recherche web).
+
+### L'ouvrir en dev
+
+1. `pnpm dev` (compile l'admin en continu, `[admin]`) ou `pnpm dev:admin` seul.
+2. Donner le rôle admin à un compte **déjà créé** (se connecter une fois depuis la popup, ou
+   avec `pnpm e2e:login`) :
+
+```sh
+pnpm admin:grant <email>
+pnpm admin:revoke <email>     # retire le rôle
+```
+
+   Codes de sortie : `1` compte inconnu, `3` refus de retirer le dernier admin, `64` argument
+   absent ou invalide.
+3. Ouvrir `http://localhost:8080/admin/`, saisir l'email : le lien magique et le code arrivent
+   dans les logs de l'auth (`[auth]`), comme pour l'extension. Le lien ramène sur `/admin/`, et le
+   code se saisit dans la page.
+
+Un utilisateur qui n'est pas admin voit « Accès réservé aux administrateurs ». En dev, un
+superuser a aussi accès à l'admin. Les routes d'administration de Better Auth (`/auth/admin/*`)
+répondent `404` : tout passe par `/api/admin/*`.
+
+### Premier admin en production
+
+La commande se lance sur le serveur, avec la composition de production :
+
+```sh
+docker compose -f infra/docker-compose.yml --env-file infra/.env exec auth \
+  node --import tsx scripts/admin-role.ts grant <email>
+```
+
+(`revoke` pour retirer le rôle.) Le compte doit déjà exister : se connecter une fois par la
+popup avant.
+
+### Journal et vie privée
+
+- Chaque modification faite dans l'admin écrit une ligne dans `admin_actions` (dans la même
+  transaction), avec l'ancienne et la nouvelle valeur, jamais d'email ni le texte d'un prompt.
+  Une ligne `INFO` sans email ni identifiant est écrite sous `radarnaque.admin`.
+- L'API est lancée avec `--no-access-log` (Dockerfile et `pnpm dev:api`) : un email cherché dans
+  l'admin n'apparaît dans aucun journal d'accès. Caddy n'a pas de journal d'accès non plus.
+- Le rôle est relu en base à chaque requête : retirer le rôle à un admin agit tout de suite.
+- Vérifications à faire en vrai : voir le [suivi de la partie 1](docs/superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md).
+
 ## Déployer
 
 Production : un serveur (Allemagne) avec Docker et Docker Compose, un enregistrement DNS
@@ -591,8 +645,8 @@ Production : un serveur (Allemagne) avec Docker et Docker Compose, un enregistre
 Encrypt valide le certificat par le port 80). Caddy est le seul service qui publie des
 ports ; postgres, auth (3000), api (8000) et searxng (8080) restent sur le réseau interne de
 la composition (`SEARXNG_SECRET` est obligatoire dans `infra/.env`). Les routes sont celles du
-dev : `/auth/*` → auth, `/api/*` → api, le reste → le site compilé (`apps/site`), construit dans
-l'image Caddy.
+dev : `/auth/*` → auth, `/api/*` → api, `/admin/*` → l'admin compilée (`apps/admin`), le reste → le
+site compilé (`apps/site`), tous deux construits dans l'image Caddy.
 
 ### 1. Configuration
 
@@ -674,6 +728,8 @@ chaque déploiement :
 curl -s -o /dev/null -w '%{http_code}\n' 'https://radarnaque.mostconsult.be/auth/dev/last-email?to=x'          # 404
 curl -s -o /dev/null -w '%{http_code}\n' 'https://radarnaque.mostconsult.be/api/internal/users/x/bootstrap'   # 404
 curl -s -o /dev/null -w '%{http_code}\n' 'https://radarnaque.mostconsult.be/auth/callback'                     # 200
+curl -s -o /dev/null -w '%{http_code}\n' 'https://radarnaque.mostconsult.be/admin/'                           # 200
+curl -sI 'https://radarnaque.mostconsult.be/admin/' | grep -iE 'content-security|x-frame|referrer|cache-control'
 ```
 
 ### 3. Sauvegardes

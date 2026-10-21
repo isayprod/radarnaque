@@ -319,7 +319,12 @@ Les poids ci-dessus sont les poids initiaux du MVP ; ils pourront être ajustés
 
 ### 5.4 Page d'administration
 
-L'admin se connecte par lien magique ou code, sur la même origine (session cookie), puis échange sa session contre un JWT via `/auth/token`.
+*Livrée en phase 4b, partie 1* (spécification : [socle](2026-10-21-phase-4b-admin-socle-design.md)).
+
+- **Connexion :** l'admin se connecte par lien magique ou par code, sur la même origine (session par cookie), puis échange sa session contre un JWT via `/auth/token`. Le JWT reste en mémoire ; un `401` en déclenche un seul renouvellement.
+- **`target` de `/auth/start` :** une liste fermée, `extension` (défaut, `callbackURL: "/auth/callback"`) ou `admin` (`callbackURL: "/admin/"`, langue forcée à `fr`, lien d'erreur vers `/admin/?erreur=lien`, email qui parle de la « page d'administration »). Toute autre valeur donne `400 invalid_target`. Le code se saisit dans la page de l'admin, par `POST /auth/sign-in/email-otp`.
+- **Routes d'administration de Better Auth fermées :** le plugin `admin()` ne sert qu'à la colonne `role`. Le service auth répond `404` à tout `/auth/admin/*`, avant `auth.handler` : les changements de rôle et les suppressions passent uniquement par `/api/admin/*`, donc par `admin_actions`.
+- **Premier admin :** `pnpm admin:grant <email>` et `pnpm admin:revoke <email>`, sur un compte existant (codes de sortie : `1` compte inconnu, `3` dernier admin refusé, `64` usage). En production : `docker compose exec auth node --import tsx scripts/admin-role.ts grant <email>`.
 
 ## 6. Données — schéma `app` en 3NF
 
@@ -370,11 +375,19 @@ plan_features(plan FK, feature FK, PK(plan, feature))
 subscriptions(id PK, user_id FK→auth.user ON DELETE CASCADE, plan FK, status FK,
               provider FK, provider_ref NULL, period_start, period_end NULL, created_at)
   UNIQUE INDEX (user_id) WHERE status = 'active'
-admin_actions(id PK, admin_user_id FK→auth.user, action, target_user_id NULL, created_at)
+admin_actions(id PK, admin_user_id NULL FK→auth.user ON DELETE SET NULL, action,
+              target_user_id NULL, details JSONB DEFAULT '{}', created_at)
+  INDEX (created_at DESC), INDEX (target_user_id)
+llm_calls(id PK, created_at, analysis_id FK, model_id FK, prompt_version_id FK,
+          tokens_in, tokens_out, images_analyzed, web_searches, cost_usd_micros)
+  INDEX (created_at), INDEX (analysis_id)
 ```
 
 - **Pourquoi garder `period_end`** alors qu'il pourrait sembler dérivable : avec Stripe, la fin de période est un fait fourni par Stripe (prorata, date d'ancrage), pas un calcul.
-- **Pourquoi `admin_actions.target_user_id` n'a pas de clé étrangère** : cela permet de conserver la trace d'une suppression de compte.
+- **Pourquoi `admin_actions.target_user_id` n'a pas de clé étrangère** : cela permet de conserver la trace d'une suppression de compte. `admin_user_id` passe à `NULL` si l'admin est supprimé, et reste `NULL` pour les lignes écrites par le système (`system.purge`).
+- **`admin_actions.details`** (phase 4b) contient l'ancienne et la nouvelle valeur (`{ "from": …, "to": … }`), jamais d'email ni le texte d'un prompt. Chaque modification écrit sa ligne dans la même transaction que le changement. Codes d'action : `user.plan_set`, `user.role_set`, `user.deleted`, `ai.model_added`, `ai.model_activated`, `ai.prompt_created`, `ai.prompt_activated`, `ai.settings_set`, `system.purge` (livrés en partie 1) ; ceux de l'offre (`offer.*`) arrivent en partie 2.
+- **`llm_calls`** (phase 4b) : une ligne par appel au modèle qui produit une analyse, écrite par `save_analysis` dans la même transaction. Une analyse du cache expirée est rafraîchie sur place (son coût et sa date sont écrasés) : les statistiques de coût et de cache se lisent donc sur cette trace, pas sur `analyses`. Elle ne relie pas un appel à un compte. La migration 0007 crée une ligne par analyse existante. Les essais « Tester » de l'admin n'y sont pas écrits.
+- **Conservation :** `admin_actions` et `llm_calls` sont purgés après 12 mois, comme les `scan_events` (§10).
 
 ### 6.4 Annonces et cache
 
@@ -437,7 +450,7 @@ scan_failures(scan_event_id PK FK, error_code, created_at)
 | POST | `/api/billing/portal` | utilisateur | MVP : `501 billing_unavailable` |
 | POST | `/api/billing/webhooks/stripe` | Stripe | MVP : `501`, implémenté en phase 5 |
 | POST | `/api/internal/users/{id}/bootstrap` | service auth | création de l'abonnement d'essai (secret partagé) |
-| GET/PATCH | `/api/admin/*` | admin | voir §8 |
+| GET/POST/PATCH/DELETE | `/api/admin/*` | admin | voir §8 : `/api/admin/users` et `/api/admin/ai` livrés en phase 4b partie 1 |
 
 ### 7.2 Déroulé de `POST /api/scans`
 
@@ -559,23 +572,30 @@ Le format est `{ "error": { "code": "...", "message": "...", "details": {} } }`.
 | 401 | `unauthenticated` |
 | 402 | `no_active_subscription`, `quota_exhausted` |
 | 403 | `feature_not_in_plan`, `admin_required` |
-| 422 | `invalid_listing` |
+| 404 | `not_found` (admin) |
+| 409 | `conflict` (admin : le dernier admin, soi-même, abonnement Stripe, doublon) |
+| 422 | `invalid_listing`, `invalid_value` (admin : contrôle métier), `invalid_request` (validation des schémas) |
 | 429 | `rate_limited` |
 | 501 | `billing_unavailable` |
 | 502 | `analysis_failed` |
 
 ## 8. Administration
 
-- **Technique :** une SPA Vite + React + Tailwind servie sur `/admin`. Toutes les routes `/api/admin/*` exigent `auth.user.role = 'admin'`.
-- **Chaque modification** est enregistrée dans `admin_actions`.
+*Phase 4b, en deux parties.* La spécification est répartie en six documents, dont le [socle](2026-10-21-phase-4b-admin-socle-design.md) (application, connexion, droits, journal), puis un par écran : [Tableau de bord](2026-10-21-phase-4b-admin-tableau-de-bord-design.md), [Utilisateurs](2026-10-21-phase-4b-admin-utilisateurs-design.md), [Offre](2026-10-21-phase-4b-admin-offre-design.md), [IA](2026-10-21-phase-4b-admin-ia-design.md) et [Analyses](2026-10-21-phase-4b-admin-analyses-design.md).
 
-| Écran | Contenu |
-|---|---|
-| Tableau de bord | Scans par jour et par type ; taux de réponses servies depuis le cache ; coût IA du jour et du mois ; abonnés actifs par plan ; taux d'échec des analyses |
-| Utilisateurs | Recherche par email ; plan, statut et consommation de la période. Actions : attribuer un plan (`provider = manual`), nommer ou retirer un admin, supprimer un compte |
-| Offre | Pour chaque plan : prix, quotas par type, fonctionnalités, `total_scan_cap` |
-| IA | Modèles (ajout d'un slug) ; modèle actif par type de scan ; versions du prompt (création, consultation, activation) ; durée du cache ; limite de requêtes |
-| Analyses | Liste paginée des analyses récentes : annonce, score, textes, modèle, coût, nombre de scans servis |
+- **Technique :** une SPA Vite + React + Tailwind (`apps/admin`), servie par Caddy sous `/admin/` (production et dev, `http://localhost:8080/admin/`) sur la même origine que l'API et l'auth. Interface en français seulement, JWT en mémoire. Toutes les routes `/api/admin/*` exigent `auth.user.role = 'admin'` (`require_admin`, qui accepte aussi un superuser hors production) : `401 unauthenticated` sans JWT valide, `403 admin_required` sinon. Le rôle est relu en base à chaque requête : un admin rétrogradé perd l'accès à la requête suivante.
+- **Chaque modification** est enregistrée dans `admin_actions` (§6.3), et une ligne `INFO` sans email ni identifiant est écrite sous `radarnaque.admin`. L'API tourne avec `--no-access-log` : un email cherché ne se retrouve pas dans un journal d'accès.
+- **Pagination** par curseur `before` (`limit` de 1 à 50, 50 par défaut).
+
+| Écran | Contenu | État |
+|---|---|---|
+| Tableau de bord | Scans par jour et par type ; taux de réponses servies depuis le cache ; coût IA du jour et du mois ; abonnés actifs par plan ; taux d'échec des analyses | partie 2 |
+| Utilisateurs | Recherche par email (3 caractères au moins, sous-chaîne, casse ignorée) ; fiche avec abonnement, consommation, historique, 20 derniers scans et journal. Actions : attribuer un plan (`provider = manual`), nommer ou retirer un admin, supprimer un compte | **livré** (partie 1) |
+| Offre | Pour chaque plan : prix, quotas par type, fonctionnalités, `total_scan_cap` (et la page `/pricing`) | partie 2 |
+| IA | Fournisseurs de `providers.toml` en lecture seule ; modèles (ajout d'un slug) ; modèle actif ; versions du prompt (création, consultation, activation) ; réglages (cache, limite de requêtes, recherches web) ; essai du modèle (10 par heure et par admin) ; état du moteur de recherche et essai de recherche (30 par heure et par admin) | **livré** (partie 1) |
+| Analyses | Liste paginée des analyses récentes : annonce, score, textes, modèle, coût, nombre de scans servis | partie 2 |
+
+- **Garde-fous des comptes :** un admin ne peut ni retirer son propre rôle ni supprimer son compte depuis l'admin ; le dernier admin ne peut pas être rétrogradé (contrôle sous verrou) ; un abonnement Stripe actif ne s'écrase pas (`409`) ; le rôle `superuser` n'est jamais attribué depuis l'admin. Un admin peut encore supprimer son compte depuis la popup, même s'il est le dernier : `pnpm admin:grant` rétablit un admin.
 
 ## 9. Paiement (structure Stripe)
 
@@ -600,10 +620,11 @@ Le format est `{ "error": { "code": "...", "message": "...", "details": {} } }`.
 - **Conservation (phase 4a, livrée) :**
   - `scan_events` et les tables associées (`scan_results`, `scan_failures`) sont supprimés après **12 mois** (`SCAN_RETENTION_MONTHS`), par une tâche de fond quotidienne de l'API (`radarnaque-purge` pour une passe à la main) ;
   - pour l'essai, le nombre de scans purgés est gardé dans `subscriptions.purged_scans` : le quota « à vie » ne se renouvelle pas ;
-  - les analyses et les snapshots, qui ne sont pas des données personnelles, sont conservés.
+  - les analyses et les snapshots, qui ne sont pas des données personnelles, sont conservés ;
+  - depuis la phase 4b, la même passe supprime aussi les lignes `admin_actions` et `llm_calls` de plus de 12 mois (`run_purge`) et écrit une ligne `system.purge` par passe qui a tourné ; `radarnaque-purge` affiche `scan_events supprimés : N, admin_actions : N, llm_calls : N`.
 - **Droit à l'effacement :**
   - par l'utilisateur (phase 4a, livrée) : « Supprimer mon compte » dans la popup (mot de confirmation `SUPPRIMER` ou `VERWIJDEREN`) appelle `DELETE /api/me`, qui supprime l'utilisateur dans Better Auth et, en cascade, sa session, son abonnement et ses scans ;
-  - par l'admin (phase 4b) : l'action correspondante dans l'admin.
+  - par l'admin (phase 4b, partie 1, livrée) : « Supprimer le compte » sur la fiche d'un utilisateur, même effet que `DELETE /api/me`, avec confirmation par la saisie de l'email. `admin_actions` garde l'identifiant visé, pas l'email.
 - **Page `/privacy`** en FR et en NL (mise à jour en phase 4a : photos, recherche web, navigateur, conservation, effacement), et déclarations correspondantes dans le Chrome Web Store (listées dans le [suivi de la phase 4a](../plans/2026-10-20-phase-4a-suivi.md)).
 
 ## 11. Infrastructure et déploiement
@@ -650,7 +671,9 @@ Chaque phase fait l'objet de son propre plan d'implémentation, et se livre et s
    - **3b à 3d** : analyses IA dans l'extension (3b), l'IA qui remplace l'analyse locale et le prompt v2 (3c), recherche web, photos obligatoires, un seul type d'analyse et réflexion en direct (3d, voir sa [spécification](2026-10-19-phase-3d-recherche-web-reflexion-design.md)).
 4. **Administration et RGPD**, en deux parties :
    - **4a, RGPD (livrée)** : `DELETE /api/me`, suppression du compte depuis la popup, purge des scans à 12 mois, page `/privacy` à jour (voir sa [spécification](2026-10-20-phase-4a-rgpd-design.md)) ;
-   - **4b, administration (à venir)** : SPA admin, routes `/api/admin/*`, `admin_actions`, suppression d'un compte par l'admin.
+   - **4b, administration**, en deux parties (voir §8 et le [socle](2026-10-21-phase-4b-admin-socle-design.md)) :
+     - **partie 1 (livrée)** : socle (SPA `apps/admin`, connexion par lien ou code, `require_admin`, `admin_actions`, `llm_calls`, purge étendue, `admin:grant`), écrans Utilisateurs (dont la suppression d'un compte) et IA ; le suivi est dans [`2026-10-21-phase-4b-partie-1-suivi.md`](../plans/2026-10-21-phase-4b-partie-1-suivi.md) ;
+     - **partie 2 (à venir)** : Tableau de bord, Offre (dont `/pricing`) et Analyses.
 5. **Stripe** : `StripeBillingProvider`, webhooks, `billing_events`, pages de paiement.
 
 ## 14. Risques connus
