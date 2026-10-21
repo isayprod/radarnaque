@@ -8,7 +8,7 @@ import { type Auth, trustedOrigins } from "./auth";
 import type { Env } from "./env";
 import type { Mailer, MemoryMailer } from "./mail/mailer";
 import { createRateLimiter } from "./rate-limit";
-import { startSignIn } from "./sign-in";
+import { parseTarget, startSignIn } from "./sign-in";
 
 export interface CreateAppOptions {
 	auth: Auth;
@@ -100,6 +100,13 @@ export function createApp({ auth, mailer, env, devMailer }: CreateAppOptions) {
 		if (!email) {
 			return c.json(apiError("invalid_email", "Adresse email invalide"), 400);
 		}
+		const target = parseTarget(body?.target);
+		if (!target) {
+			return c.json(
+				apiError("invalid_target", "Cible de connexion inconnue"),
+				400,
+			);
+		}
 		// Limite par IP d'abord : une requête refusée ici ne consomme pas le quota de
 		// l'adresse visée.
 		if (!ipLimiter.hit(clientIp(c)) || !emailLimiter.hit(email)) {
@@ -117,6 +124,7 @@ export function createApp({ auth, mailer, env, devMailer }: CreateAppOptions) {
 			email,
 			locale,
 			headers: c.req.raw.headers,
+			target,
 		});
 		return c.json({ ok: true });
 	});
@@ -143,6 +151,13 @@ export function createApp({ auth, mailer, env, devMailer }: CreateAppOptions) {
 			return c.json(parsed);
 		});
 	}
+
+	// Routes HTTP du plugin admin de Better Auth (liste, rôles, bannissement, usurpation…) :
+	// fermées. L'administration passe par l'API Radarnaque ; le plugin ne sert qu'en interne
+	// (`auth.api.*`, qui ne passe pas par ici). Déclarée avant le catch-all.
+	app.all("/auth/admin/*", (c) =>
+		c.json(apiError("not_found", "Route inconnue"), 404),
+	);
 
 	app.all("/auth/*", (c) => auth.handler(c.req.raw));
 

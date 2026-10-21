@@ -1,4 +1,5 @@
 import type { Locale } from "@radarnaque/shared";
+import type { SignInTarget } from "../sign-in";
 
 export interface RenderedEmail {
 	subject: string;
@@ -40,6 +41,10 @@ const COPY: Record<Locale, Copy> = {
 	},
 };
 
+/** Introduction de l'email de connexion à l'administration (FR uniquement). */
+const ADMIN_INTRO =
+	"Pour vous connecter à l'administration de Radarnaque, cliquez sur le lien ci-dessous ou saisissez le code dans la page d'administration.";
+
 const ESCAPES: Record<string, string> = {
 	"&": "&amp;",
 	"<": "&lt;",
@@ -52,17 +57,24 @@ export function escapeHtml(value: string): string {
 	return value.replace(/[&<>"']/g, (c) => ESCAPES[c] ?? c);
 }
 
-/** Email de connexion combiné : lien magique + code OTP, en FR ou NL. */
+/**
+ * Email de connexion combiné : lien magique + code OTP, en FR ou NL. La variante `admin`
+ * est toujours en français et parle de la page d'administration au lieu de l'extension.
+ */
 export function renderSignInEmail({
-	locale,
+	locale: requestedLocale,
 	url,
 	otp,
+	target = "extension",
 }: {
 	locale: Locale;
 	url: string;
 	otp: string;
+	target?: SignInTarget;
 }): RenderedEmail {
-	const c = COPY[locale];
+	const locale: Locale = target === "admin" ? "fr" : requestedLocale;
+	const c =
+		target === "admin" ? { ...COPY.fr, intro: ADMIN_INTRO } : COPY[locale];
 	const u = escapeHtml(url);
 	const code = escapeHtml(otp);
 

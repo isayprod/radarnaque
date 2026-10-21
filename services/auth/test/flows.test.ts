@@ -244,6 +244,70 @@ describe("POST /auth/start", () => {
 	});
 });
 
+describe("POST /auth/start target", () => {
+	test("start without target keeps /auth/callback", async () => {
+		const h = setup();
+		const email = uniqueEmail("sans-target");
+		const { url } = await start(h, email);
+		expect(new URL(url).searchParams.get("callbackURL")).toBe("/auth/callback");
+		expect(h.mailer.last(email)?.text).toContain("dans l'extension");
+	});
+
+	test("start with target admin links to /admin/", async () => {
+		const h = setup();
+		const email = uniqueEmail("admin");
+		const res = await call(h, "/auth/start", {
+			json: { email, locale: "fr", target: "admin" },
+		});
+		expect(res.status).toBe(200);
+		const msg = h.mailer.last(email);
+		const { url } = parseSignIn(msg);
+		const params = new URL(url).searchParams;
+		expect(params.get("callbackURL")).toBe("/admin/");
+		expect(params.get("errorCallbackURL")).toBe("/admin/?erreur=lien");
+		expect(url).toContain("callbackURL=%2Fadmin%2F");
+		expect(msg?.text).toContain("page d'administration");
+		expect(msg?.text).not.toContain("extension");
+		expect(msg?.html).not.toContain("extension");
+	});
+
+	test("start with target admin ignores locale nl", async () => {
+		const h = setup();
+		const email = uniqueEmail("admin-nl");
+		const res = await call(h, "/auth/start", {
+			json: { email, locale: "nl", target: "admin" },
+		});
+		expect(res.status).toBe(200);
+		const msg = h.mailer.last(email);
+		expect(msg?.subject).toBe("Votre connexion à Radarnaque");
+		expect(msg?.text).toContain("page d'administration");
+	});
+
+	test("start with target extension behaves like no target", async () => {
+		const h = setup();
+		const email = uniqueEmail("ext");
+		const res = await call(h, "/auth/start", {
+			json: { email, locale: "fr", target: "extension" },
+		});
+		expect(res.status).toBe(200);
+		const { url } = parseSignIn(h.mailer.last(email));
+		expect(new URL(url).searchParams.get("callbackURL")).toBe("/auth/callback");
+	});
+
+	test("start rejects an unknown target", async () => {
+		const h = setup();
+		const email = uniqueEmail("cible");
+		for (const target of ["autre", "", "ADMIN", 42, null, {}]) {
+			const res = await call(h, "/auth/start", {
+				json: { email, locale: "fr", target },
+			});
+			expect(res.status, JSON.stringify(target)).toBe(400);
+			expect((await json(res)).error?.code).toBe("invalid_target");
+		}
+		expect(h.mailer.messages).toHaveLength(0);
+	});
+});
+
 describe("POST /auth/start per-IP limit", () => {
 	test("21st start from the same IP (distinct emails) → 429", async () => {
 		const h = setup();
@@ -406,6 +470,35 @@ describe("GET /auth/extension/session-token", () => {
 		expect(res.status).toBe(401);
 		expect(res.headers.get("cache-control")).toBe("no-store");
 		expect((await json(res)).error?.code).toBe("unauthenticated");
+	});
+});
+
+describe("Better Auth admin routes", () => {
+	test("auth admin routes return 404 even for an admin session", async () => {
+		const h = setup();
+		const email = uniqueEmail("admin-http");
+		const signIn = await otpSignIn(h, email);
+		expect(signIn.status).toBe(200);
+		const cookie = signIn.headers
+			.getSetCookie()
+			.map((c) => c.split(";")[0])
+			.join("; ");
+		await pool.query(`UPDATE "user" SET role = 'admin' WHERE email = $1`, [
+			email,
+		]);
+
+		const list = await call(h, "/auth/admin/list-users", {
+			headers: { cookie },
+		});
+		expect(list.status).toBe(404);
+		expect((await json(list)).error?.code).toBe("not_found");
+
+		const impersonate = await call(h, "/auth/admin/impersonate-user", {
+			json: { userId: "x" },
+			headers: { cookie, origin: h.env.PUBLIC_URL },
+		});
+		expect(impersonate.status).toBe(404);
+		expect((await json(impersonate)).error?.code).toBe("not_found");
 	});
 });
 
