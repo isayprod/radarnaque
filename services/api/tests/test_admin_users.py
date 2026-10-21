@@ -504,7 +504,9 @@ async def test_journal_insert_does_not_wait_for_a_no_key_update_lock(db, make_us
         )
         await db.execute(text("set local lock_timeout = '500ms'"))
         await db.execute(
-            text("insert into app.admin_actions(admin_user_id, action) values (:i, 'user.plan_set')"),
+            text(
+                "insert into app.admin_actions(admin_user_id, action) values (:i, 'user.plan_set')"
+            ),
             {"i": actor},
         )
         await db.commit()
@@ -531,7 +533,9 @@ async def test_plan_and_role_removal_do_not_deadlock_across_admins(client, db, b
         assert not pending.done()  # B tient a et b, attend c
         await acting_as_a.execute(text("set local lock_timeout = '2s'"))
         await acting_as_a.execute(
-            text("insert into app.admin_actions(admin_user_id, action) values (:i, 'user.plan_set')"),
+            text(
+                "insert into app.admin_actions(admin_user_id, action) values (:i, 'user.plan_set')"
+            ),
             {"i": a},
         )
         await acting_as_a.commit()
@@ -611,6 +615,38 @@ async def test_delete_self_is_409(client, db, bearer, admin):
     assert r.json()["error"]["code"] == "conflict"
     assert await _count_actions(db) == 0
     assert await _scalar(db, 'select count(*) from auth."user" where id = :i', i=admin) == 1
+
+
+async def test_conflict_reasons(client, db, bearer, admin, make_user):
+    """Chaque 409 de l'écran Utilisateurs porte `details.reason` (l'interface s'en sert)."""
+    other = await make_user("autre-admin@radarnaque.test", "admin")
+    root = await make_user("root@radarnaque.test", "superuser")
+    stripe_user = await make_user("stripe@radarnaque.test")
+    await _add_sub(db, stripe_user, "premium", provider="stripe")
+
+    # rôle sur soi
+    r = await client.post(
+        f"/api/admin/users/{admin}/role", json={"role": "user"}, headers=bearer(admin)
+    )
+    assert r.status_code == 409 and r.json()["error"]["details"] == {"reason": "self"}
+
+    # dernier admin : l'autre admin disparaît, le superuser tente de retirer celui qui reste
+    await db.execute(text("update auth.\"user\" set role = 'user' where id = :i"), {"i": other})
+    await db.commit()
+    r = await client.post(
+        f"/api/admin/users/{admin}/role", json={"role": "user"}, headers=bearer(root)
+    )
+    assert r.status_code == 409 and r.json()["error"]["details"] == {"reason": "last_admin"}
+
+    # plan sur un abonnement Stripe
+    r = await client.post(
+        f"/api/admin/users/{stripe_user}/plan", json={"plan": "standard"}, headers=bearer(admin)
+    )
+    assert r.status_code == 409 and r.json()["error"]["details"] == {"reason": "stripe"}
+
+    # suppression de soi
+    r = await client.delete(f"/api/admin/users/{admin}", headers=bearer(admin))
+    assert r.status_code == 409 and r.json()["error"]["details"] == {"reason": "self"}
 
 
 # --- Journal -------------------------------------------------------------------------------

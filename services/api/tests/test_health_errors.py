@@ -23,3 +23,24 @@ async def test_validation_error_format(app, client):
 
     r = await client.get("/api/_typed", params={"n": "abc"})
     assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_request"
+
+
+async def test_nul_character_is_422(client, db, bearer, make_user):
+    admin = await make_user("nul@radarnaque.test", "admin")
+    slug = "x\u0000secret-slug"
+    bodies = []
+
+    r = await client.post(
+        "/api/admin/ai/models", json={"provider": "stub", "slug": slug}, headers=bearer(admin)
+    )
+    bodies.append(r)
+    r2 = await client.get("/api/admin/users?q=ab%00c", headers=bearer(admin))
+    bodies.append(r2)
+
+    for response in bodies:
+        assert response.status_code == 422, response.text
+        assert response.json() == {
+            "error": {"code": "invalid_request", "message": "Requête invalide.", "details": {}}
+        }
+        assert "secret-slug" not in response.text
+        assert "DataError" not in response.text
