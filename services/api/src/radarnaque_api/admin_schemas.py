@@ -202,3 +202,78 @@ class ActiveModelIn(CamelInModel):
 
 class PromptIn(CamelInModel):
     system_prompt: PromptText
+
+
+# --- Offre : plans, prix, quotas ------------------------------------------------------------
+
+# Bornes de saisie de l'offre : prix en centimes, quotas et plafond en scans.
+OFFER_MAX_CENTS = 100_000
+OFFER_MAX_SCANS = 100_000
+# Photos envoyées au modèle : même borne que la contrainte `ck_plans_max_images`.
+OFFER_MAX_IMAGES = 4
+
+BillingInterval = Literal["month", "year"]
+
+
+class OfferPriceOut(CamelModel):
+    """Prix en euros d'un plan pour un intervalle. `stripe_price_id` : lecture seule, il ne
+    sert qu'à l'admin (jamais renvoyé par la route publique)."""
+
+    amount_cents: int
+    stripe_price_id: str | None
+
+
+class OfferPlanOut(CamelModel):
+    """Un plan. `quota` : scans `full` par période ; `total_scan_cap` : plafond total (`None` :
+    aucun) ; `prices` est vide pour l'essai."""
+
+    code: str
+    quota_period: str
+    quota: int
+    total_scan_cap: int | None
+    max_images: int
+    card_icons: bool
+    prices: dict[BillingInterval, OfferPriceOut]
+
+
+class AdminOfferOut(CamelModel):
+    """L'offre dans l'ordre `trial`, `standard`, `premium`, et les 20 dernières actions
+    `offer.*`."""
+
+    plans: list[OfferPlanOut]
+    actions: list[AdminActionOut]
+
+
+class OfferPricesIn(CamelInModel):
+    month: int | None = Field(default=None, ge=0, le=OFFER_MAX_CENTS)
+    year: int | None = Field(default=None, ge=0, le=OFFER_MAX_CENTS)
+
+
+class OfferPlanIn(CamelInModel):
+    """Champs à modifier, tous optionnels. `total_scan_cap: null` explicite vide le plafond :
+    l'absence du champ (`model_fields_set`) le laisse tel quel."""
+
+    quota: int | None = Field(default=None, ge=0, le=OFFER_MAX_SCANS)
+    total_scan_cap: int | None = Field(default=None, ge=0, le=OFFER_MAX_SCANS)
+    max_images: int | None = Field(default=None, ge=0, le=OFFER_MAX_IMAGES)
+    card_icons: bool | None = None
+    prices: OfferPricesIn | None = None
+
+
+class PublicPlanOut(CamelModel):
+    """Un plan tel que le site l'affiche : jamais d'identifiant Stripe ; prix `None` pour l'essai
+    ou quand il manque."""
+
+    scans: int
+    max_images: int
+    card_icons: bool
+    monthly_cents: int | None
+    yearly_cents: int | None
+
+
+class PublicOfferOut(CamelModel):
+    """Réponse de `GET /api/offer`, lue par la page des prix du site."""
+
+    trial: PublicPlanOut
+    standard: PublicPlanOut
+    premium: PublicPlanOut

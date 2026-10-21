@@ -82,6 +82,31 @@
         "title": "AdminActionOut",
         "type": "object"
       },
+      "AdminOfferOut": {
+        "description": "L'offre dans l'ordre `trial`, `standard`, `premium`, et les 20 derni\u00e8res actions\n`offer.*`.",
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/AdminActionOut"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/OfferPlanOut"
+            },
+            "title": "Plans",
+            "type": "array"
+          }
+        },
+        "required": [
+          "plans",
+          "actions"
+        ],
+        "title": "AdminOfferOut",
+        "type": "object"
+      },
       "AdminPlanIn": {
         "additionalProperties": false,
         "properties": {
@@ -1247,6 +1272,193 @@
         "title": "MonthRangeIn",
         "type": "object"
       },
+      "OfferPlanIn": {
+        "additionalProperties": false,
+        "description": "Champs \u00e0 modifier, tous optionnels. `total_scan_cap: null` explicite vide le plafond :\nl'absence du champ (`model_fields_set`) le laisse tel quel.",
+        "properties": {
+          "cardIcons": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cardicons"
+          },
+          "maxImages": {
+            "anyOf": [
+              {
+                "maximum": 4.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximages"
+          },
+          "prices": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OfferPricesIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quota": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quota"
+          },
+          "totalScanCap": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totalscancap"
+          }
+        },
+        "title": "OfferPlanIn",
+        "type": "object"
+      },
+      "OfferPlanOut": {
+        "description": "Un plan. `quota` : scans `full` par p\u00e9riode ; `total_scan_cap` : plafond total (`None` :\naucun) ; `prices` est vide pour l'essai.",
+        "properties": {
+          "cardIcons": {
+            "title": "Cardicons",
+            "type": "boolean"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "maxImages": {
+            "title": "Maximages",
+            "type": "integer"
+          },
+          "prices": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OfferPriceOut"
+            },
+            "propertyNames": {
+              "enum": [
+                "month",
+                "year"
+              ]
+            },
+            "title": "Prices",
+            "type": "object"
+          },
+          "quota": {
+            "title": "Quota",
+            "type": "integer"
+          },
+          "quotaPeriod": {
+            "title": "Quotaperiod",
+            "type": "string"
+          },
+          "totalScanCap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totalscancap"
+          }
+        },
+        "required": [
+          "code",
+          "quotaPeriod",
+          "quota",
+          "totalScanCap",
+          "maxImages",
+          "cardIcons",
+          "prices"
+        ],
+        "title": "OfferPlanOut",
+        "type": "object"
+      },
+      "OfferPriceOut": {
+        "description": "Prix en euros d'un plan pour un intervalle. `stripe_price_id` : lecture seule, il ne\nsert qu'\u00e0 l'admin (jamais renvoy\u00e9 par la route publique).",
+        "properties": {
+          "amountCents": {
+            "title": "Amountcents",
+            "type": "integer"
+          },
+          "stripePriceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stripepriceid"
+          }
+        },
+        "required": [
+          "amountCents",
+          "stripePriceId"
+        ],
+        "title": "OfferPriceOut",
+        "type": "object"
+      },
+      "OfferPricesIn": {
+        "additionalProperties": false,
+        "properties": {
+          "month": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Month"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "title": "OfferPricesIn",
+        "type": "object"
+      },
       "PriceIn": {
         "additionalProperties": false,
         "properties": {
@@ -1444,6 +1656,75 @@
           "key"
         ],
         "title": "ProviderOut",
+        "type": "object"
+      },
+      "PublicOfferOut": {
+        "description": "R\u00e9ponse de `GET /api/offer`, lue par la page des prix du site.",
+        "properties": {
+          "premium": {
+            "$ref": "#/components/schemas/PublicPlanOut"
+          },
+          "standard": {
+            "$ref": "#/components/schemas/PublicPlanOut"
+          },
+          "trial": {
+            "$ref": "#/components/schemas/PublicPlanOut"
+          }
+        },
+        "required": [
+          "trial",
+          "standard",
+          "premium"
+        ],
+        "title": "PublicOfferOut",
+        "type": "object"
+      },
+      "PublicPlanOut": {
+        "description": "Un plan tel que le site l'affiche : jamais d'identifiant Stripe ; prix `None` pour l'essai\nou quand il manque.",
+        "properties": {
+          "cardIcons": {
+            "title": "Cardicons",
+            "type": "boolean"
+          },
+          "maxImages": {
+            "title": "Maximages",
+            "type": "integer"
+          },
+          "monthlyCents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthlycents"
+          },
+          "scans": {
+            "title": "Scans",
+            "type": "integer"
+          },
+          "yearlyCents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yearlycents"
+          }
+        },
+        "required": [
+          "scans",
+          "maxImages",
+          "cardIcons",
+          "monthlyCents",
+          "yearlyCents"
+        ],
+        "title": "PublicPlanOut",
         "type": "object"
       },
       "QuotaOut": {
@@ -2452,6 +2733,75 @@
         "summary": "Update Settings"
       }
     },
+    "/api/admin/offer": {
+      "get": {
+        "description": "Les trois plans (prix, quota, photos, ic\u00f4nes, plafond) et les 20 derni\u00e8res actions\n`offer.*`.",
+        "operationId": "overview_api_admin_offer_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOfferOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Overview"
+      }
+    },
+    "/api/admin/offer/plans/{plan}": {
+      "patch": {
+        "description": "Modifie les champs fournis ; une ligne de journal par champ r\u00e9ellement chang\u00e9. Les\nabonn\u00e9s actuels sont concern\u00e9s aussit\u00f4t : un quota abaiss\u00e9 sous leur consommation leur\nlaisse 0 scan restant.",
+        "operationId": "update_plan_api_admin_offer_plans__plan__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan",
+            "required": true,
+            "schema": {
+              "title": "Plan",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfferPlanIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOfferOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Plan"
+      }
+    },
     "/api/admin/users": {
       "get": {
         "description": "Les comptes, du plus r\u00e9cent au plus ancien. `q` : sous-cha\u00eene de l'email, casse ignor\u00e9e\n(3 caract\u00e8res au moins) ; `plan` : un code d'offre, ou `none` ; `before` : curseur.",
@@ -2945,6 +3295,25 @@
           }
         },
         "summary": "Me"
+      }
+    },
+    "/api/offer": {
+      "get": {
+        "description": "Quotas, photos, ic\u00f4nes et prix des trois plans. Publique, sans identifiant Stripe ;\ngard\u00e9e cinq minutes par les caches.",
+        "operationId": "offer_api_offer_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicOfferOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Offer"
       }
     },
     "/api/scans": {

@@ -188,6 +188,49 @@ export interface paths {
         patch: operations["update_settings_api_admin_ai_settings_patch"];
         trace?: never;
     };
+    "/api/admin/offer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Overview
+         * @description Les trois plans (prix, quota, photos, icônes, plafond) et les 20 dernières actions
+         *     `offer.*`.
+         */
+        get: operations["overview_api_admin_offer_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/offer/plans/{plan}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Plan
+         * @description Modifie les champs fournis ; une ligne de journal par champ réellement changé. Les
+         *     abonnés actuels sont concernés aussitôt : un quota abaissé sous leur consommation leur
+         *     laisse 0 scan restant.
+         */
+        patch: operations["update_plan_api_admin_offer_plans__plan__patch"];
+        trace?: never;
+    };
     "/api/admin/users": {
         parameters: {
             query?: never;
@@ -384,6 +427,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/offer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Offer
+         * @description Quotas, photos, icônes et prix des trois plans. Publique, sans identifiant Stripe ;
+         *     gardée cinq minutes par les caches.
+         */
+        get: operations["offer_api_offer_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scans": {
         parameters: {
             query?: never;
@@ -473,6 +537,17 @@ export interface components {
             id: number;
             /** Targetuserid */
             targetUserId: string | null;
+        };
+        /**
+         * AdminOfferOut
+         * @description L'offre dans l'ordre `trial`, `standard`, `premium`, et les 20 dernières actions
+         *     `offer.*`.
+         */
+        AdminOfferOut: {
+            /** Actions */
+            actions: components["schemas"]["AdminActionOut"][];
+            /** Plans */
+            plans: components["schemas"]["OfferPlanOut"][];
         };
         /** AdminPlanIn */
         AdminPlanIn: {
@@ -882,6 +957,63 @@ export interface components {
             /** Min */
             min: number;
         };
+        /**
+         * OfferPlanIn
+         * @description Champs à modifier, tous optionnels. `total_scan_cap: null` explicite vide le plafond :
+         *     l'absence du champ (`model_fields_set`) le laisse tel quel.
+         */
+        OfferPlanIn: {
+            /** Cardicons */
+            cardIcons?: boolean | null;
+            /** Maximages */
+            maxImages?: number | null;
+            prices?: components["schemas"]["OfferPricesIn"] | null;
+            /** Quota */
+            quota?: number | null;
+            /** Totalscancap */
+            totalScanCap?: number | null;
+        };
+        /**
+         * OfferPlanOut
+         * @description Un plan. `quota` : scans `full` par période ; `total_scan_cap` : plafond total (`None` :
+         *     aucun) ; `prices` est vide pour l'essai.
+         */
+        OfferPlanOut: {
+            /** Cardicons */
+            cardIcons: boolean;
+            /** Code */
+            code: string;
+            /** Maximages */
+            maxImages: number;
+            /** Prices */
+            prices: {
+                [key: string]: components["schemas"]["OfferPriceOut"];
+            };
+            /** Quota */
+            quota: number;
+            /** Quotaperiod */
+            quotaPeriod: string;
+            /** Totalscancap */
+            totalScanCap: number | null;
+        };
+        /**
+         * OfferPriceOut
+         * @description Prix en euros d'un plan pour un intervalle. `stripe_price_id` : lecture seule, il ne
+         *     sert qu'à l'admin (jamais renvoyé par la route publique).
+         */
+        OfferPriceOut: {
+            /** Amountcents */
+            amountCents: number;
+            /** Stripepriceid */
+            stripePriceId: string | null;
+        };
+        /** OfferPricesIn */
+        OfferPricesIn: {
+            /** Month */
+            month?: number | null;
+            /** Year */
+            year?: number | null;
+        };
         /** PriceIn */
         PriceIn: {
             /** Amountcents */
@@ -968,6 +1100,32 @@ export interface components {
              * @enum {string}
              */
             structuredOutput: "json_schema" | "json_object";
+        };
+        /**
+         * PublicOfferOut
+         * @description Réponse de `GET /api/offer`, lue par la page des prix du site.
+         */
+        PublicOfferOut: {
+            premium: components["schemas"]["PublicPlanOut"];
+            standard: components["schemas"]["PublicPlanOut"];
+            trial: components["schemas"]["PublicPlanOut"];
+        };
+        /**
+         * PublicPlanOut
+         * @description Un plan tel que le site l'affiche : jamais d'identifiant Stripe ; prix `None` pour l'essai
+         *     ou quand il manque.
+         */
+        PublicPlanOut: {
+            /** Cardicons */
+            cardIcons: boolean;
+            /** Maximages */
+            maxImages: number;
+            /** Monthlycents */
+            monthlyCents: number | null;
+            /** Scans */
+            scans: number;
+            /** Yearlycents */
+            yearlyCents: number | null;
         };
         /** QuotaOut */
         QuotaOut: {
@@ -1492,6 +1650,61 @@ export interface operations {
             };
         };
     };
+    overview_api_admin_offer_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminOfferOut"];
+                };
+            };
+        };
+    };
+    update_plan_api_admin_offer_plans__plan__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OfferPlanIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminOfferOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_users_api_admin_users_get: {
         parameters: {
             query?: {
@@ -1831,6 +2044,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    offer_api_offer_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicOfferOut"];
+                };
             };
         };
     };
