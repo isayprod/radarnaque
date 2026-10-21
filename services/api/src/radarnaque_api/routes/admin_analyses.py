@@ -31,12 +31,12 @@ async def list_analyses(
     with_search: Annotated[bool | None, Query(alias="withSearch")] = None,
     partial: bool | None = None,
     q: Annotated[str | None, Query(min_length=3, max_length=200)] = None,
-    before: Annotated[int | None, Query(ge=1)] = None,
+    before: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
     limit: ListLimit = 50,
 ) -> AnalysisListOut:
     """Les analyses, de la plus récente à la plus ancienne. `from` et `to` : jours civils de
     Bruxelles (`YYYY-MM-DD`), bornes incluses ; `q` : sous-chaîne du titre, casse ignorée (3
-    caractères au moins) ; `before` : identifiant de la dernière analyse de la page précédente."""
+    caractères au moins) ; `before` : le `nextBefore` de la page précédente, tel quel."""
     return await admin_analyses.list_analyses(
         session,
         site=site,

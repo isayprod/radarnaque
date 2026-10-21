@@ -277,6 +277,45 @@ async def test_scan_stores_listing_url_without_query(client, bearer, user, db, l
     assert await _listing_urls(db) == ["https://www.2ememain.be/v/a/b/m123-velo-rouge"]
 
 
+async def _scan_url(client, bearer, uid, url: str, *, site: str = "2dehands.be"):
+    r = await client.post(
+        "/api/scans", json=_body(external_id="m1", site=site, url=url), headers=bearer(uid)
+    )
+    assert r.status_code == 200, r.text
+
+
+async def test_foreign_host_does_not_create_or_replace_listing_url(client, bearer, user, db, llm):
+    uid = await user()
+    # Premier scan avec un autre domaine : aucune URL n'est créée.
+    await _scan_url(client, bearer, uid, "https://evil.test/x")
+    assert await _listing_urls(db) == [None]
+    # Une URL valide, puis un scan avec un autre domaine : elle est conservée.
+    await _scan_url(client, bearer, uid, "https://www.2dehands.be/v/a/m1")
+    assert await _listing_urls(db) == ["https://www.2dehands.be/v/a/m1"]
+    await _scan_url(client, bearer, uid, "https://evil.test/x")
+    assert await _listing_urls(db) == ["https://www.2dehands.be/v/a/m1"]
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://2dehands.be/v/a/m1", "https://2dehands.be/v/a/m1"),
+        ("https://WWW.2dehands.be/v/a/m1?x=1", "https://www.2dehands.be/v/a/m1"),
+        (
+            "https://not2dehands.be/v/a/m1",
+            None,
+        ),  # finit par le domaine sans en être un sous-domaine
+        ("https://2dehands.be.evil.test/v/a/m1", None),
+        ("https://user:pass@www.2dehands.be/v/a/m1", "https://www.2dehands.be/v/a/m1"),
+        ("https://user:pass@evil.test/v/a/m1", None),
+    ],
+)
+async def test_listing_url_must_belong_to_the_site(client, bearer, user, db, llm, url, expected):
+    uid = await user()
+    await _scan_url(client, bearer, uid, url)
+    assert await _listing_urls(db) == [expected]
+
+
 async def test_detail_exposes_scanned_listing_url(client, bearer, user, admin, llm):
     uid = await user()
     url = "https://www.2dehands.be/v/a/m123-velo?utm=x"
@@ -431,7 +470,8 @@ async def test_list_pagination(client, bearer, admin, db):
     # Tri (created_at décroissant, id décroissant).
     keys = [(item["createdAt"], item["id"]) for item in first["items"]]
     assert keys == sorted(keys, reverse=True)
-    assert first["nextBefore"] == ids[-1]
+    last = first["items"][-1]
+    assert first["nextBefore"] == f"{last['createdAt']}~{last['id']}"  # jeton opaque
 
     second = await _list(client, bearer, admin, before=first["nextBefore"])
     assert len(second["items"]) == 5
@@ -442,18 +482,79 @@ async def test_list_pagination(client, bearer, admin, db):
     assert keys == sorted(keys, reverse=True)
 
     page = await _list(client, bearer, admin, limit=10)
-    assert len(page["items"]) == 10 and page["nextBefore"] == page["items"][-1]["id"]
+    assert len(page["items"]) == 10 and page["nextBefore"] is not None
     r = await client.get("/api/admin/analyses?limit=51", headers=bearer(admin))
     assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_request"
     r = await client.get("/api/admin/analyses?limit=0", headers=bearer(admin))
     assert r.status_code == 422
 
 
-async def test_unknown_before_cursor_is_404(client, bearer, admin, db):
+@pytest.mark.parametrize(
+    "shift", [timedelta(days=10), timedelta(days=-10)], ids=["avance", "recule"]
+)
+async def test_pagination_stable_when_cursor_analysis_is_refreshed(
+    client, bearer, admin, db, shift
+):
+    ids = [
+        await _make_analysis(db, ext=f"r{i}", created_at=BASE + timedelta(hours=i))
+        for i in range(6)
+    ]
+    newest_first = ids[::-1]
+    first = await _list(client, bearer, admin, limit=3)
+    assert [i["id"] for i in first["items"]] == newest_first[:3]
+    moved = newest_first[2]  # la dernière de la page 1, celle du curseur
+
+    # Entre deux pages, l'analyse du curseur est rafraîchie : sa date change.
+    await db.execute(
+        text("update app.analyses set created_at = created_at + :s where id = :a"),
+        {"s": shift, "a": moved},
+    )
+    await db.commit()
+
+    rest: list[int] = []
+    token = first["nextBefore"]
+    while token is not None:
+        page = await _list(client, bearer, admin, limit=3, before=token)
+        rest += [i["id"] for i in page["items"]]
+        token = page["nextBefore"]
+    # Les trois plus anciennes, qui n'ont pas bougé, sont là une fois chacune ; aucun doublon.
+    assert len(rest) == len(set(rest))
+    assert set(newest_first[3:]) <= set(rest)
+    assert not set(newest_first[:2]) & set(
+        rest
+    )  # les deux premières de la page 1 ne reviennent pas
+    if shift > timedelta(0):
+        assert rest == newest_first[3:]  # avancée : elle ne reparaît pas en page 2
+
+
+async def test_cursor_does_not_read_the_database(client, bearer, admin, db):
+    """Le jeton porte la date : celui d'une analyse supprimée ou inconnue reste valide."""
+    older = await _make_analysis(db, ext="a", created_at=BASE)
+    newer = await _make_analysis(db, ext="b", created_at=BASE + timedelta(days=1))
+    token = f"{(BASE + timedelta(hours=1)).isoformat().replace('+00:00', 'Z')}~999999999"
+    page = await _list(client, bearer, admin, before=token)
+    assert [i["id"] for i in page["items"]] == [older]
+    assert newer not in {i["id"] for i in page["items"]}
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "n'importe quoi",
+        "123",
+        "2026-10-10T12:00:00Z",  # sans identifiant
+        "2026-10-10T12:00:00Z~abc",
+        "2026-10-10T12:00:00Z~0",
+        "2026-10-10T12:00:00Z~99999999999999999999",
+        "2026-10-10T12:00:00~5",  # sans fuseau
+        "hier~5",
+    ],
+)
+async def test_malformed_cursor_is_422(client, bearer, admin, db, token):
     await _make_analysis(db, ext="a")
-    r = await client.get("/api/admin/analyses?before=999999999", headers=bearer(admin))
-    assert r.status_code == 404
-    assert r.json()["error"]["code"] == "not_found"
+    r = await client.get("/api/admin/analyses", params={"before": token}, headers=bearer(admin))
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "invalid_value"
 
 
 async def test_title_search_under_3_chars_is_422(client, bearer, admin, db):

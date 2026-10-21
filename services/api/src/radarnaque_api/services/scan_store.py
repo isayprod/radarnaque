@@ -4,7 +4,7 @@ l'annonce, analyse (insertion ou rafraîchissement sur place) et relecture de se
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import ColumnElement, delete, select
+from sqlalchemy import ColumnElement, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -105,18 +105,24 @@ async def valid_analysis_id(
     )
 
 
-def listing_url(listing: ListingIn) -> str:
-    """`scheme://host/path` de l'annonce : la query et le fragment peuvent porter des traceurs, et
-    d'éventuels identifiants (`user:pass@`) ne sont pas conservés."""
+def listing_url(listing: ListingIn) -> str | None:
+    """`scheme://host/path` de l'annonce, ou `None` si l'hôte n'est pas le domaine du site de
+    l'annonce (`listing.site`, déjà validé) ou l'un de ses sous-domaines : ce lien s'affiche aux
+    admins, un autre domaine n'y a pas sa place. La query et le fragment (traceurs) et les
+    identifiants (`user:pass@`) ne sont pas conservés."""
     url = listing.url
-    return f"{url.scheme}://{url.host}{url.path or ''}"
+    host = url.host or ""
+    if host != listing.site and not host.endswith(f".{listing.site}"):
+        return None
+    return f"{url.scheme}://{host}{url.path or ''}"
 
 
 async def upsert_snapshot(
     session: AsyncSession, site_id: int, listing: ListingIn, at: datetime
 ) -> tuple[int, str]:
     """Annonce, snapshot et images, puis commit. L'annonce est insérée, ou son URL mise à jour
-    (`ON CONFLICT (site_id, external_id) DO UPDATE`) ; le snapshot et ses images le sont par
+    (`ON CONFLICT (site_id, external_id) DO UPDATE`, qui garde l'URL connue quand celle du scan
+    est refusée, voir `listing_url`) ; le snapshot et ses images le sont par
     `INSERT … ON CONFLICT DO NOTHING`, puis relecture. Renvoie l'identifiant du snapshot et son
     empreinte de contenu. Le titre et la description sont masqués **avant** l'empreinte et
     l'enregistrement (règle R9), comme dans le message envoyé au LLM : aucun contact n'est
@@ -129,7 +135,8 @@ async def upsert_snapshot(
     listing_id = (
         await session.execute(
             stmt.on_conflict_do_update(
-                index_elements=["site_id", "external_id"], set_={"url": stmt.excluded.url}
+                index_elements=["site_id", "external_id"],
+                set_={"url": func.coalesce(stmt.excluded.url, Listing.url)},
             ).returning(Listing.id)
         )
     ).scalar_one()
