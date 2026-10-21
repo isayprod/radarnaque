@@ -2,6 +2,8 @@ import { Link } from "./components/Link";
 import { secondaryButton } from "./components/ui";
 import { AccessDenied } from "./pages/AccessDenied";
 import { Ai } from "./pages/Ai";
+import { Analyses } from "./pages/Analyses";
+import { AnalysisCard } from "./pages/AnalysisCard";
 import { Dashboard } from "./pages/Dashboard";
 import { NotFound } from "./pages/NotFound";
 import { Offer } from "./pages/Offer";
@@ -62,7 +64,6 @@ function title(route: Route): string {
 	}
 }
 
-// Les analyses n'ont pas encore d'écran : contenu vide.
 function Content({ route }: { route: Route }) {
 	switch (route.name) {
 		case "dashboard":
@@ -75,10 +76,12 @@ function Content({ route }: { route: Route }) {
 			return <Offer />;
 		case "ai":
 			return <Ai promptId={route.promptId} />;
+		case "analyses":
+			return <Analyses />;
+		case "analysis":
+			return <AnalysisCard id={route.id} />;
 		case "notFound":
 			return <NotFound />;
-		default:
-			return null;
 	}
 }
 
