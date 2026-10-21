@@ -6,6 +6,7 @@ import logging
 from collections.abc import Iterator
 from uuid import uuid4
 
+import httpx
 import psycopg
 import pytest
 from sqlalchemy import text
@@ -15,6 +16,7 @@ from radarnaque_api.llm.client import LLMResult
 from radarnaque_api.llm.events import EventSink
 from radarnaque_api.llm.tools import WebSearchTool
 from radarnaque_api.search import SearchHit
+from radarnaque_api.services.ai_probes import SearchHealth
 
 ADMIN_EMAIL = "admin@radarnaque.test"
 PROMPT = "Tu es un expert des arnaques en ligne. " * 8  # 304 caractères
@@ -203,12 +205,15 @@ async def test_overview_search_url_hides_credentials(app, client, bearer, admin)
     app.state.settings = settings.model_copy(
         update={"search_backend": "searxng", "searxng_url": "http://moi:mdp@searx.test:8080/x"}
     )
+    app.state.search_health = SearchHealth(
+        httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200))),
+        "http://searx.test:8080/x",
+    )
     data = await _overview(client, bearer, admin)
-    # Le moteur répond en tâche 7 ; d'ici là, un moteur actif est annoncé « down ».
     assert data["search"] == {
         "backend": "searxng",
         "url": "http://searx.test:8080/x",
-        "status": "down",
+        "status": "ok",
         "cacheEntries": None,
     }
     assert "mdp" not in json.dumps(data) and "moi" not in json.dumps(data)
@@ -314,7 +319,7 @@ class _RecordingLLM(FakeLLM):
 
 
 class _OneHitBackend:
-    async def search(self, query: str) -> list[SearchHit]:
+    async def search(self, query: str, *, fresh: bool = False) -> list[SearchHit]:
         return [SearchHit(title="Vélo", url="https://exemple.be/velo", snippet="Prix")]
 
 

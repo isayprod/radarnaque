@@ -166,6 +166,31 @@ class AiOverviewOut(CamelModel):
     actions: list[AdminActionOut]
 
 
+class ModelTestOut(CamelModel):
+    """Essai d'un modèle sur l'annonce fictive. Une erreur du fournisseur n'est pas une erreur
+    de l'API : `ok` vaut `False` et `error` en donne le code."""
+
+    ok: bool
+    score: int | None
+    duration_ms: int
+    tokens_in: int
+    tokens_out: int
+    raw: str
+    error: Literal["transport", "timeout", "invalid_response", "configuration"] | None
+
+
+class SearchTestIn(CamelInModel):
+    query: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+
+
+class SearchTestOut(CamelModel):
+    """Résultat d'une recherche hors cache : `text` est le bloc rendu au modèle."""
+
+    status: Literal["ok", "down", "disabled"]
+    count: int
+    text: str
+
+
 class ModelIn(CamelInModel):
     provider: str
     slug: ModelSlug

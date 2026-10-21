@@ -65,6 +65,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/ai/models/{model_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Model
+         * @description Essaie un modèle avec le prompt actif sur une annonce fictive, sans outil ni photo. Rien
+         *     n'est écrit. 10 essais par heure et par admin. Une erreur du fournisseur rend `200` avec
+         *     `ok: false`.
+         */
+        post: operations["test_model_api_admin_ai_models__model_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/ai/prompts": {
         parameters: {
             query?: never;
@@ -119,6 +141,27 @@ export interface paths {
          * @description Active une version du type `full` pour les scans suivants (le cache est lié au prompt).
          */
         post: operations["activate_prompt_api_admin_ai_prompts__prompt_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/search-test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Search
+         * @description Interroge le moteur de recherche sans passer par le cache. 30 essais par heure et par
+         *     admin. La requête n'est ni journalisée ni enregistrée.
+         */
+        post: operations["test_search_api_admin_ai_search_test_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -811,6 +854,27 @@ export interface components {
             /** Slug */
             slug: string;
         };
+        /**
+         * ModelTestOut
+         * @description Essai d'un modèle sur l'annonce fictive. Une erreur du fournisseur n'est pas une erreur
+         *     de l'API : `ok` vaut `False` et `error` en donne le code.
+         */
+        ModelTestOut: {
+            /** Durationms */
+            durationMs: number;
+            /** Error */
+            error: ("transport" | "timeout" | "invalid_response" | "configuration") | null;
+            /** Ok */
+            ok: boolean;
+            /** Raw */
+            raw: string;
+            /** Score */
+            score: number | null;
+            /** Tokensin */
+            tokensIn: number;
+            /** Tokensout */
+            tokensOut: number;
+        };
         /** MonthRangeIn */
         MonthRangeIn: {
             /** Max */
@@ -1062,6 +1126,26 @@ export interface components {
             /** Url */
             url: string | null;
         };
+        /** SearchTestIn */
+        SearchTestIn: {
+            /** Query */
+            query: string;
+        };
+        /**
+         * SearchTestOut
+         * @description Résultat d'une recherche hors cache : `text` est le bloc rendu au modèle.
+         */
+        SearchTestOut: {
+            /** Count */
+            count: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "down" | "disabled";
+            /** Text */
+            text: string;
+        };
         /**
          * SellerFactsIn
          * @description Faits sur le vendeur, jamais son identité : `id`, `name` et `profileUrl` sont refusés.
@@ -1216,6 +1300,37 @@ export interface operations {
             };
         };
     };
+    test_model_api_admin_ai_models__model_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelTestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_prompt_api_admin_ai_prompts_post: {
         parameters: {
             query?: never;
@@ -1298,6 +1413,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiOverviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_search_api_admin_ai_search_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SearchTestIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchTestOut"];
                 };
             };
             /** @description Validation Error */

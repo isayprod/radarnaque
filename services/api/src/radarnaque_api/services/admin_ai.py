@@ -29,7 +29,9 @@ from radarnaque_api.config import Settings
 from radarnaque_api.errors import ApiError
 from radarnaque_api.llm.providers import ProviderConfig
 from radarnaque_api.models import Analysis, AppSettings, Model, PromptVersion, ScanKind
+from radarnaque_api.search import SearchBackend, SearxngBackend
 from radarnaque_api.services.admin_log import recent_actions, record_action
+from radarnaque_api.services.ai_probes import SearchHealth
 from radarnaque_api.services.scans import SCAN_KIND
 
 AI_ACTIONS = 20
@@ -64,16 +66,18 @@ def public_search_url(url: str) -> str:
     return f"{scheme}{sep}{authority.rpartition('@')[2]}{slash}{path}"
 
 
-def search_status(settings: Settings) -> SearchStatusOut:
-    """État du moteur de recherche. Tâche 7 : la vraie vérification (`/healthz`) et la taille du
-    cache remplaceront `down` et `None` pour un moteur actif."""
+async def search_status(
+    settings: Settings, health: SearchHealth | None, search: SearchBackend | None
+) -> SearchStatusOut:
+    """État du moteur de recherche : `/healthz` (gardé 60 s par `health`) et taille du cache du
+    processus qui répond. Sans moteur : `disabled`."""
     if settings.search_backend == "none":
         return SearchStatusOut(backend="none", url=None, status="disabled", cache_entries=None)
     return SearchStatusOut(
         backend=settings.search_backend,
         url=public_search_url(settings.searxng_url),
-        status="down",
-        cache_entries=None,
+        status="down" if health is None else await health.status(),
+        cache_entries=search.cache_entries if isinstance(search, SearxngBackend) else None,
     )
 
 
@@ -101,6 +105,8 @@ async def build_overview(
     providers: Mapping[str, ProviderConfig],
     settings: Settings,
     environ: Mapping[str, str],
+    search_health: SearchHealth | None,
+    search: SearchBackend | None,
 ) -> AiOverviewOut:
     """Lit des colonnes, jamais des entités : la session de la route, déjà validée, ne renvoie
     pas d'objets périmés."""
@@ -178,7 +184,7 @@ async def build_overview(
             rate_limit_per_minute=rate_limit,
             max_web_searches=max_searches,
         ),
-        search=search_status(settings),
+        search=await search_status(settings, search_health, search),
         actions=await recent_actions(session, prefix="ai.", limit=AI_ACTIONS),
     )
 

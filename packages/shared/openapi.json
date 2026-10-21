@@ -1162,6 +1162,70 @@
         "title": "ModelOut",
         "type": "object"
       },
+      "ModelTestOut": {
+        "description": "Essai d'un mod\u00e8le sur l'annonce fictive. Une erreur du fournisseur n'est pas une erreur\nde l'API : `ok` vaut `False` et `error` en donne le code.",
+        "properties": {
+          "durationMs": {
+            "title": "Durationms",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "enum": [
+                  "transport",
+                  "timeout",
+                  "invalid_response",
+                  "configuration"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "raw": {
+            "title": "Raw",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "tokensIn": {
+            "title": "Tokensin",
+            "type": "integer"
+          },
+          "tokensOut": {
+            "title": "Tokensout",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ok",
+          "score",
+          "durationMs",
+          "tokensIn",
+          "tokensOut",
+          "raw",
+          "error"
+        ],
+        "title": "ModelTestOut",
+        "type": "object"
+      },
       "MonthRangeIn": {
         "additionalProperties": false,
         "properties": {
@@ -1795,6 +1859,51 @@
         "title": "SearchStatusOut",
         "type": "object"
       },
+      "SearchTestIn": {
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "SearchTestIn",
+        "type": "object"
+      },
+      "SearchTestOut": {
+        "description": "R\u00e9sultat d'une recherche hors cache : `text` est le bloc rendu au mod\u00e8le.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "down",
+              "disabled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "count",
+          "text"
+        ],
+        "title": "SearchTestOut",
+        "type": "object"
+      },
       "SellerFactsIn": {
         "additionalProperties": false,
         "description": "Faits sur le vendeur, jamais son identit\u00e9 : `id`, `name` et `profileUrl` sont refus\u00e9s.",
@@ -2106,6 +2215,46 @@
         "summary": "Add Model"
       }
     },
+    "/api/admin/ai/models/{model_id}/test": {
+      "post": {
+        "description": "Essaie un mod\u00e8le avec le prompt actif sur une annonce fictive, sans outil ni photo. Rien\nn'est \u00e9crit. 10 essais par heure et par admin. Une erreur du fournisseur rend `200` avec\n`ok: false`.",
+        "operationId": "test_model_api_admin_ai_models__model_id__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelTestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Model"
+      }
+    },
     "/api/admin/ai/prompts": {
       "post": {
         "description": "Cr\u00e9e la version suivante, non active.",
@@ -2223,6 +2372,45 @@
           }
         },
         "summary": "Activate Prompt"
+      }
+    },
+    "/api/admin/ai/search-test": {
+      "post": {
+        "description": "Interroge le moteur de recherche sans passer par le cache. 30 essais par heure et par\nadmin. La requ\u00eate n'est ni journalis\u00e9e ni enregistr\u00e9e.",
+        "operationId": "test_search_api_admin_ai_search_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchTestIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchTestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Search"
       }
     },
     "/api/admin/ai/settings": {
