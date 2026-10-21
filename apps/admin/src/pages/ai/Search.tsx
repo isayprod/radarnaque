@@ -1,14 +1,8 @@
 import type { components } from "@radarnaque/shared";
 import { type FormEvent, type ReactNode, useState } from "react";
 import type { AdminApi } from "../../api";
-import {
-	ErrorLine,
-	field,
-	type Overview,
-	primaryButton,
-	probeMessage,
-	Section,
-} from "./shared";
+import { ErrorLine, field, primaryButton, Section } from "../../components/ui";
+import { type Overview, probeMessage } from "./shared";
 
 type SearchStatus = Overview["search"];
 type SearchTest = components["schemas"]["SearchTestOut"];

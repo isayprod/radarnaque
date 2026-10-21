@@ -12,15 +12,53 @@ const LABELS: Record<string, string> = {
 	"ai.prompt_created": "Prompt créé",
 	"ai.prompt_activated": "Prompt activé",
 	"ai.settings_set": "Réglage modifié",
+	"offer.price_set": "Prix modifié",
+	"offer.quota_set": "Quota modifié",
+	"offer.feature_set": "Fonctionnalité modifiée",
+	"offer.max_images_set": "Photos modifiées",
+	"offer.total_cap_set": "Plafond total modifié",
 	"system.purge": "Purge",
 };
 
+const INTERVALS: Record<string, string> = { month: "mois", year: "an" };
+const FEATURES: Record<string, string> = { card_icons: "icônes des cartes" };
+
+const euros = new Intl.NumberFormat("fr-BE", {
+	style: "currency",
+	currency: "EUR",
+});
+
 function show(value: unknown): string {
-	return value === null || value === undefined ? "aucun" : String(value);
+	if (value === null || value === undefined) return "aucun";
+	if (typeof value === "boolean") return value ? "oui" : "non";
+	return String(value);
 }
 
-/** `from → to` (avec le réglage visé pour `ai.settings_set`), ou les repères propres à l'action. */
-function formatDetails(details: AdminAction["details"]): string {
+// Un prix de l'offre est en centimes ; le journal l'affiche en euros.
+function showPrice(value: unknown): string {
+	return typeof value === "number" ? euros.format(value / 100) : show(value);
+}
+
+/** Le plan visé par une action de l'offre, avec l'intervalle ou la fonctionnalité s'il y en a un. */
+function offerTarget(details: AdminAction["details"]): string {
+	const scope =
+		typeof details.interval === "string"
+			? (INTERVALS[details.interval] ?? details.interval)
+			: typeof details.feature === "string"
+				? (FEATURES[details.feature] ?? details.feature)
+				: null;
+	return scope === null
+		? show(details.plan)
+		: `${show(details.plan)}, ${scope}`;
+}
+
+/** `from → to` (avec le réglage visé pour `ai.settings_set`, le plan pour l'offre), ou les repères propres à l'action. */
+function formatDetails(action: AdminAction): string {
+	const { details } = action;
+	if (action.action.startsWith("offer.") && "to" in details) {
+		const price = action.action === "offer.price_set" ? showPrice : show;
+		return `${offerTarget(details)} : ${price(details.from)} → ${price(details.to)}`;
+	}
 	if ("to" in details) {
 		const change = `${show(details.from)} → ${show(details.to)}`;
 		return typeof details.field === "string"
@@ -60,7 +98,7 @@ export function ActionLog({ actions }: { actions: AdminAction[] }) {
 						<td className="py-1 pr-4 break-all">
 							{action.adminEmail ?? "admin supprimé"}
 						</td>
-						<td className="py-1">{formatDetails(action.details)}</td>
+						<td className="py-1">{formatDetails(action)}</td>
 					</tr>
 				))}
 			</tbody>

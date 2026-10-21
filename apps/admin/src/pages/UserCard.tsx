@@ -1,63 +1,28 @@
 import type { components } from "@radarnaque/shared";
-import { type ReactNode, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { type AdminApi, ApiFailure } from "../api";
 import { ActionLog } from "../components/ActionLog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Link } from "../components/Link";
+import {
+	actionMessage,
+	dangerButton,
+	Section,
+	secondaryButton,
+	Term,
+} from "../components/ui";
 import { formatDateTime } from "../format";
-import { hrefOf, isPlainLeftClick, useRoute } from "../router";
+import { usePlans } from "../plans";
+import { useRoute } from "../router";
 import { useSession } from "../session";
 
 type Card = components["schemas"]["AdminUserOut"];
-
-const PLANS = ["trial", "standard", "premium"] as const;
 
 const SCAN_KINDS: Record<string, string> = {
 	full: "Complète",
 	text: "Texte",
 	image: "Image",
 };
-
-const secondaryButton =
-	"rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:opacity-60";
-const dangerButton =
-	"rounded-lg border border-red-300 px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:cursor-not-allowed disabled:opacity-60";
-
-/** Texte clair d'une erreur d'action. Les 409 se distinguent par le message de l'API. */
-function actionMessage(error: unknown): string {
-	if (error instanceof ApiFailure) {
-		if (error.status === 404) return "Compte introuvable.";
-		if (error.status === 409) {
-			if (error.message.includes("dernier admin")) {
-				return "Impossible : c'est le dernier admin.";
-			}
-			if (error.message.includes("propre")) {
-				return "Impossible sur votre propre compte.";
-			}
-			return error.message === error.code
-				? "Impossible : l'action entre en conflit avec l'état du compte."
-				: error.message;
-		}
-	}
-	return "L'action a échoué, réessayez.";
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-	return (
-		<section aria-label={title} className="space-y-2">
-			<h2 className="text-base font-semibold">{title}</h2>
-			{children}
-		</section>
-	);
-}
-
-function Term({ label, children }: { label: string; children: ReactNode }) {
-	return (
-		<div className="flex gap-2">
-			<dt className="w-40 shrink-0 text-slate-500">{label}</dt>
-			<dd className="min-w-0 break-all">{children}</dd>
-		</div>
-	);
-}
 
 export function UserCard({ id }: { id: string }) {
 	const session = useSession();
@@ -82,7 +47,9 @@ function CardView({
 	const [loadError, setLoadError] = useState<string | null>(null);
 	const [dialog, setDialog] = useState<Dialog | null>(null);
 	const [actionError, setActionError] = useState<string | null>(null);
-	const [plan, setPlan] = useState<string>("standard");
+	const plans = usePlans();
+	// Le plan choisi dans le menu ; sans choix, « standard » s'il existe, sinon le premier.
+	const [choice, setChoice] = useState<string | null>(null);
 
 	useEffect(() => {
 		let stale = false;
@@ -107,20 +74,7 @@ function CardView({
 		};
 	}, [api, id]);
 
-	const backTarget = { name: "users" } as const;
-	const back = (
-		<a
-			href={hrefOf(backTarget)}
-			onClick={(event) => {
-				if (!isPlainLeftClick(event)) return;
-				event.preventDefault();
-				navigate(backTarget);
-			}}
-			className="text-sm font-medium text-brand-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
-		>
-			← Retour à la liste
-		</a>
-	);
+	const back = <Link route={{ name: "users" }}>← Retour à la liste</Link>;
 
 	if (loadError !== null) {
 		return (
@@ -133,6 +87,12 @@ function CardView({
 	if (card === null)
 		return <p className="text-sm text-slate-500">Chargement…</p>;
 
+	const plan =
+		choice !== null && plans?.includes(choice)
+			? choice
+			: plans?.includes("standard")
+				? "standard"
+				: (plans?.[0] ?? "");
 	const isOwn = card.email.toLowerCase() === ownEmail.toLowerCase();
 	const stripe = card.subscription?.provider === "stripe";
 	const base = `/api/admin/users/${encodeURIComponent(card.id)}`;
@@ -288,11 +248,11 @@ function CardView({
 					<select
 						id="plan-choice"
 						value={plan}
-						disabled={stripe}
-						onChange={(event) => setPlan(event.target.value)}
+						disabled={stripe || plans === null}
+						onChange={(event) => setChoice(event.target.value)}
 						className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-60"
 					>
-						{PLANS.map((code) => (
+						{(plans ?? []).map((code) => (
 							<option key={code} value={code}>
 								{code}
 							</option>
@@ -300,7 +260,7 @@ function CardView({
 					</select>
 					<button
 						type="button"
-						disabled={stripe}
+						disabled={stripe || plans === null}
 						onClick={() => setDialog("plan")}
 						className={secondaryButton}
 					>

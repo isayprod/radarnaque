@@ -1,11 +1,11 @@
-import type { MouseEvent } from "react";
+import { Link } from "./components/Link";
 import { AccessDenied } from "./pages/AccessDenied";
 import { Ai } from "./pages/Ai";
 import { NotFound } from "./pages/NotFound";
 import { SignIn } from "./pages/SignIn";
 import { UserCard } from "./pages/UserCard";
 import { Users } from "./pages/Users";
-import { hrefOf, isPlainLeftClick, type Route, useRoute } from "./router";
+import { type Route, useRoute } from "./router";
 import { useSession } from "./session";
 
 type NavItem = {
@@ -14,29 +14,52 @@ type NavItem = {
 	active: (route: Route) => boolean;
 };
 
-// Partie 1 : deux entrées. Les autres écrans arrivent avec la partie 2 (pas d'entrée morte).
 const NAV: NavItem[] = [
+	{
+		label: "Tableau de bord",
+		route: { name: "dashboard" },
+		active: (r) => r.name === "dashboard",
+	},
 	{
 		label: "Utilisateurs",
 		route: { name: "users" },
 		active: (r) => r.name === "users" || r.name === "user",
 	},
+	{
+		label: "Offre",
+		route: { name: "offer" },
+		active: (r) => r.name === "offer",
+	},
 	{ label: "IA", route: { name: "ai" }, active: (r) => r.name === "ai" },
+	{
+		label: "Analyses",
+		route: { name: "analyses" },
+		active: (r) => r.name === "analyses" || r.name === "analysis",
+	},
 ];
 
 function title(route: Route): string {
 	switch (route.name) {
+		case "dashboard":
+			return "Tableau de bord";
 		case "users":
 			return "Utilisateurs";
 		case "user":
 			return "Fiche utilisateur";
+		case "offer":
+			return "Offre";
 		case "ai":
 			return "IA";
+		case "analyses":
+			return "Analyses";
+		case "analysis":
+			return "Analyse";
 		case "notFound":
 			return "Page introuvable";
 	}
 }
 
+// Tableau de bord, offre et analyses n'ont pas encore d'écran : contenu vide.
 function Content({ route }: { route: Route }) {
 	switch (route.name) {
 		case "users":
@@ -44,9 +67,11 @@ function Content({ route }: { route: Route }) {
 		case "user":
 			return <UserCard id={route.id} />;
 		case "ai":
-			return <Ai />;
+			return <Ai promptId={route.promptId} />;
 		case "notFound":
 			return <NotFound />;
+		default:
+			return null;
 	}
 }
 
@@ -71,13 +96,7 @@ function Shell({
 	email: string;
 	onSignOut: () => Promise<void>;
 }) {
-	const [route, navigate] = useRoute();
-
-	const onNavigate = (event: MouseEvent<HTMLAnchorElement>, target: Route) => {
-		if (!isPlainLeftClick(event)) return;
-		event.preventDefault();
-		navigate(target);
-	};
+	const [route] = useRoute();
 
 	return (
 		<div className="flex min-h-screen">
@@ -91,10 +110,9 @@ function Shell({
 						const active = item.active(route);
 						return (
 							<li key={item.label}>
-								<a
-									href={hrefOf(item.route)}
+								<Link
+									route={item.route}
 									aria-current={active ? "page" : undefined}
-									onClick={(event) => onNavigate(event, item.route)}
 									className={`block rounded-md px-3 py-2 text-sm ${
 										active
 											? "bg-brand-50 font-medium text-brand-700"
@@ -102,7 +120,7 @@ function Shell({
 									}`}
 								>
 									{item.label}
-								</a>
+								</Link>
 							</li>
 						);
 					})}

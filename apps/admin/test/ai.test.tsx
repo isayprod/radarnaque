@@ -576,6 +576,27 @@ describe("écran IA", () => {
 		);
 	});
 
+	it("ai screen opens the prompt given by the route", async () => {
+		const { sent } = fakeFetch({
+			...base,
+			"GET /api/admin/ai": () => json(overview()),
+			"GET /api/admin/ai/prompts/10": () =>
+				json({
+					id: 10,
+					version: 1,
+					active: false,
+					analyses: 5,
+					createdAt: "2026-10-01T10:00:00Z",
+					systemPrompt: "Texte de la première version.",
+				}),
+		});
+		renderAt("/admin/ia/prompts/10");
+		expect(
+			await screen.findByLabelText("Texte de la version 1"),
+		).toHaveProperty("value", "Texte de la première version.");
+		expect(sent("GET", "/api/admin/ai/prompts/10")).toHaveLength(1);
+	});
+
 	it("settings confirmation lists changes and privacy warning on maxWebSearches", async () => {
 		const after = overview({
 			settings: {

@@ -103,8 +103,11 @@ describe("session", () => {
 			},
 			"GET /api/me": () => json(ME),
 			"GET /api/admin/users": () => json({ items: [], nextBefore: null }),
+			"GET /api/admin/offer": () => json({ plans: [], actions: [] }),
 		});
 		const user = userEvent.setup();
+		// La racine /admin/ est le tableau de bord ; la liste garde ici un appel à observer.
+		window.history.replaceState(null, "", "/admin/utilisateurs");
 		renderApp();
 
 		await user.type(
@@ -128,6 +131,7 @@ describe("session", () => {
 			"POST /auth/sign-in/email-otp",
 			"GET /auth/token",
 			"GET /api/me",
+			"GET /api/admin/offer",
 			"GET /api/admin/users",
 		]);
 		const bodyOf = (n: number) =>

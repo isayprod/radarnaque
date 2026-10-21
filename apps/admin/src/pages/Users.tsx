@@ -1,17 +1,16 @@
 import type { components } from "@radarnaque/shared";
 import { useEffect, useRef, useState } from "react";
 import type { AdminApi } from "../api";
+import { Link } from "../components/Link";
+import { field, secondaryButton } from "../components/ui";
 import { formatDateTime } from "../format";
-import { hrefOf, isPlainLeftClick, useRoute } from "../router";
+import { usePlans } from "../plans";
 import { useSession } from "../session";
 
 type UserList = components["schemas"]["AdminUserListOut"];
 
 const SEARCH_MIN = 3;
 const SEARCH_DELAY_MS = 300;
-
-const field =
-	"rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-brand-600";
 
 export function Users() {
 	const session = useSession();
@@ -32,7 +31,7 @@ function listPath(
 }
 
 function UserList({ api }: { api: AdminApi }) {
-	const [, navigate] = useRoute();
+	const plans = usePlans();
 	const [input, setInput] = useState("");
 	// Terme réellement envoyé : au moins 3 caractères, 300 ms après la dernière frappe.
 	const [q, setQ] = useState<string | null>(null);
@@ -143,9 +142,11 @@ function UserList({ api }: { api: AdminApi }) {
 						className={`${field} block`}
 					>
 						<option value="">Tous</option>
-						<option value="trial">trial</option>
-						<option value="standard">standard</option>
-						<option value="premium">premium</option>
+						{plans?.map((code) => (
+							<option key={code} value={code}>
+								{code}
+							</option>
+						))}
 						<option value="none">Aucun</option>
 					</select>
 				</div>
@@ -176,21 +177,12 @@ function UserList({ api }: { api: AdminApi }) {
 						</thead>
 						<tbody>
 							{items.map((item) => {
-								const target = { name: "user", id: item.id } as const;
 								return (
 									<tr key={item.id} className="border-t border-slate-100">
 										<td className="py-2 pr-4 break-all">
-											<a
-												href={hrefOf(target)}
-												onClick={(event) => {
-													if (!isPlainLeftClick(event)) return;
-													event.preventDefault();
-													navigate(target);
-												}}
-												className="font-medium text-brand-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
-											>
+											<Link route={{ name: "user", id: item.id }}>
 												{item.email}
-											</a>
+											</Link>
 										</td>
 										<td className="py-2 pr-4">{item.role}</td>
 										<td className="py-2 pr-4">{item.plan ?? "aucun"}</td>
@@ -215,7 +207,7 @@ function UserList({ api }: { api: AdminApi }) {
 					type="button"
 					onClick={() => void loadMore()}
 					disabled={loading}
-					className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:opacity-60"
+					className={secondaryButton}
 				>
 					Page suivante
 				</button>
