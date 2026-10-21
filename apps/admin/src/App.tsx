@@ -1,5 +1,6 @@
 import type { MouseEvent } from "react";
 import { AccessDenied } from "./pages/AccessDenied";
+import { Ai } from "./pages/Ai";
 import { NotFound } from "./pages/NotFound";
 import { SignIn } from "./pages/SignIn";
 import { UserCard } from "./pages/UserCard";
@@ -42,10 +43,10 @@ function Content({ route }: { route: Route }) {
 			return <Users />;
 		case "user":
 			return <UserCard id={route.id} />;
+		case "ai":
+			return <Ai />;
 		case "notFound":
 			return <NotFound />;
-		default:
-			return null;
 	}
 }
 
