@@ -91,6 +91,32 @@ describe("createApi", () => {
 		expect(onSignedOut).toHaveBeenCalledTimes(1);
 	});
 
+	it("exposes the details of an API error", async () => {
+		const { api } = setup(
+			[
+				json(
+					{
+						error: {
+							code: "conflict",
+							message: "Refusé.",
+							details: { reason: "stripe" },
+						},
+					},
+					409,
+				),
+				json({ error: { code: "conflict" } }, 409),
+			],
+			["jwt-1"],
+		);
+		await expect(api.get("/api/admin/x")).rejects.toMatchObject({
+			status: 409,
+			details: { reason: "stripe" },
+		});
+		await expect(api.get("/api/admin/x")).rejects.toMatchObject({
+			details: {},
+		});
+	});
+
 	it("signs out when no session gives a new token", async () => {
 		const { api, onSignedOut } = setup(
 			[json({ error: { code: "unauthenticated" } }, 401)],

@@ -1,16 +1,16 @@
 import type { components } from "@radarnaque/shared";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AdminApi } from "../../api";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
-import { formatDateTime } from "../../format";
 import {
 	actionMessage,
 	ErrorLine,
-	type Overview,
 	primaryButton,
 	Section,
 	secondaryButton,
-} from "./shared";
+} from "../../components/ui";
+import { formatDateTime } from "../../format";
+import type { Overview } from "./shared";
 
 type Prompt = Overview["prompts"][number];
 type PromptText = components["schemas"]["PromptTextOut"];
@@ -32,11 +32,14 @@ export function Prompts({
 	overview,
 	onOverview,
 	reload,
+	promptId,
 }: {
 	api: AdminApi;
 	overview: Overview;
 	onOverview: (overview: Overview) => void;
 	reload: () => Promise<void>;
+	/** Version à ouvrir en consultation (route /admin/ia/prompts/{id}). */
+	promptId?: number;
 }) {
 	const [pane, setPane] = useState<Pane | null>(null);
 	const [toActivate, setToActivate] = useState<Prompt | null>(null);
@@ -66,13 +69,20 @@ export function Prompts({
 		}
 	}
 
-	function consult(prompt: Prompt) {
-		void open(prompt.id, (loaded) => ({
+	function consult(id: number) {
+		void open(id, (loaded) => ({
 			kind: "read",
 			version: loaded.version,
 			text: loaded.systemPrompt,
 		}));
 	}
+
+	// La route peut donner une version à consulter : elle s'ouvre à l'arrivée, et à chaque
+	// changement d'identifiant.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: seul l'identifiant de la route déclenche l'ouverture
+	useEffect(() => {
+		if (promptId !== undefined) consult(promptId);
+	}, [promptId]);
 
 	function startNew() {
 		if (overview.activePromptVersionId === null) {
@@ -164,7 +174,7 @@ export function Prompts({
 									<div className="flex flex-wrap gap-2">
 										<button
 											type="button"
-											onClick={() => consult(prompt)}
+											onClick={() => consult(prompt.id)}
 											className={secondaryButton}
 										>
 											Consulter

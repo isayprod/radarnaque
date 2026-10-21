@@ -1,13 +1,18 @@
-import { type FormEvent, useId, useRef, useState } from "react";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 
 const buttonBase =
 	"rounded-lg px-4 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:opacity-60";
 
+const FOCUSABLE = "button:not(:disabled), input:not(:disabled)";
+
 /**
  * Confirmation modale d'une action. `typedConfirmation` : le bouton reste désactivé tant que
- * la saisie n'est pas identique. Un seul envoi, même en double clic ; si `onConfirm` échoue,
- * le message s'affiche ici et l'action peut être relancée (l'appelant gère ses propres
- * erreurs et ferme la boîte en retirant le composant).
+ * la saisie n'est pas identique. Un seul envoi, même en double clic.
+ *
+ * Clavier : à l'ouverture le focus va à la saisie (sinon à « Annuler ») ; Échap ferme (sauf
+ * pendant l'envoi) ; Tab et Maj+Tab restent dans la boîte ; à la fermeture le focus revient
+ * à l'élément qui l'avait. `onConfirm` gère ses erreurs lui-même et ferme la boîte en la
+ * retirant : une promesse rejetée n'est pas rattrapée ici.
  */
 export function ConfirmDialog(props: {
 	title: string;
@@ -20,22 +25,61 @@ export function ConfirmDialog(props: {
 	const { title, message, confirmLabel, typedConfirmation } = props;
 	const [typed, setTyped] = useState("");
 	const [busy, setBusy] = useState(false);
-	const [failed, setFailed] = useState(false);
 	const sending = useRef(false);
+	const dialog = useRef<HTMLFormElement>(null);
+	const input = useRef<HTMLInputElement>(null);
+	const cancel = useRef<HTMLButtonElement>(null);
+	// Les écouteurs du document lisent l'état courant sans être réinstallés à chaque frappe.
+	const live = useRef({ busy, onCancel: props.onCancel });
+	live.current = { busy, onCancel: props.onCancel };
 	const titleId = useId();
 	const inputId = useId();
 	const ready = typedConfirmation === undefined || typed === typedConfirmation;
+
+	useEffect(() => {
+		const opener = document.activeElement;
+		(input.current ?? cancel.current)?.focus();
+
+		function onKeyDown(event: KeyboardEvent) {
+			if (event.key === "Escape") {
+				if (!live.current.busy) live.current.onCancel();
+				return;
+			}
+			if (event.key !== "Tab" || dialog.current === null) return;
+			const items = [
+				...dialog.current.querySelectorAll<HTMLElement>(FOCUSABLE),
+			];
+			if (items.length === 0) {
+				event.preventDefault();
+				return;
+			}
+			const first = items[0];
+			const last = items[items.length - 1];
+			const active = document.activeElement;
+			const inside = active !== null && dialog.current.contains(active);
+			if (event.shiftKey && (!inside || active === first)) {
+				event.preventDefault();
+				last.focus();
+			} else if (!event.shiftKey && (!inside || active === last)) {
+				event.preventDefault();
+				first.focus();
+			}
+		}
+
+		document.addEventListener("keydown", onKeyDown);
+		return () => {
+			document.removeEventListener("keydown", onKeyDown);
+			if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+		};
+	}, []);
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
 		if (!ready || sending.current) return;
 		sending.current = true;
 		setBusy(true);
-		setFailed(false);
 		try {
 			await props.onConfirm();
-		} catch {
-			setFailed(true);
 		} finally {
 			sending.current = false;
 			setBusy(false);
@@ -45,14 +89,12 @@ export function ConfirmDialog(props: {
 	return (
 		<div className="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/40 p-4">
 			<form
+				ref={dialog}
 				role="dialog"
 				aria-modal="true"
 				aria-labelledby={titleId}
 				noValidate
 				onSubmit={submit}
-				onKeyDown={(event) => {
-					if (event.key === "Escape" && !busy) props.onCancel();
-				}}
 				className="w-full max-w-md space-y-4 rounded-xl bg-white p-6 shadow-lg"
 			>
 				<h2 id={titleId} className="text-lg font-semibold">
@@ -65,9 +107,8 @@ export function ConfirmDialog(props: {
 							Saisissez <strong>{typedConfirmation}</strong> pour confirmer
 						</label>
 						<input
+							ref={input}
 							id={inputId}
-							// biome-ignore lint/a11y/noAutofocus: la saisie est le premier geste de la boîte
-							autoFocus
 							autoComplete="off"
 							value={typed}
 							onChange={(event) => setTyped(event.target.value)}
@@ -75,13 +116,9 @@ export function ConfirmDialog(props: {
 						/>
 					</div>
 				)}
-				<div aria-live="polite" className="min-h-5 text-sm">
-					{failed && (
-						<p className="text-red-700">L'action a échoué, réessayez.</p>
-					)}
-				</div>
 				<div className="flex justify-end gap-2">
 					<button
+						ref={cancel}
 						type="button"
 						onClick={props.onCancel}
 						disabled={busy}

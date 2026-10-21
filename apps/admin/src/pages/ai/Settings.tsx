@@ -5,10 +5,10 @@ import {
 	actionMessage,
 	ErrorLine,
 	field,
-	type Overview,
 	primaryButton,
 	Section,
-} from "./shared";
+} from "../../components/ui";
+import type { Overview } from "./shared";
 
 type Values = Overview["settings"];
 type Key = keyof Values;

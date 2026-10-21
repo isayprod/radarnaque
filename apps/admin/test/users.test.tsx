@@ -15,6 +15,7 @@ type Schemas = components["schemas"];
 type Row = Schemas["AdminUserRowOut"];
 type Card = Schemas["AdminUserOut"];
 type Subscription = Schemas["AdminSubscriptionOut"];
+type OfferPlan = Schemas["OfferPlanOut"];
 
 function json(body: unknown, status = 200): Response {
 	return new Response(JSON.stringify(body), {
@@ -23,8 +24,30 @@ function json(body: unknown, status = 200): Response {
 	});
 }
 
-function apiError(status: number, code: string, message: string): Response {
-	return json({ error: { code, message, details: {} } }, status);
+function apiError(
+	status: number,
+	code: string,
+	message: string,
+	details: Record<string, unknown> = {},
+): Response {
+	return json({ error: { code, message, details } }, status);
+}
+
+function offerPlan(code: string): OfferPlan {
+	return {
+		code,
+		quota: 10,
+		quotaPeriod: "month",
+		totalScanCap: null,
+		maxImages: 4,
+		cardIcons: true,
+		prices: {},
+	};
+}
+
+// Les plans viennent de GET /api/admin/offer, pas d'une liste écrite dans l'écran.
+function offer(codes: string[] = ["trial", "standard", "premium"]): Response {
+	return json({ plans: codes.map(offerPlan), actions: [] });
 }
 
 const ME = { email: "admin@radarnaque.test", role: "admin" };
@@ -63,6 +86,7 @@ function fakeFetch(routes: Record<string, Handler>) {
 const base: Routes = {
 	"GET /auth/token": () => json({ token: "jwt-1" }),
 	"GET /api/me": () => json(ME),
+	"GET /api/admin/offer": () => offer(),
 };
 type Routes = Record<string, Handler>;
 
@@ -129,6 +153,38 @@ beforeEach(() => {
 
 afterEach(() => {
 	cleanup();
+});
+
+describe("navigation", () => {
+	it("sidebar has five entries and the root is the dashboard", async () => {
+		fakeFetch(base);
+		renderAt("/admin/");
+		const nav = await screen.findByRole("navigation", { name: "Navigation" });
+		expect(
+			within(nav)
+				.getAllByRole("link")
+				.map((link) => link.textContent),
+		).toEqual(["Tableau de bord", "Utilisateurs", "Offre", "IA", "Analyses"]);
+		expect(
+			within(nav)
+				.getByRole("link", { name: "Tableau de bord" })
+				.getAttribute("aria-current"),
+		).toBe("page");
+		expect(
+			screen.getByRole("heading", { level: 1, name: "Tableau de bord" }),
+		).toBeTruthy();
+	});
+
+	it("an analysis keeps Analyses active in the sidebar", async () => {
+		fakeFetch(base);
+		renderAt("/admin/analyses/5");
+		const nav = await screen.findByRole("navigation", { name: "Navigation" });
+		expect(
+			within(nav)
+				.getByRole("link", { name: "Analyses" })
+				.getAttribute("aria-current"),
+		).toBe("page");
+	});
 });
 
 describe("liste des utilisateurs", () => {
@@ -212,6 +268,25 @@ describe("liste des utilisateurs", () => {
 		expect(screen.queryByRole("button", { name: "Page suivante" })).toBeNull();
 		expect(listCalls().some((c) => c.url.searchParams.has("before"))).toBe(
 			false,
+		);
+	});
+
+	it("plan filter comes from the API plans", async () => {
+		fakeFetch({
+			...base,
+			"GET /api/admin/offer": () => offer(["trial", "gold"]),
+			"GET /api/admin/users": () => json({ items: [row()], nextBefore: null }),
+		});
+		renderAt("/admin/utilisateurs");
+		await screen.findByText("alice@radarnaque.test");
+		const filter = screen.getByLabelText("Plan") as HTMLSelectElement;
+		await waitFor(() =>
+			expect([...filter.options].map((option) => option.value)).toEqual([
+				"",
+				"trial",
+				"gold",
+				"none",
+			]),
 		);
 	});
 
@@ -428,7 +503,9 @@ describe("fiche d'un utilisateur", () => {
 		fakeFetch({
 			...routeCard(card({ role: "admin" })),
 			"POST /api/admin/users/u1/role": () =>
-				apiError(409, "conflict", "Impossible de retirer le dernier admin."),
+				apiError(409, "conflict", "Impossible de retirer le dernier admin.", {
+					reason: "last_admin",
+				}),
 		});
 		const user = userEvent.setup();
 		renderAt("/admin/utilisateurs/u1");
@@ -456,6 +533,7 @@ describe("fiche d'un utilisateur", () => {
 					409,
 					"conflict",
 					"Vous ne pouvez pas modifier votre propre rôle.",
+					{ reason: "self" },
 				),
 		});
 		const user = userEvent.setup();
@@ -471,6 +549,43 @@ describe("fiche d'un utilisateur", () => {
 		expect(
 			await screen.findByText("Impossible sur votre propre compte."),
 		).toBeTruthy();
+	});
+
+	it("409 stripe shows the message", async () => {
+		fakeFetch({
+			...routeCard(card()),
+			"POST /api/admin/users/u1/plan": () =>
+				apiError(409, "conflict", "Abonnement géré par Stripe.", {
+					reason: "stripe",
+				}),
+		});
+		const user = userEvent.setup();
+		renderAt("/admin/utilisateurs/u1");
+		await screen.findByText("alice@radarnaque.test");
+
+		await user.click(screen.getByRole("button", { name: "Attribuer un plan" }));
+		const dialog = await screen.findByRole("dialog");
+		await user.click(within(dialog).getByRole("button", { name: "Attribuer" }));
+		expect(await screen.findByText("Géré dans Stripe.")).toBeTruthy();
+	});
+
+	it("user card plan menu comes from the API plans", async () => {
+		fakeFetch({
+			...routeCard(card()),
+			"GET /api/admin/offer": () => offer(["trial", "standard", "gold"]),
+		});
+		renderAt("/admin/utilisateurs/u1");
+		await screen.findByText("alice@radarnaque.test");
+
+		const menu = screen.getByLabelText("Plan à attribuer") as HTMLSelectElement;
+		await waitFor(() =>
+			expect([...menu.options].map((option) => option.value)).toEqual([
+				"trial",
+				"standard",
+				"gold",
+			]),
+		);
+		expect(menu.value).toBe("standard");
 	});
 
 	it("cancelling the confirmation sends nothing", async () => {

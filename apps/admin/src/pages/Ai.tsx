@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AdminApi } from "../api";
 import { ActionLog } from "../components/ActionLog";
+import { Section } from "../components/ui";
 import { useSession } from "../session";
 import { Models } from "./ai/Models";
 import { Prompts } from "./ai/Prompts";
 import { Search } from "./ai/Search";
 import { Settings } from "./ai/Settings";
-import { type Overview, Section } from "./ai/shared";
+import type { Overview } from "./ai/shared";
 
 const KEY_STATES = {
 	present: "Clé présente",
@@ -14,12 +15,15 @@ const KEY_STATES = {
 	not_required: "Pas de clé requise",
 } as const;
 
-export function Ai() {
+/** `promptId` : la version de prompt à ouvrir en consultation (route /admin/ia/prompts/{id}). */
+export function Ai({ promptId }: { promptId?: number }) {
 	const session = useSession();
-	return session.status === "ready" ? <AiView api={session.api} /> : null;
+	return session.status === "ready" ? (
+		<AiView api={session.api} promptId={promptId} />
+	) : null;
 }
 
-function AiView({ api }: { api: AdminApi }) {
+function AiView({ api, promptId }: { api: AdminApi; promptId?: number }) {
 	const [overview, setOverview] = useState<Overview | null>(null);
 	const [loadError, setLoadError] = useState(false);
 
@@ -92,6 +96,7 @@ function AiView({ api }: { api: AdminApi }) {
 				overview={overview}
 				onOverview={setOverview}
 				reload={reload}
+				promptId={promptId}
 			/>
 			<Settings
 				api={api}

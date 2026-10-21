@@ -6,12 +6,11 @@ import {
 	actionMessage,
 	ErrorLine,
 	field,
-	type Overview,
 	primaryButton,
-	probeMessage,
 	Section,
 	secondaryButton,
-} from "./shared";
+} from "../../components/ui";
+import { type Overview, probeMessage } from "./shared";
 
 type Model = Overview["models"][number];
 type ModelTest = components["schemas"]["ModelTestOut"];
