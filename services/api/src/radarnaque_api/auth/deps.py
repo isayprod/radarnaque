@@ -1,9 +1,11 @@
 import hmac
+from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from radarnaque_api.auth.privileges import Privileges, privileges_of
 from radarnaque_api.db import get_session
 from radarnaque_api.errors import ApiError
 from radarnaque_api.models.auth_user import AuthUser
@@ -26,6 +28,23 @@ async def current_user(
     if user is None:
         raise _unauthenticated()
     return user
+
+
+@dataclass(frozen=True)
+class AdminContext:
+    user: AuthUser
+    privileges: Privileges
+
+
+async def require_admin(
+    request: Request, user: Annotated[AuthUser, Depends(current_user)]
+) -> AdminContext:
+    """Compte `admin`, ou `superuser` quand `privileges.debug` (hors production). Le rôle est
+    relu en base à chaque requête : un admin rétrogradé ou supprimé perd l'accès aussitôt."""
+    privileges = privileges_of(user, request.app.state.settings)
+    if user.role != "admin" and not privileges.debug:
+        raise ApiError(403, "admin_required", "Accès réservé aux administrateurs.")
+    return AdminContext(user=user, privileges=privileges)
 
 
 async def require_internal_secret(

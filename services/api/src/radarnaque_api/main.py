@@ -20,6 +20,7 @@ from radarnaque_api.llm.providers import ensure_models_use_known_providers, load
 from radarnaque_api.routes import billing, health, internal, me, scans
 from radarnaque_api.search import make_search_backend
 from radarnaque_api.services.purge import purge_forever
+from radarnaque_api.services.rate_window import SlidingWindowLimiter
 from radarnaque_api.services.scans import ANALYSIS_TIMEOUT_S
 
 # En DEBUG, ces bibliothèques journalisent les URL et les corps des requêtes : l'annonce, les
@@ -157,6 +158,10 @@ def create_app(
         settings.jwt_issuer,
         settings.jwt_audience,
     )
+    # Essais de l'admin (modèle, recherche) : par administrateur, en mémoire du processus. Un
+    # redémarrage les remet à zéro ; plusieurs processus auraient chacun leur compteur.
+    app.state.model_test_limiter = SlidingWindowLimiter(10, 3600)
+    app.state.search_test_limiter = SlidingWindowLimiter(30, 3600)
     install_error_handlers(app)
     app.include_router(health.router)
     app.include_router(me.router)
