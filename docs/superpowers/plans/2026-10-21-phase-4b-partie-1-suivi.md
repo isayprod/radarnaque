@@ -4,7 +4,7 @@ Remarques relevées pendant la partie 1 de la phase 4b : socle de l'administrati
 
 ## Corrections prévues avant fusion
 
-- **Asset absent sous `/admin/assets/` :** `try_files {path} /admin/index.html` répond l'`index.html` (code 200) à un fichier de `/admin/assets/` qui n'existe pas, avec l'en-tête de cache des assets (`public, max-age=31536000, immutable`). Un navigateur peut donc garder une page HTML à la place d'un script. À corriger dans la vague finale (repli sur `index.html` hors de `/admin/assets/` seulement, `404` dans `/admin/assets/`), sinon à suivre ici. Le correctif touche `infra/Caddyfile` et `infra/Caddyfile.dev`.
+Aucune. L'asset absent sous `/admin/assets/` (repli sur `index.html` avec l'en-tête `immutable`) est corrigé dans `infra/Caddyfile` et `infra/Caddyfile.dev` : un `handle /admin/assets/*` sans `try_files` donne un vrai `404`. Vérifié sur le Caddy de dev (après `pnpm --filter admin build`) : `/admin/x` donne `200` et `no-store`, un vrai asset `200` et `immutable`, `/admin/assets/nope.js` `404`, `/admin` `308` ; les trois en-têtes de sécurité sont présents sur chaque réponse, et `caddy validate` accepte les deux fichiers.
 
 ## À vérifier en direct avant la mise en ligne
 
@@ -41,8 +41,9 @@ Rien de ceci n'a été essayé hors des tests.
 ## Limites connues
 
 - **Limiteurs et cache propres à chaque processus de l'API :**
-  - les limites des essais (10 par heure et par admin pour le modèle, 30 pour la recherche) et le cache des essais de recherche sont en mémoire ;
-  - avec plusieurs processus ou un redémarrage, la limite se remet à zéro et la taille du cache affichée est celle du processus qui répond ;
+  - les limites des essais (10 par heure et par admin pour le modèle, 30 pour la recherche) et le cache des recherches des analyses (dont l'écran IA affiche la taille ; les essais de recherche n'y passent pas) sont en mémoire ;
+  - avec N processus, chaque processus garde son propre compteur : la limite effective est multipliée par N ; un redémarrage remet les compteurs à zéro ;
+  - la taille du cache affichée est celle du processus qui répond ;
   - sans conséquence avec un seul processus (cas prévu) et peu d'admins ; à partager (Postgres ou Redis) si l'API passe à plusieurs processus.
 - **Un admin peut supprimer son compte depuis la popup, même s'il est le dernier :** `DELETE /api/me` (phase 4a) n'a pas le garde-fou de l'admin. Accepté (socle §4) : `pnpm admin:grant <email>` rétablit un admin sur un autre compte, en production par `docker compose exec auth …`.
 - **Pas de double authentification, ni d'export des données d'un utilisateur :** hors de la phase (socle §8).

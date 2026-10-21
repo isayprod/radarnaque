@@ -23,9 +23,10 @@ async function grantAdmin(pool: Pool, email: string): Promise<boolean> {
 }
 
 /**
- * Retire le rôle admin du compte de cet email. Les admins sont verrouillés (`FOR UPDATE`,
- * toujours dans le même ordre) pour que deux retraits simultanés ne suppriment pas le
- * dernier admin : le second attend le premier, puis relit la liste à jour.
+ * Retire le rôle admin du compte de cet email. Les admins sont verrouillés (`FOR NO KEY
+ * UPDATE`, toujours dans le même ordre) pour que deux retraits simultanés ne suppriment pas
+ * le dernier admin : le second attend le premier, puis relit la liste à jour. Pas `FOR UPDATE` :
+ * il entrerait en conflit avec le `FOR KEY SHARE` que prend le journal d'un admin sur sa ligne.
  */
 async function revokeAdmin(
 	pool: Pool,
@@ -35,7 +36,7 @@ async function revokeAdmin(
 	try {
 		await client.query("BEGIN");
 		const admins = await client.query<{ id: string; email: string }>(
-			`SELECT id, email FROM "user" WHERE role = 'admin' ORDER BY id FOR UPDATE`,
+			`SELECT id, email FROM "user" WHERE role = 'admin' ORDER BY id FOR NO KEY UPDATE`,
 		);
 		const target = admins.rows.find((row) => row.email.toLowerCase() === email);
 		if (!target) {

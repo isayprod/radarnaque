@@ -87,7 +87,7 @@ async def _lock_kind(session: AsyncSession) -> ScanKind:
         await session.execute(
             select(ScanKind)
             .where(ScanKind.code == SCAN_KIND)
-            .with_for_update()
+            .with_for_update(key_share=True)
             .execution_options(populate_existing=True)
         )
     ).scalar_one()
@@ -347,7 +347,9 @@ async def update_settings(session: AsyncSession, *, admin_id: str, changes: AiSe
     Corps vide ou sans changement : rien n'est écrit."""
     row = (
         await session.execute(
-            select(AppSettings).with_for_update().execution_options(populate_existing=True)
+            select(AppSettings)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
         )
     ).scalar_one()
     wanted: dict[str, Any] = {f: getattr(changes, f) for f in SETTING_FIELDS}

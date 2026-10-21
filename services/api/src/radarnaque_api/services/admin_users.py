@@ -39,13 +39,16 @@ def escape_like(text: str) -> str:
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-async def _lock_user(session: AsyncSession, user_id: str) -> AuthUser:
-    """Le compte, sous verrou (`FOR UPDATE`) et relu en base ; 404 s'il n'existe pas."""
+async def _lock_user(session: AsyncSession, user_id: str, *, deleting: bool = False) -> AuthUser:
+    """Le compte, sous verrou et relu en base ; 404 s'il n'existe pas. `FOR NO KEY UPDATE`, sauf
+    pour une suppression (`FOR UPDATE`) : l'insertion d'une ligne `admin_actions` prend un
+    `FOR KEY SHARE` sur la ligne de l'acteur (clé étrangère `admin_user_id`), qui entrerait en
+    conflit avec `FOR UPDATE` et ferait un interblocage entre deux admins."""
     user = (
         await session.execute(
             select(AuthUser)
             .where(AuthUser.id == user_id)
-            .with_for_update()
+            .with_for_update(key_share=not deleting)
             .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
@@ -237,7 +240,7 @@ async def set_role(
                 select(AuthUser.id)
                 .where(AuthUser.role == "admin")
                 .order_by(AuthUser.id)
-                .with_for_update()
+                .with_for_update(key_share=True)
             )
         )
     user = await _lock_user(session, user_id)
@@ -262,6 +265,7 @@ async def delete_user(session: AsyncSession, *, admin_id: str, user_id: str) -> 
     l'identifiant, pas l'email."""
     if user_id == admin_id:
         raise ApiError(409, "conflict", "Vous ne pouvez pas supprimer votre propre compte.")
-    await _lock_user(session, user_id)  # 404 ; le compte ne peut plus disparaître sous nos pieds
+    # 404 ; le compte ne peut plus disparaître sous nos pieds (seul verrou `FOR UPDATE`)
+    await _lock_user(session, user_id, deleting=True)
     record_action(session, admin_id=admin_id, action="user.deleted", target_user_id=user_id)
     await delete_account(session, user_id)

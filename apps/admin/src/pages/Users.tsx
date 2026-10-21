@@ -65,7 +65,12 @@ function UserList({ api }: { api: AdminApi }) {
 				setNextBefore(page.nextBefore);
 			})
 			.catch(() => {
-				if (!stale) setError(true);
+				if (stale) return;
+				// Les anciens résultats ne correspondent plus aux filtres, et leur curseur
+				// ne doit pas servir avec les nouveaux.
+				setItems([]);
+				setNextBefore(null);
+				setError(true);
 			})
 			.finally(() => {
 				if (!stale) setLoading(false);
