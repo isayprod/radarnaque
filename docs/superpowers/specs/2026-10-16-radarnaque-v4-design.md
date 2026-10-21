@@ -63,7 +63,7 @@ Il n'y a pas de freemium. Sans compte, l'extension affiche uniquement le score d
 
 ### 2.2 Prix et quotas de départ
 
-Ces valeurs sont stockées en base et modifiables depuis l'admin.
+Ces valeurs sont stockées en base et modifiables depuis l'admin (écran Offre, phase 4b partie 2). La page `/pricing` les lit par `GET /api/offer` et garde ces valeurs comme secours si l'API ne répond pas.
 
 | Plan | Mensuel TTC | Annuel TTC | Analyses IA | Photos par analyse | Période |
 |---|---|---|---|---|---|
@@ -385,14 +385,14 @@ llm_calls(id PK, created_at, analysis_id FK, model_id FK, prompt_version_id FK,
 
 - **Pourquoi garder `period_end`** alors qu'il pourrait sembler dérivable : avec Stripe, la fin de période est un fait fourni par Stripe (prorata, date d'ancrage), pas un calcul.
 - **Pourquoi `admin_actions.target_user_id` n'a pas de clé étrangère** : cela permet de conserver la trace d'une suppression de compte. `admin_user_id` passe à `NULL` si l'admin est supprimé, et reste `NULL` pour les lignes écrites par le système (`system.purge`).
-- **`admin_actions.details`** (phase 4b) contient l'ancienne et la nouvelle valeur (`{ "from": …, "to": … }`), jamais d'email ni le texte d'un prompt. Chaque modification écrit sa ligne dans la même transaction que le changement. Codes d'action : `user.plan_set`, `user.role_set`, `user.deleted`, `ai.model_added`, `ai.model_activated`, `ai.prompt_created`, `ai.prompt_activated`, `ai.settings_set`, `system.purge` (livrés en partie 1) ; ceux de l'offre (`offer.*`) arrivent en partie 2.
+- **`admin_actions.details`** (phase 4b) contient l'ancienne et la nouvelle valeur (`{ "from": …, "to": … }`), jamais d'email ni le texte d'un prompt. Chaque modification écrit sa ligne dans la même transaction que le changement. Codes d'action : `user.plan_set`, `user.role_set`, `user.deleted`, `ai.model_added`, `ai.model_activated`, `ai.prompt_created`, `ai.prompt_activated`, `ai.settings_set`, `system.purge` (partie 1) ; `offer.price_set`, `offer.quota_set`, `offer.feature_set`, `offer.max_images_set`, `offer.total_cap_set` (partie 2, une ligne par champ modifié, `details` = `{ plan, from, to }`, plus `interval` (`month` ou `year`) pour un prix et `feature` (`card_icons`) pour une fonctionnalité).
 - **`llm_calls`** (phase 4b) : une ligne par appel au modèle qui produit une analyse, écrite par `save_analysis` dans la même transaction. Une analyse du cache expirée est rafraîchie sur place (son coût et sa date sont écrasés) : les statistiques de coût et de cache se lisent donc sur cette trace, pas sur `analyses`. Elle ne relie pas un appel à un compte. La migration 0007 crée une ligne par analyse existante. Les essais « Tester » de l'admin n'y sont pas écrits.
 - **Conservation :** `admin_actions` et `llm_calls` sont purgés après 12 mois, comme les `scan_events` (§10).
 
 ### 6.4 Annonces et cache
 
 ```
-listings(id PK, site_id FK, external_id, UNIQUE(site_id, external_id))
+listings(id PK, site_id FK, external_id, url NULL, UNIQUE(site_id, external_id))
 listing_snapshots(id PK, listing_id FK, content_hash, title, description,
                   price_cents NULL, currency FK NULL, captured_at,
                   UNIQUE(listing_id, content_hash))
@@ -409,6 +409,7 @@ analysis_web_searches(analysis_id FK ON DELETE CASCADE, position, query, aspect,
                       PK(analysis_id, position))
 ```
 
+- **`listings.url`** (migration 0008, phase 4b partie 2) : l'adresse de l'annonce, écrite à chaque scan sous la forme `scheme://host/path`, **sans query ni fragment**. Elle n'est acceptée que si son hôte est le domaine du site de l'annonce ou l'un de ses sous-domaines (sinon elle reste à `NULL`). Elle ne sert qu'à l'écran Analyses de l'admin. Une annonce scannée avant la migration garde `NULL` jusqu'à son prochain scan.
 - **`analysis_web_searches`** ne garde que les recherches **réussies**, dans l'ordre. Elles s'affichent aussi quand l'analyse est servie depuis le cache. L'utilisateur voit les échecs en direct, pas ensuite.
 
 - **`content_hash`** = SHA-256 de la forme canonique de `{ title, description, price, priceType, images }`. Il est **toujours recalculé par le serveur**.
@@ -450,7 +451,22 @@ scan_failures(scan_event_id PK FK, error_code, created_at)
 | POST | `/api/billing/portal` | utilisateur | MVP : `501 billing_unavailable` |
 | POST | `/api/billing/webhooks/stripe` | Stripe | MVP : `501`, implémenté en phase 5 |
 | POST | `/api/internal/users/{id}/bootstrap` | service auth | création de l'abonnement d'essai (secret partagé) |
-| GET/POST/PATCH/DELETE | `/api/admin/*` | admin | voir §8 : `/api/admin/users` et `/api/admin/ai` livrés en phase 4b partie 1 |
+| GET | `/api/offer` | public | prix, quotas, photos et icônes des trois plans, pour la page `/pricing` : `Cache-Control: public, max-age=300`, pas de prix pour l'essai, aucun identifiant Stripe. Le quota de l'essai est le quota par analyse, sans tenir compte de son plafond total (phase 4b partie 2) |
+| GET/POST/PATCH/DELETE | `/api/admin/*` | admin | voir §8 : `/api/admin/users` et `/api/admin/ai` (partie 1), `/api/admin/dashboard`, `/api/admin/offer` et `/api/admin/analyses` (partie 2) |
+
+Routes de la partie 2 de la phase 4b (toutes derrière `require_admin`, sauf `GET /api/offer`) :
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| GET | `/api/admin/dashboard` | cartes du jour et des 7 derniers jours civils de Bruxelles, abonnés actifs par plan, coût du mois et projection, santé du service |
+| GET | `/api/admin/dashboard/daily?days=` | un point par jour civil, jours vides compris, du plus ancien au plus récent (`days` de 1 à 90, 30 par défaut) |
+| GET | `/api/admin/offer` | les trois plans (prix, quota, période, plafond total, photos, icônes, identifiant de prix Stripe en lecture seule) et les 20 dernières modifications de l'offre |
+| PATCH | `/api/admin/offer/plans/{plan}` | les champs modifiés ; une ligne `admin_actions` par champ réellement changé, dans la même transaction. Valeurs identiques : `200` sans écriture ; plan inconnu : `404` |
+| GET | `/api/admin/analyses` | liste filtrée (`site`, `level`, `modelId`, `promptVersionId`, `from`, `to`, `withSearch`, `partial`, `q`, `before`, `limit`) ; 50 au plus par page ; `from` postérieur à `to` : `422` |
+| GET | `/api/admin/analyses/{id}` | détail d'une analyse, sans aucune donnée de compte |
+
+- **Curseur des analyses :** `before` est un **jeton opaque**, `"<date ISO>~<id>"`, que l'écran renvoie tel quel (le `nextBefore` de la page précédente). Ce n'est pas un identifiant : la liste est triée par date du dernier appel, et une analyse rafraîchie remonte en tête.
+- **Tableau de bord :** les statistiques lisent `llm_calls`. Un échec est un scan avec `scan_failures` et sans `scan_results`. Un scan sans issue (encore en cours) compte dans la carte « Analyses » mais dans aucune barre du graphique. La projection du mois est `null` pendant les 24 premières heures du mois.
 
 ### 7.2 Déroulé de `POST /api/scans`
 
@@ -573,8 +589,8 @@ Le format est `{ "error": { "code": "...", "message": "...", "details": {} } }`.
 | 402 | `no_active_subscription`, `quota_exhausted` |
 | 403 | `feature_not_in_plan`, `admin_required` |
 | 404 | `not_found` (admin) |
-| 409 | `conflict` (admin : le dernier admin, soi-même, abonnement Stripe, doublon) |
-| 422 | `invalid_listing`, `invalid_value` (admin : contrôle métier), `invalid_request` (validation des schémas) |
+| 409 | `conflict` (admin : le dernier admin, soi-même, abonnement Stripe, doublon ; l'écran Utilisateurs porte la cause dans `details.reason` : `self`, `last_admin`, `stripe`) |
+| 422 | `invalid_listing`, `invalid_value` (admin : contrôle métier), `invalid_request` (validation des schémas ; aussi une `DataError` de la base, par exemple un caractère NUL) |
 | 429 | `rate_limited` |
 | 501 | `billing_unavailable` |
 | 502 | `analysis_failed` |
@@ -589,12 +605,13 @@ Le format est `{ "error": { "code": "...", "message": "...", "details": {} } }`.
 
 | Écran | Contenu | État |
 |---|---|---|
-| Tableau de bord | Scans par jour et par type ; taux de réponses servies depuis le cache ; coût IA du jour et du mois ; abonnés actifs par plan ; taux d'échec des analyses | partie 2 |
+| Tableau de bord | Écran d'accueil. Cartes du jour et des 7 jours (analyses, appels au modèle, part servie depuis le cache, échecs et trois codes les plus fréquents, coût IA, coût moyen par appel, recherches web) ; graphique SVG des 30 derniers jours (barres empilées servies depuis le cache, avec appel, en échec ; coût en ligne) avec un tableau « Voir les données » ; abonnés actifs par plan ; coût du mois et projection linéaire ; santé (modèle actif, moteur de recherche, dernière purge). Pourcentages affichés arrondis à l'entier, coût moyen à 4 décimales, « — » quand une part n'existe pas | **livré** (partie 2) |
 | Utilisateurs | Recherche par email (3 caractères au moins, sous-chaîne, casse ignorée) ; fiche avec abonnement, consommation, historique, 20 derniers scans et journal. Actions : attribuer un plan (`provider = manual`), nommer ou retirer un admin, supprimer un compte | **livré** (partie 1) |
-| Offre | Pour chaque plan : prix, quotas par type, fonctionnalités, `total_scan_cap` (et la page `/pricing`) | partie 2 |
+| Offre | Pour chaque plan : prix (pas pour l'essai), quota `full`, photos par analyse, icônes sur les cartes, plafond total ; une confirmation résume les changements ; un avertissement rappelle de créer le prix dans Stripe quand on change le prix d'un intervalle qui a un identifiant Stripe, et de mettre `/privacy` à jour quand les photos changent ; historique des 20 dernières modifications. La page `/pricing` lit `GET /api/offer` | **livré** (partie 2) |
 | IA | Fournisseurs de `providers.toml` en lecture seule ; modèles (ajout d'un slug) ; modèle actif ; versions du prompt (création, consultation, activation) ; réglages (cache, limite de requêtes, recherches web) ; essai du modèle (10 par heure et par admin) ; état du moteur de recherche et essai de recherche (30 par heure et par admin) | **livré** (partie 1) |
-| Analyses | Liste paginée des analyses récentes : annonce, score, textes, modèle, coût, nombre de scans servis | partie 2 |
+| Analyses | Liste paginée par curseur (50 par page) avec filtres (site, niveau, modèle, version du prompt, période, recherche web, partielle) et recherche dans le titre (3 caractères au moins) ; détail avec l'annonce (lien vers l'annonce quand `listings.url` existe, photos en **liens** et non en images à cause de la CSP), le résultat FR et NL, les recherches, les appels au modèle et un lien vers le texte du prompt dans l'écran IA. Coûts à 4 décimales. Le filtre Site est codé en dur (2ememain.be, 2dehands.be, facebook.com) | **livré** (partie 2) |
 
+- **Navigation :** la barre latérale a cinq entrées (Tableau de bord, Utilisateurs, Offre, IA, Analyses). Les routes sont `/admin/` (Tableau de bord), `/admin/utilisateurs`, `/admin/offre`, `/admin/ia`, `/admin/ia/prompts/{id}`, `/admin/analyses` et `/admin/analyses/{id}`. Les actions risquées passent par une boîte de confirmation modale (focus piégé, Échap, Tab).
 - **Garde-fous des comptes :** un admin ne peut ni retirer son propre rôle ni supprimer son compte depuis l'admin ; le dernier admin ne peut pas être rétrogradé (contrôle sous verrou) ; un abonnement Stripe actif ne s'écrase pas (`409`) ; le rôle `superuser` n'est jamais attribué depuis l'admin. Un admin peut encore supprimer son compte depuis la popup, même s'il est le dernier : `pnpm admin:grant` rétablit un admin.
 
 ## 9. Paiement (structure Stripe)
@@ -673,7 +690,7 @@ Chaque phase fait l'objet de son propre plan d'implémentation, et se livre et s
    - **4a, RGPD (livrée)** : `DELETE /api/me`, suppression du compte depuis la popup, purge des scans à 12 mois, page `/privacy` à jour (voir sa [spécification](2026-10-20-phase-4a-rgpd-design.md)) ;
    - **4b, administration**, en deux parties (voir §8 et le [socle](2026-10-21-phase-4b-admin-socle-design.md)) :
      - **partie 1 (livrée)** : socle (SPA `apps/admin`, connexion par lien ou code, `require_admin`, `admin_actions`, `llm_calls`, purge étendue, `admin:grant`), écrans Utilisateurs (dont la suppression d'un compte) et IA ; le suivi est dans [`2026-10-21-phase-4b-partie-1-suivi.md`](../plans/2026-10-21-phase-4b-partie-1-suivi.md) ;
-     - **partie 2 (à venir)** : Tableau de bord, Offre (dont `/pricing`) et Analyses.
+     - **partie 2 (livrée)** : écrans Tableau de bord, Offre et Analyses, `GET /api/offer` publique, page `/pricing` réécrite sur l'offre `full` (3, 150 et 300 analyses ; 4, 1 et 4 photos) avec valeurs de secours, migration 0008 (`listings.url`) ; le suivi est dans [`2026-10-21-phase-4b-partie-2-suivi.md`](../plans/2026-10-21-phase-4b-partie-2-suivi.md).
 5. **Stripe** : `StripeBillingProvider`, webhooks, `billing_events`, pages de paiement.
 
 ## 14. Risques connus
