@@ -402,10 +402,11 @@ class AnalysisRowOut(CamelModel):
 
 
 class AnalysisListOut(CamelModel):
-    """`next_before` : identifiant de la dernière analyse de la page, `None` à la dernière page."""
+    """`next_before` : jeton opaque à repasser tel quel dans `before` pour la page suivante,
+    `None` à la dernière page."""
 
     items: list[AnalysisRowOut]
-    next_before: int | None
+    next_before: str | None
 
 
 class AnalysisListingOut(CamelModel):

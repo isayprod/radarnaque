@@ -700,7 +700,7 @@
         "type": "object"
       },
       "AnalysisListOut": {
-        "description": "`next_before` : identifiant de la derni\u00e8re analyse de la page, `None` \u00e0 la derni\u00e8re page.",
+        "description": "`next_before` : jeton opaque \u00e0 repasser tel quel dans `before` pour la page suivante,\n`None` \u00e0 la derni\u00e8re page.",
         "properties": {
           "items": {
             "items": {
@@ -712,7 +712,7 @@
           "nextBefore": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -3551,7 +3551,7 @@
     },
     "/api/admin/analyses": {
       "get": {
-        "description": "Les analyses, de la plus r\u00e9cente \u00e0 la plus ancienne. `from` et `to` : jours civils de\nBruxelles (`YYYY-MM-DD`), bornes incluses ; `q` : sous-cha\u00eene du titre, casse ignor\u00e9e (3\ncaract\u00e8res au moins) ; `before` : identifiant de la derni\u00e8re analyse de la page pr\u00e9c\u00e9dente.",
+        "description": "Les analyses, de la plus r\u00e9cente \u00e0 la plus ancienne. `from` et `to` : jours civils de\nBruxelles (`YYYY-MM-DD`), bornes incluses ; `q` : sous-cha\u00eene du titre, casse ignor\u00e9e (3\ncaract\u00e8res au moins) ; `before` : le `nextBefore` de la page pr\u00e9c\u00e9dente, tel quel.",
         "operationId": "list_analyses_api_admin_analyses_get",
         "parameters": [
           {
@@ -3716,8 +3716,9 @@
             "schema": {
               "anyOf": [
                 {
-                  "minimum": 1,
-                  "type": "integer"
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
                 },
                 {
                   "type": "null"

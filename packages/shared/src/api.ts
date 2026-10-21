@@ -199,7 +199,7 @@ export interface paths {
          * List Analyses
          * @description Les analyses, de la plus récente à la plus ancienne. `from` et `to` : jours civils de
          *     Bruxelles (`YYYY-MM-DD`), bornes incluses ; `q` : sous-chaîne du titre, casse ignorée (3
-         *     caractères au moins) ; `before` : identifiant de la dernière analyse de la page précédente.
+         *     caractères au moins) ; `before` : le `nextBefore` de la page précédente, tel quel.
          */
         get: operations["list_analyses_api_admin_analyses_get"];
         put?: never;
@@ -843,13 +843,14 @@ export interface components {
         };
         /**
          * AnalysisListOut
-         * @description `next_before` : identifiant de la dernière analyse de la page, `None` à la dernière page.
+         * @description `next_before` : jeton opaque à repasser tel quel dans `before` pour la page suivante,
+         *     `None` à la dernière page.
          */
         AnalysisListOut: {
             /** Items */
             items: components["schemas"]["AnalysisRowOut"][];
             /** Nextbefore */
-            nextBefore: number | null;
+            nextBefore: string | null;
         };
         /**
          * AnalysisListingOut
@@ -2071,7 +2072,7 @@ export interface operations {
                 withSearch?: boolean | null;
                 partial?: boolean | null;
                 q?: string | null;
-                before?: number | null;
+                before?: string | null;
                 limit?: number;
             };
             header?: never;

@@ -55,6 +55,10 @@ _LEVEL_BOUNDS: dict[RiskLevel, tuple[int, int]] = {
 }
 
 
+# Plus grand identifiant `bigint` : au-delà, Postgres refuse la valeur.
+MAX_ID = 2**63 - 1
+
+
 def _not_found() -> ApiError:
     return ApiError(404, "not_found", "Analyse introuvable.")
 
@@ -85,6 +89,30 @@ def _searches_exist() -> ColumnElement[bool]:
     return select(literal(1)).where(AnalysisWebSearch.analysis_id == Analysis.id).exists()
 
 
+def _encode_cursor(created_at: datetime, analysis_id: int) -> str:
+    """Jeton opaque de pagination : `<date UTC ISO 8601>~<id>` de la dernière ligne d'une page.
+    Il porte la date elle-même : une analyse rafraîchie entre deux pages (sa date change) ou
+    supprimée ne décale ni ne casse la page suivante."""
+    stamp = created_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    return f"{stamp}~{analysis_id}"
+
+
+def _decode_cursor(token: str) -> tuple[datetime, int]:
+    """Date et identifiant d'un jeton de `_encode_cursor` ; 422 `invalid_value` s'il est mal
+    formé (date sans fuseau comprise)."""
+    stamp, separator, raw_id = token.partition("~")
+    try:
+        if not separator:
+            raise ValueError
+        created_at = datetime.fromisoformat(stamp)
+        analysis_id = int(raw_id)
+        if created_at.tzinfo is None or not 1 <= analysis_id <= MAX_ID:
+            raise ValueError
+    except ValueError:
+        raise ApiError(422, "invalid_value", "Curseur invalide.", {"field": "before"}) from None
+    return created_at, analysis_id
+
+
 async def list_analyses(
     session: AsyncSession,
     *,
@@ -97,13 +125,13 @@ async def list_analyses(
     with_search: bool | None,
     partial: bool | None,
     q: str | None,
-    before: int | None,
+    before: str | None,
     limit: int,
 ) -> AnalysisListOut:
     """Au plus `limit` analyses, de la plus récente à la plus ancienne (égalité : identifiant
-    décroissant). `before` est l'identifiant de la dernière analyse de la page précédente, relue
-    pour sa date. `day_from` et `day_to` sont des jours civils de Bruxelles, bornes incluses ;
-    `day_from > day_to` donne 422."""
+    décroissant). `before` est le jeton `next_before` de la page précédente (voir
+    `_encode_cursor`), décodé sans relecture en base. `day_from` et `day_to` sont des jours
+    civils de Bruxelles, bornes incluses ; `day_from > day_to` donne 422."""
     if day_from is not None and day_to is not None and day_from > day_to:
         raise ApiError(
             422,
@@ -157,13 +185,10 @@ async def list_analyses(
     if q is not None:
         query = query.where(ListingSnapshot.title.ilike(f"%{escape_like(q)}%", escape="\\"))
     if before is not None:
-        cursor = (
-            await session.execute(select(Analysis.created_at).where(Analysis.id == before))
-        ).scalar_one_or_none()
-        if cursor is None:
-            raise _not_found()
+        cursor_at, cursor_id = _decode_cursor(before)
         query = query.where(
-            tuple_(Analysis.created_at, Analysis.id) < tuple_(literal(cursor), literal(before))
+            tuple_(Analysis.created_at, Analysis.id)
+            < tuple_(literal(cursor_at), literal(cursor_id))
         )
     rows = (await session.execute(query)).all()
 
@@ -200,7 +225,11 @@ async def list_analyses(
             served_count,
         ) in rows[:limit]
     ]
-    return AnalysisListOut(items=items, next_before=items[-1].id if len(rows) > limit else None)
+    next_before = None
+    if len(rows) > limit:
+        last = items[-1]
+        next_before = _encode_cursor(last.created_at, last.id)
+    return AnalysisListOut(items=items, next_before=next_before)
 
 
 async def build_analysis_detail(session: AsyncSession, analysis_id: int) -> AnalysisDetailOut:
