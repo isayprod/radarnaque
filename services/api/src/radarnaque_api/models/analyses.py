@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Identity,
+    Index,
     UniqueConstraint,
     false,
     func,
@@ -87,3 +88,29 @@ class AnalysisWebSearch(Base):
     position: Mapped[int] = mapped_column(primary_key=True)
     query: Mapped[str]
     aspect: Mapped[str]
+
+
+class LlmCall(Base):
+    """Un appel au modèle qui a produit une analyse (insertion ou rafraîchissement sur place).
+
+    Une analyse expirée est rafraîchie sur place : son coût, ses tokens et sa date sont écrasés.
+    Cette trace garde donc chaque appel, pour les statistiques de coût et de cache. Elle ne relie
+    un appel ni à un utilisateur ni à un scan.
+    """
+
+    __tablename__ = "llm_calls"
+    __table_args__ = (
+        Index("ix_llm_calls_created_at", "created_at"),
+        Index("ix_llm_calls_analysis_id", "analysis_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    analysis_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("app.analyses.id"))
+    model_id: Mapped[int] = mapped_column(ForeignKey("app.models.id"))
+    prompt_version_id: Mapped[int] = mapped_column(ForeignKey("app.prompt_versions.id"))
+    tokens_in: Mapped[int] = mapped_column(server_default="0")
+    tokens_out: Mapped[int] = mapped_column(server_default="0")
+    images_analyzed: Mapped[int] = mapped_column(server_default="0")
+    web_searches: Mapped[int] = mapped_column(server_default="0")
+    cost_usd_micros: Mapped[int] = mapped_column(BigInteger, server_default="0")
