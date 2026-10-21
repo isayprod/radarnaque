@@ -277,7 +277,8 @@ describe("écran Tableau de bord", () => {
 		expect(
 			screen.getAllByText(/^\d\d\/\d\d : 0 cache, 0 appel, 0 échec/),
 		).toHaveLength(30);
-		expect(document.body.textContent).not.toMatch(/NaN|Infinity/);
+		// un NaN apparaîtrait dans les attributs du SVG, pas dans le texte
+		expect(document.body.innerHTML).not.toMatch(/NaN|Infinity/);
 	});
 
 	it("chart has one bar per day with its title", async () => {
@@ -319,6 +320,105 @@ describe("écran Tableau de bord", () => {
 		expect(legend.getByText("Avec appel au modèle")).toBeTruthy();
 		expect(legend.getByText("En échec")).toBeTruthy();
 		expect(legend.getByText("Coût IA du jour")).toBeTruthy();
+	});
+
+	it("bar heights are proportional to the counts", async () => {
+		fakeFetch(
+			pageRoutes(
+				dashboard(),
+				daily((i) =>
+					i === 28
+						? { llm: 10, costUsd: 0.2 }
+						: i === 29
+							? { llm: 5, costUsd: 0.1 }
+							: {},
+				),
+			),
+		);
+		renderAt("/admin/");
+
+		const chart = await screen.findByRole("img", {
+			name: "Analyses par jour, 30 derniers jours",
+		});
+		expect(chart.outerHTML).not.toMatch(/NaN|Infinity/);
+		const barHeight = (date: string) => {
+			const rects = chart.querySelectorAll(`g[data-day="${date}"] rect`);
+			// 1er rect : zone de survol ; le suivant : la barre `llm`
+			return Number(rects[1].getAttribute("height"));
+		};
+		expect(barHeight("2026-10-20")).toBeGreaterThan(0);
+		expect(barHeight("2026-10-20")).toBeCloseTo(2 * barHeight("2026-10-21"), 6);
+
+		// la ligne de coût suit la même échelle : 0,2 $ est deux fois plus haut que 0,1 $
+		const ys = chart
+			.querySelector("polyline")
+			?.getAttribute("points")
+			?.split(" ")
+			.map((pair) => Number(pair.split(",")[1]));
+		expect(ys).toHaveLength(30);
+		const bottom = ys?.[0] ?? 0;
+		expect(bottom - (ys?.[28] ?? 0)).toBeCloseTo(
+			2 * (bottom - (ys?.[29] ?? 0)),
+			6,
+		);
+	});
+
+	it("data table gives the values of each day", async () => {
+		fakeFetch(
+			pageRoutes(
+				dashboard(),
+				daily((i) =>
+					i === 29 ? { fromCache: 12, llm: 4, failed: 1, costUsd: 0.42 } : {},
+				),
+			),
+		);
+		renderAt("/admin/");
+
+		await screen.findByRole("img", {
+			name: "Analyses par jour, 30 derniers jours",
+		});
+		expect(screen.getByText("Voir les données").tagName).toBe("SUMMARY");
+		const table = screen.getByRole("table", { hidden: true });
+		const rows = within(table).getAllByRole("row", { hidden: true });
+		// en-tête + 30 jours
+		expect(rows).toHaveLength(31);
+		expect(
+			within(table)
+				.getAllByRole("columnheader", { hidden: true })
+				.map((h) => h.textContent),
+		).toEqual(["Date", "Depuis le cache", "Avec appel", "En échec", "Coût"]);
+		const last = within(rows[30]).getAllByRole("cell", { hidden: true });
+		expect(last.map((c) => c.textContent)).toEqual([
+			"21/10",
+			"12",
+			"4",
+			"1",
+			"0,42 $",
+		]);
+	});
+
+	it("forbidden dashboard shows access denied", async () => {
+		fakeFetch({
+			...base,
+			"GET /api/admin/dashboard": () =>
+				json(
+					{ error: { code: "admin_required", message: "", details: {} } },
+					403,
+				),
+			"GET /api/admin/dashboard/daily": () =>
+				json(
+					{ error: { code: "admin_required", message: "", details: {} } },
+					403,
+				),
+		});
+		renderAt("/admin/");
+
+		expect(
+			await screen.findByText("Accès réservé aux administrateurs"),
+		).toBeTruthy();
+		expect(
+			screen.queryByText("Impossible de charger le tableau de bord."),
+		).toBeNull();
 	});
 
 	it("search down is orange and not an error", async () => {
