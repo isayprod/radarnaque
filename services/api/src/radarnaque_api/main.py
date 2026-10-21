@@ -17,7 +17,7 @@ from radarnaque_api.db import make_engine
 from radarnaque_api.errors import install_error_handlers
 from radarnaque_api.llm.client import LLMClientFactory
 from radarnaque_api.llm.providers import ensure_models_use_known_providers, load_providers
-from radarnaque_api.routes import admin_users, billing, health, internal, me, scans
+from radarnaque_api.routes import admin_ai, admin_users, billing, health, internal, me, scans
 from radarnaque_api.search import make_search_backend
 from radarnaque_api.services.purge import purge_forever
 from radarnaque_api.services.rate_window import SlidingWindowLimiter
@@ -169,4 +169,5 @@ def create_app(
     app.include_router(billing.router)
     app.include_router(internal.router)
     app.include_router(admin_users.router)
+    app.include_router(admin_ai.router)
     return app

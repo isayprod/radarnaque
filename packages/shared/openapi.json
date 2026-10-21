@@ -1,6 +1,20 @@
 {
   "components": {
     "schemas": {
+      "ActiveModelIn": {
+        "additionalProperties": false,
+        "properties": {
+          "modelId": {
+            "title": "Modelid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "modelId"
+        ],
+        "title": "ActiveModelIn",
+        "type": "object"
+      },
       "AdminActionOut": {
         "description": "Une ligne du journal des modifications faites depuis l'admin. `admin_email` vient de\n`auth.user` (affichage seulement) ; il est `None` quand l'admin a \u00e9t\u00e9 supprim\u00e9.",
         "properties": {
@@ -383,6 +397,141 @@
           "lastScanAt"
         ],
         "title": "AdminUserRowOut",
+        "type": "object"
+      },
+      "AiOverviewOut": {
+        "description": "Vue d'ensemble de l'IA : mod\u00e8le et prompt actifs du type `full`, versions sans leur texte,\net les 20 derni\u00e8res actions `ai.*`.",
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/AdminActionOut"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "activeModelId": {
+            "title": "Activemodelid",
+            "type": "integer"
+          },
+          "activePromptVersionId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activepromptversionid"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelOut"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "prompts": {
+            "items": {
+              "$ref": "#/components/schemas/PromptVersionOut"
+            },
+            "title": "Prompts",
+            "type": "array"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderOut"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "search": {
+            "$ref": "#/components/schemas/SearchStatusOut"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/AiSettingsOut"
+          }
+        },
+        "required": [
+          "providers",
+          "models",
+          "activeModelId",
+          "prompts",
+          "activePromptVersionId",
+          "settings",
+          "search",
+          "actions"
+        ],
+        "title": "AiOverviewOut",
+        "type": "object"
+      },
+      "AiSettingsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "cacheTtlHours": {
+            "anyOf": [
+              {
+                "maximum": 168.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cachettlhours"
+          },
+          "maxWebSearches": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxwebsearches"
+          },
+          "rateLimitPerMinute": {
+            "anyOf": [
+              {
+                "maximum": 600.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ratelimitperminute"
+          }
+        },
+        "title": "AiSettingsIn",
+        "type": "object"
+      },
+      "AiSettingsOut": {
+        "properties": {
+          "cacheTtlHours": {
+            "title": "Cachettlhours",
+            "type": "integer"
+          },
+          "maxWebSearches": {
+            "title": "Maxwebsearches",
+            "type": "integer"
+          },
+          "rateLimitPerMinute": {
+            "title": "Ratelimitperminute",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cacheTtlHours",
+          "rateLimitPerMinute",
+          "maxWebSearches"
+        ],
+        "title": "AiSettingsOut",
         "type": "object"
       },
       "AnalysisReasonOut": {
@@ -954,6 +1103,65 @@
         "title": "MeOut",
         "type": "object"
       },
+      "ModelIn": {
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "slug": {
+            "pattern": "^\\S{1,200}$",
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "slug"
+        ],
+        "title": "ModelIn",
+        "type": "object"
+      },
+      "ModelOut": {
+        "description": "Un mod\u00e8le de `app.models`. `known_provider` : son fournisseur figure encore dans\n`providers.toml` (sinon il ne peut pas \u00eatre activ\u00e9).",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "analyses": {
+            "title": "Analyses",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "knownProvider": {
+            "title": "Knownprovider",
+            "type": "boolean"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "slug",
+          "analyses",
+          "active",
+          "knownProvider"
+        ],
+        "title": "ModelOut",
+        "type": "object"
+      },
       "MonthRangeIn": {
         "additionalProperties": false,
         "properties": {
@@ -996,6 +1204,61 @@
         "title": "PriceIn",
         "type": "object"
       },
+      "PromptIn": {
+        "additionalProperties": false,
+        "properties": {
+          "systemPrompt": {
+            "maxLength": 20000,
+            "minLength": 200,
+            "title": "Systemprompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "systemPrompt"
+        ],
+        "title": "PromptIn",
+        "type": "object"
+      },
+      "PromptTextOut": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "analyses": {
+            "title": "Analyses",
+            "type": "integer"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "systemPrompt": {
+            "title": "Systemprompt",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "createdAt",
+          "active",
+          "analyses",
+          "systemPrompt"
+        ],
+        "title": "PromptTextOut",
+        "type": "object"
+      },
       "PromptVersionDebugOut": {
         "properties": {
           "scanKind": {
@@ -1017,6 +1280,106 @@
           "version"
         ],
         "title": "PromptVersionDebugOut",
+        "type": "object"
+      },
+      "PromptVersionOut": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "analyses": {
+            "title": "Analyses",
+            "type": "integer"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "createdAt",
+          "active",
+          "analyses"
+        ],
+        "title": "PromptVersionOut",
+        "type": "object"
+      },
+      "ProviderOut": {
+        "description": "Un fournisseur de `providers.toml`, en lecture seule. `key` : l'\u00e9tat de la variable\nd'environnement de la cl\u00e9, jamais sa valeur ; `not_required` sans `api_key_env`.",
+        "properties": {
+          "api": {
+            "enum": [
+              "chat",
+              "responses"
+            ],
+            "title": "Api",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "key": {
+            "enum": [
+              "present",
+              "absent",
+              "not_required"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "maxImages": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximages"
+          },
+          "reasoningEffort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoningeffort"
+          },
+          "structuredOutput": {
+            "enum": [
+              "json_schema",
+              "json_object"
+            ],
+            "title": "Structuredoutput",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "api",
+          "structuredOutput",
+          "reasoningEffort",
+          "maxImages",
+          "key"
+        ],
+        "title": "ProviderOut",
         "type": "object"
       },
       "QuotaOut": {
@@ -1380,6 +1743,58 @@
         "title": "ScanIn",
         "type": "object"
       },
+      "SearchStatusOut": {
+        "description": "Moteur de recherche web. `url` : celle de SearXNG sans `user:pass@` (`None` quand le moteur\nest d\u00e9sactiv\u00e9). `cache_entries` : taille du cache en m\u00e9moire du processus qui r\u00e9pond.",
+        "properties": {
+          "backend": {
+            "enum": [
+              "searxng",
+              "none"
+            ],
+            "title": "Backend",
+            "type": "string"
+          },
+          "cacheEntries": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cacheentries"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "down",
+              "disabled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "backend",
+          "url",
+          "status",
+          "cacheEntries"
+        ],
+        "title": "SearchStatusOut",
+        "type": "object"
+      },
       "SellerFactsIn": {
         "additionalProperties": false,
         "description": "Faits sur le vendeur, jamais son identit\u00e9 : `id`, `name` et `profileUrl` sont refus\u00e9s.",
@@ -1594,6 +2009,261 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/admin/ai": {
+      "get": {
+        "description": "Mod\u00e8les, fournisseurs (\u00e9tat des cl\u00e9s, jamais leur valeur), versions de prompt sans leur\ntexte, r\u00e9glages, moteur de recherche et 20 derni\u00e8res actions IA.",
+        "operationId": "overview_api_admin_ai_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiOverviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Overview"
+      }
+    },
+    "/api/admin/ai/active-model": {
+      "post": {
+        "description": "Active un mod\u00e8le pour les scans suivants (le cache est li\u00e9 au mod\u00e8le).",
+        "operationId": "activate_model_api_admin_ai_active_model_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveModelIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiOverviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate Model"
+      }
+    },
+    "/api/admin/ai/models": {
+      "post": {
+        "description": "Ajoute un mod\u00e8le : fournisseur de `providers.toml` (422), couple unique (409).",
+        "operationId": "add_model_api_admin_ai_models_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiOverviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Model"
+      }
+    },
+    "/api/admin/ai/prompts": {
+      "post": {
+        "description": "Cr\u00e9e la version suivante, non active.",
+        "operationId": "create_prompt_api_admin_ai_prompts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptTextOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Prompt"
+      }
+    },
+    "/api/admin/ai/prompts/{prompt_id}": {
+      "get": {
+        "description": "Le texte d'une version, en lecture seule : aucune route ne modifie une version.",
+        "operationId": "get_prompt_api_admin_ai_prompts__prompt_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptTextOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Prompt"
+      }
+    },
+    "/api/admin/ai/prompts/{prompt_id}/activate": {
+      "post": {
+        "description": "Active une version du type `full` pour les scans suivants (le cache est li\u00e9 au prompt).",
+        "operationId": "activate_prompt_api_admin_ai_prompts__prompt_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiOverviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate Prompt"
+      }
+    },
+    "/api/admin/ai/settings": {
+      "patch": {
+        "description": "Modifie les r\u00e9glages fournis ; une ligne de journal par champ r\u00e9ellement chang\u00e9.",
+        "operationId": "update_settings_api_admin_ai_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiSettingsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiOverviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Settings"
+      }
+    },
     "/api/admin/users": {
       "get": {
         "description": "Les comptes, du plus r\u00e9cent au plus ancien. `q` : sous-cha\u00eene de l'email, casse ignor\u00e9e\n(3 caract\u00e8res au moins) ; `plan` : un code d'offre, ou `none` ; `before` : curseur.",

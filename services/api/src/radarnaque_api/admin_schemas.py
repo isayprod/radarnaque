@@ -1,7 +1,9 @@
 """Schémas de l'API admin."""
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
+
+from pydantic import Field, StringConstraints
 
 from radarnaque_api.schemas import CamelInModel, CamelModel, QuotaOut, ScanHistoryItemOut
 
@@ -82,3 +84,96 @@ class AdminPlanIn(CamelInModel):
 class AdminRoleIn(CamelInModel):
     # `superuser` n'est jamais attribué depuis l'admin : refusé par la validation.
     role: Literal["admin", "user"]
+
+
+# --- IA : modèles, prompts, réglages -------------------------------------------------------
+
+# Slug d'un modèle chez son fournisseur : 1 à 200 caractères, aucun espace.
+ModelSlug = Annotated[str, StringConstraints(pattern=r"^\S{1,200}$")]
+# Texte d'un prompt système : 200 à 20 000 caractères.
+PromptText = Annotated[str, StringConstraints(min_length=200, max_length=20_000)]
+
+
+class ProviderOut(CamelModel):
+    """Un fournisseur de `providers.toml`, en lecture seule. `key` : l'état de la variable
+    d'environnement de la clé, jamais sa valeur ; `not_required` sans `api_key_env`."""
+
+    code: str
+    api: Literal["chat", "responses"]
+    structured_output: Literal["json_schema", "json_object"]
+    reasoning_effort: str | None
+    max_images: int | None
+    key: Literal["present", "absent", "not_required"]
+
+
+class ModelOut(CamelModel):
+    """Un modèle de `app.models`. `known_provider` : son fournisseur figure encore dans
+    `providers.toml` (sinon il ne peut pas être activé)."""
+
+    id: int
+    provider: str
+    slug: str
+    analyses: int
+    active: bool
+    known_provider: bool
+
+
+class PromptVersionOut(CamelModel):
+    id: int
+    version: int
+    created_at: datetime
+    active: bool
+    analyses: int
+
+
+class PromptTextOut(PromptVersionOut):
+    system_prompt: str
+
+
+class AiSettingsOut(CamelModel):
+    cache_ttl_hours: int
+    rate_limit_per_minute: int
+    max_web_searches: int
+
+
+class AiSettingsIn(CamelInModel):
+    cache_ttl_hours: int | None = Field(default=None, ge=1, le=168)
+    rate_limit_per_minute: int | None = Field(default=None, ge=1, le=600)
+    max_web_searches: int | None = Field(default=None, ge=0, le=5)
+
+
+class SearchStatusOut(CamelModel):
+    """Moteur de recherche web. `url` : celle de SearXNG sans `user:pass@` (`None` quand le moteur
+    est désactivé). `cache_entries` : taille du cache en mémoire du processus qui répond."""
+
+    backend: Literal["searxng", "none"]
+    url: str | None
+    status: Literal["ok", "down", "disabled"]
+    cache_entries: int | None
+
+
+class AiOverviewOut(CamelModel):
+    """Vue d'ensemble de l'IA : modèle et prompt actifs du type `full`, versions sans leur texte,
+    et les 20 dernières actions `ai.*`."""
+
+    providers: list[ProviderOut]
+    models: list[ModelOut]
+    active_model_id: int
+    prompts: list[PromptVersionOut]
+    active_prompt_version_id: int | None
+    settings: AiSettingsOut
+    search: SearchStatusOut
+    actions: list[AdminActionOut]
+
+
+class ModelIn(CamelInModel):
+    provider: str
+    slug: ModelSlug
+
+
+class ActiveModelIn(CamelInModel):
+    model_id: int
+
+
+class PromptIn(CamelInModel):
+    system_prompt: PromptText
