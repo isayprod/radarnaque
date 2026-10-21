@@ -102,6 +102,7 @@ describe("session", () => {
 				return json({ ok: true });
 			},
 			"GET /api/me": () => json(ME),
+			"GET /api/admin/users": () => json({ items: [], nextBefore: null }),
 		});
 		const user = userEvent.setup();
 		renderApp();
@@ -127,6 +128,7 @@ describe("session", () => {
 			"POST /auth/sign-in/email-otp",
 			"GET /auth/token",
 			"GET /api/me",
+			"GET /api/admin/users",
 		]);
 		const bodyOf = (n: number) =>
 			JSON.parse(String(mock.mock.calls[n][1]?.body));

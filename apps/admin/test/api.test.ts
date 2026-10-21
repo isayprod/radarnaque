@@ -127,6 +127,31 @@ describe("createApi", () => {
 		expect(onForbidden).not.toHaveBeenCalled();
 		expect(onSignedOut).not.toHaveBeenCalled();
 	});
+	it("keeps the API message on failures, the code when there is none", async () => {
+		const { api } = setup(
+			[
+				json(
+					{
+						error: {
+							code: "conflict",
+							message: "Impossible de retirer le dernier admin.",
+							details: {},
+						},
+					},
+					409,
+				),
+				json({ error: { code: "conflict" } }, 409),
+			],
+			["jwt-1"],
+		);
+		await expect(api.get("/api/admin/x")).rejects.toMatchObject({
+			message: "Impossible de retirer le dernier admin.",
+		});
+		await expect(api.get("/api/admin/x")).rejects.toMatchObject({
+			message: "conflict",
+		});
+	});
+
 	describe("concurrent requests", () => {
 		const later = () => new Promise((resolve) => setTimeout(resolve, 0));
 

@@ -4,8 +4,9 @@ export class ApiFailure extends Error {
 	readonly status: number;
 	readonly code: string;
 
-	constructor(status: number, code: string) {
-		super(code);
+	/** `message` est celui de l'API (en français) ; à défaut, le code. */
+	constructor(status: number, code: string, message: string = code) {
+		super(message);
 		this.name = "ApiFailure";
 		this.status = status;
 		this.code = code;
@@ -23,12 +24,17 @@ export interface AdminApi {
 
 type Method = "GET" | "POST" | "PATCH" | "DELETE";
 
-async function errorCode(res: Response): Promise<string> {
+async function errorOf(
+	res: Response,
+): Promise<{ code: string; message: string | undefined }> {
 	const body = (await res
 		.json()
 		.catch(() => null)) as Partial<ApiErrorBody> | null;
-	const code = body?.error?.code;
-	return typeof code === "string" ? code : "http_error";
+	const { code, message } = body?.error ?? {};
+	return {
+		code: typeof code === "string" ? code : "http_error",
+		message: typeof message === "string" && message ? message : undefined,
+	};
 }
 
 /**
@@ -103,9 +109,9 @@ export function createApi(deps: {
 			if (res.status === 401) return signedOut();
 		}
 		if (!res.ok) {
-			const code = await errorCode(res);
+			const { code, message } = await errorOf(res);
 			if (res.status === 403 && code === "admin_required") deps.onForbidden();
-			throw new ApiFailure(res.status, code);
+			throw new ApiFailure(res.status, code, message);
 		}
 		if (res.status === 204) return undefined as T;
 		return (await res.json()) as T;

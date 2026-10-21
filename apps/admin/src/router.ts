@@ -42,6 +42,24 @@ export function hrefOf(route: Route): string {
 	}
 }
 
+/** Clic simple : navigation interne ; Ctrl, Cmd, Maj, Alt ou clic milieu gardent le
+ * comportement du navigateur (nouvel onglet). */
+export function isPlainLeftClick(event: {
+	button: number;
+	metaKey: boolean;
+	ctrlKey: boolean;
+	shiftKey: boolean;
+	altKey: boolean;
+}): boolean {
+	return (
+		event.button === 0 &&
+		!event.metaKey &&
+		!event.ctrlKey &&
+		!event.shiftKey &&
+		!event.altKey
+	);
+}
+
 const listeners = new Set<() => void>();
 
 function subscribe(listener: () => void): () => void {
