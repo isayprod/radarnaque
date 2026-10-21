@@ -591,9 +591,36 @@ cd services/api && uv run --env-file ../../infra/.env radarnaque-purge
 ## Administration (phase 4b)
 
 L'admin est une application à part (`apps/admin`), servie par Caddy sous `/admin/` sur la même
-origine que l'API et l'auth. Interface en français. En partie 1, elle a deux écrans :
-Utilisateurs (recherche, fiche, plan, rôle, suppression) et IA (fournisseurs, modèles, prompts,
-réglages, essais du modèle et de la recherche web).
+origine que l'API et l'auth. Interface en français. La barre latérale a cinq écrans :
+
+- **Tableau de bord** (accueil) : activité du jour et des 7 jours (analyses, appels au modèle,
+  part servie depuis le cache, échecs, coût IA, recherches web), graphique des 30 derniers jours
+  avec un tableau « Voir les données », abonnés actifs, coût du mois et projection, santé du
+  service. Les jours sont des jours civils de Bruxelles ; les pourcentages sont arrondis à
+  l'entier, le coût moyen par appel s'affiche à 4 décimales.
+- **Utilisateurs** : recherche, fiche, plan, rôle, suppression.
+- **Offre** : prix, quota, photos, icônes sur les cartes et plafond de chaque plan. Une
+  confirmation résume les changements, et l'effet est immédiat. Chaque champ modifié écrit une
+  ligne de journal. Un avertissement rappelle de créer le prix dans Stripe quand un identifiant
+  Stripe existe, et de mettre `/privacy` à jour quand le nombre de photos change.
+- **IA** : fournisseurs, modèles, prompts, réglages, essais du modèle et de la recherche web.
+- **Analyses** : liste filtrée des analyses récentes (site, niveau, modèle, prompt, période,
+  recherche web, partielle, titre), puis détail avec l'annonce (lien et photos en liens, pas en
+  images), le résultat FR et NL, les recherches, les appels au modèle et un lien vers le prompt.
+  Les analyses faites avant la migration 0008 n'ont pas de lien vers l'annonce.
+
+### La page des prix et `GET /api/offer`
+
+La page `/pricing` du site (FR et NL) affiche l'offre en cours. Elle lit `GET /api/offer`, une
+route publique sans authentification : prix, quotas, photos et icônes des trois plans, sans prix
+pour l'essai et sans identifiant Stripe. La réponse a `Cache-Control: public, max-age=300` : après
+une modification dans l'écran Offre, la page peut avoir 5 minutes de retard. Si l'API ne répond
+pas, la page garde des valeurs de secours (3, 150 et 300 analyses ; 4, 1 et 4 photos).
+
+```sh
+curl -s http://localhost:8080/api/offer
+curl -sI http://localhost:8080/api/offer | grep -i cache-control
+```
 
 ### L'ouvrir en dev
 
@@ -636,7 +663,8 @@ popup avant.
 - L'API est lancée avec `--no-access-log` (Dockerfile et `pnpm dev:api`) : un email cherché dans
   l'admin n'apparaît dans aucun journal d'accès. Caddy n'a pas de journal d'accès non plus.
 - Le rôle est relu en base à chaque requête : retirer le rôle à un admin agit tout de suite.
-- Vérifications à faire en vrai : voir le [suivi de la partie 1](docs/superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md).
+- Les écrans Tableau de bord et Analyses ne montrent aucun email ni identifiant de compte.
+- Vérifications à faire en vrai : voir les suivis de la [partie 1](docs/superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md) et de la [partie 2](docs/superpowers/plans/2026-10-21-phase-4b-partie-2-suivi.md).
 
 ## Déployer
 

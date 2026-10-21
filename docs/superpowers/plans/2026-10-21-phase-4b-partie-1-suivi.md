@@ -51,7 +51,4 @@ Rien de ceci n'a été essayé hors des tests.
 
 ## Reste pour la partie 2
 
-- **Tableau de bord :** scans par jour et par type, part servie depuis le cache, coût du jour et du mois (lus sur `llm_calls`), abonnés actifs par plan, taux d'échec, dernière ligne `system.purge`, état du moteur de recherche (la vérification existe déjà).
-- **Offre :** prix, quotas, fonctionnalités, photos, plafond de l'essai, avec la page `/pricing` du site ; codes d'action `offer.*`.
-- **Analyses :** liste et détail des analyses récentes (nombre d'appels et coût total lus sur `llm_calls`).
-- **Barre latérale :** aujourd'hui seulement Utilisateurs et IA ; les trois autres entrées s'ajoutent avec leurs écrans.
+Fait : le Tableau de bord, l'Offre (dont `/pricing`) et les Analyses sont livrés, avec la barre latérale à cinq entrées. Le reste à vérifier est dans le [suivi de la partie 2](2026-10-21-phase-4b-partie-2-suivi.md). Les vérifications de ce suivi-ci restent à faire.

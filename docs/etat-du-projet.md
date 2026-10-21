@@ -26,11 +26,11 @@ Radarnaque est une extension Chrome, Edge et Brave qui signale les annonces susp
 | 3d | Recherche web (SearXNG), réflexion, photos obligatoires (un seul type d'analyse), analyse en direct dans la pastille | `feat/phase-3d` (au-dessus de `feat/superuser-debug`) | terminée, non poussée |
 | 4a | RGPD : suppression du compte, purge à 12 mois, page `/privacy` à jour | `feat/phase-4a` (au-dessus de `feat/phase-3d`) | terminée, non poussée |
 | 4b, partie 1 | Administration : socle (SPA `apps/admin`, connexion, droits, journal), écrans Utilisateurs et IA | `feat/phase-4b` (au-dessus de `main`, où 4a est fusionnée) | terminée, non poussée |
-| 4b, partie 2 | Administration : Tableau de bord, Offre (dont `/pricing`) et Analyses | — | à faire |
+| 4b, partie 2 | Administration : Tableau de bord, Offre (dont `/pricing`) et Analyses | `feat/phase-4b-2` (au-dessus de `feat/phase-4b`) | terminée, non poussée |
 | 5 | Paiement Stripe | — | à faire (les routes répondent 501) |
 | — | Passe de design (identité visuelle, maquettes) | — | à faire en dernier |
 
-Les phases 3b, 3c et 3d n'ont pas encore été essayées sur les vrais sites. Les vérifications à faire sont listées dans les suivis [3b](superpowers/plans/2026-10-18-phase-3b-suivi.md), [3c](superpowers/plans/2026-10-18-phase-3c-suivi.md), [3d](superpowers/plans/2026-10-19-phase-3d-suivi.md), [4a](superpowers/plans/2026-10-20-phase-4a-suivi.md) et [4b partie 1](superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md). Les phases 3d et 4a ont aussi une liste de corrections prévues avant leur fusion.
+Les phases 3b, 3c et 3d n'ont pas encore été essayées sur les vrais sites. Les vérifications à faire sont listées dans les suivis [3b](superpowers/plans/2026-10-18-phase-3b-suivi.md), [3c](superpowers/plans/2026-10-18-phase-3c-suivi.md), [3d](superpowers/plans/2026-10-19-phase-3d-suivi.md), [4a](superpowers/plans/2026-10-20-phase-4a-suivi.md), [4b partie 1](superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md) et [4b partie 2](superpowers/plans/2026-10-21-phase-4b-partie-2-suivi.md). Les phases 3d et 4a ont aussi une liste de corrections prévues avant leur fusion.
 
 ## Architecture
 
@@ -178,8 +178,32 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
   - réglages : `cache_ttl_hours` 1–168, `rate_limit_per_minute` 1–600, `max_web_searches` 0–5 ;
   - essai du modèle (annonce fictive, hors quota et hors cache) : 10 par heure et par admin ;
   - état du moteur de recherche (`GET {SEARXNG_URL}/healthz`, 3 s, gardé 60 s : `ok`, `down`, `disabled`) et essai de recherche hors cache : 30 par heure et par admin.
-- **Barre latérale :** seulement Utilisateurs et IA ; le Tableau de bord, l'Offre et les Analyses viennent en partie 2.
 - Voir le [README](../README.md#administration-phase-4b) et le [suivi](superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md).
+
+### Administration (phase 4b, partie 2)
+- **Barre latérale :** cinq entrées (Tableau de bord, Utilisateurs, Offre, IA, Analyses). L'écran d'accueil est le Tableau de bord. Les routes de l'application sont `/admin/`, `/admin/utilisateurs`, `/admin/offre`, `/admin/ia`, `/admin/ia/prompts/{id}`, `/admin/analyses` et `/admin/analyses/{id}`. Les actions risquées passent par une boîte de confirmation modale (focus, Échap, Tab).
+- **Tableau de bord :** `GET /api/admin/dashboard` et `GET /api/admin/dashboard/daily?days=` (1 à 90).
+  - cartes du jour et des 7 jours : analyses, appels au modèle, part servie depuis le cache, échecs (avec les trois codes les plus fréquents), coût IA, coût moyen par appel, recherches web ;
+  - les statistiques lisent `llm_calls`, jamais `analyses` ; les jours sont des jours civils de Bruxelles (le 25 octobre 2026 dure 25 h : un scan à `2026-10-24T22:30Z` compte pour le 25) ;
+  - un échec est un scan avec `scan_failures` et sans `scan_results` ; un scan sans issue (en cours) compte dans la carte « Analyses » mais dans aucune barre du graphique ;
+  - graphique SVG des 30 derniers jours (barres empilées servies depuis le cache, avec appel, en échec ; coût en ligne), avec un tableau « Voir les données » pour l'accessibilité ;
+  - abonnés actifs par plan, coût du mois et projection linéaire (`null` pendant les 24 premières heures du mois) ;
+  - santé : modèle actif, moteur de recherche, dernière purge ;
+  - pourcentages arrondis à l'entier, coût moyen à 4 décimales, « — » quand une part n'existe pas (aucun scan).
+- **Offre :** `GET /api/admin/offer` et `PATCH /api/admin/offer/plans/{plan}`.
+  - par plan : prix mensuel et annuel (0 à 100 000 centimes, pas pour l'essai), quota `full` (0 à 100 000), plafond total (0 à 100 000 ou vide), photos (0 à 4), icônes sur les cartes ;
+  - une ligne `admin_actions` par champ réellement changé (`offer.price_set`, `offer.quota_set`, `offer.feature_set`, `offer.max_images_set`, `offer.total_cap_set`), `details` = `{ plan, from, to }` ; des valeurs identiques donnent `200` sans aucune ligne, un plan inconnu `404` ;
+  - une confirmation résume les changements ; un avertissement Stripe s'affiche quand change le prix d'un intervalle qui a un identifiant Stripe, et un rappel de mettre `/privacy` à jour quand les photos changent ;
+  - l'effet est immédiat (les droits sont relus en base) ; historique des 20 dernières modifications.
+- **`GET /api/offer` (publique) :** prix, quotas, photos et icônes des trois plans. `Cache-Control: public, max-age=300` (la page peut avoir 5 minutes de retard sur une modification), pas de prix pour l'essai, aucun identifiant Stripe.
+- **Page `/pricing` :** réécrite sur l'offre `full` (3, 150 et 300 analyses ; 4, 1 et 4 photos), en FR et en NL. Elle lit `GET /api/offer` et garde des valeurs de secours si l'API ne répond pas ou renvoie un JSON inattendu ; un plan à 0 photo affiche « Pas de photo analysée ».
+- **Analyses :** `GET /api/admin/analyses` et `GET /api/admin/analyses/{id}`, en lecture seule, sans aucune donnée de compte.
+  - liste de 50 analyses au plus, filtres (site, niveau, modèle, version du prompt, période, recherche web, partielle) et recherche dans le titre (3 caractères au moins) ; le filtre Site est codé en dur (les trois domaines) ;
+  - le curseur `before` est un jeton opaque `"<date ISO>~<id>"`, pas un identifiant ;
+  - détail : annonce (lien vers l'annonce si elle en a une, photos en liens et non en images à cause de la CSP), résultat FR et NL, raisons, recherches, appels au modèle, lien vers le texte du prompt (`/admin/ia/prompts/{id}`) ; coûts à 4 décimales ;
+  - migration 0008 : `listings.url`, sans query ni fragment, acceptée seulement si l'hôte est le domaine du site ou un sous-domaine ; les analyses d'avant la migration n'ont pas de lien.
+- **Erreurs :** un `DataError` de la base (caractère NUL, etc.) donne `422 invalid_request` ; les `409` de l'écran Utilisateurs portent `details.reason` (`self`, `last_admin`, `stripe`).
+- Voir le [README](../README.md#administration-phase-4b) et le [suivi](superpowers/plans/2026-10-21-phase-4b-partie-2-suivi.md).
 
 ### Superuser de développement
 - **Rôle `superuser`, réservé au développement :** aucun quota ni limite de requêtes, traité comme un compte **Premium** (plan, fonctionnalités, 4 photos). Il s'attribue avec `DEV_SUPERUSER_EMAIL` (`infra/.env`) ou `pnpm dev:superuser <email>`. L'API l'ignore en production.
@@ -189,11 +213,11 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
 
 ### Site
 - La page `/auth/callback` reçoit la connexion par lien magique.
-- Les pages `/pricing` et `/privacy` existent en FR et NL. Depuis la phase 4a, `/privacy` décrit fidèlement le produit : elle peut être publiée une fois l'adresse `privacy@mostconsult.be` confirmée et la rétention du stockage distant des sauvegardes vérifiée (la page annonce 14 jours sur notre serveur).
+- Les pages `/pricing` et `/privacy` existent en FR et NL. Depuis la phase 4b partie 2, `/pricing` lit l'offre sur `GET /api/offer` (valeurs de secours si l'API ne répond pas). Depuis la phase 4a, `/privacy` décrit fidèlement le produit : elle peut être publiée une fois l'adresse `privacy@mostconsult.be` confirmée et la rétention du stockage distant des sauvegardes vérifiée (la page annonce 14 jours sur notre serveur).
 
 ## Offre
 
-Un seul type d'analyse IA, avec photos et recherche web.
+Un seul type d'analyse IA, avec photos et recherche web. Ces valeurs sont celles de départ : l'écran Offre de l'admin les modifie, et la page `/pricing` les lit par `GET /api/offer`.
 
 | Plan | Prix | Analyses IA | Photos par analyse | Icônes sur les cartes |
 |---|---|---|---|---|
@@ -207,11 +231,11 @@ Coût estimé avec `google/gemini-3.1-flash-lite` : environ 1,1 ¢ par analyse a
 
 | Partie | Tests | Commande |
 |---|---|---|
-| API | 907 | `pnpm test:api` |
+| API | 989 | `pnpm test:api` |
 | Extension | 1085 | `pnpm --filter extension test` |
-| Auth | 88 | `pnpm --filter auth test` |
-| Site | 50 | `pnpm --filter site test` |
-| Admin | 61 | `pnpm --filter admin test` |
+| Auth | 89 | `pnpm --filter auth test` |
+| Site | 78 | `pnpm --filter site test` |
+| Admin | 127 | `pnpm --filter admin test` |
 | Scripts | 16 | `pnpm test:scripts` |
 | Bout en bout | connexion et scan (en flux) | `pnpm e2e:login`, `pnpm e2e:scan` |
 
@@ -229,13 +253,13 @@ Coût estimé avec `google/gemini-3.1-flash-lite` : environ 1,1 ¢ par analyse a
 - **Réflexion :** `reasoning_effort` (`none`, `low`, `medium`, `high`) est une option de chaque fournisseur de `services/api/providers.toml`. Redémarrer l'API après l'avoir changée.
 - **Sans recherche web :** `SEARCH_BACKEND=none` dans `infra/.env` retire l'outil de recherche.
 - **Essayer le flux :** `pnpm e2e:scan` affiche chaque événement à son arrivée ; `--no-stream` utilise la route sans flux.
-- **Base de dev :** l'API applique les migrations au démarrage (`pnpm dev:api`). La migration 0005 de la phase 3d crée le type `full`, retire les quotas `text` et `image` et ajoute `plans.max_images`. La migration 0006 de la phase 4a ajoute `subscriptions.purged_scans`. La migration 0007 de la phase 4b crée `admin_actions` et `llm_calls`.
+- **Base de dev :** l'API applique les migrations au démarrage (`pnpm dev:api`). La migration 0005 de la phase 3d crée le type `full`, retire les quotas `text` et `image` et ajoute `plans.max_images`. La migration 0006 de la phase 4a ajoute `subscriptions.purged_scans`. La migration 0007 de la phase 4b crée `admin_actions` et `llm_calls`. La migration 0008 (partie 2) ajoute `listings.url`.
 - **Purge :** `PURGE_ENABLED=false` dans `infra/.env` coupe la tâche de fond en dev ; `radarnaque-purge` fait une passe à la main et affiche `scan_events supprimés : N, admin_actions : N, llm_calls : N` (voir le [README](../README.md)).
 - **Admin :** `http://localhost:8080/admin/` ; `pnpm admin:grant <email>` donne le rôle admin à un compte existant (voir le [README](../README.md#administration-phase-4b)).
 
 ## Points ouverts avant une mise en ligne
 
-1. Passer les corrections prévues avant la fusion des phases 3d, 4a et 4b partie 1 (voir leurs suivis), après la relecture finale de la branche.
+1. Passer les corrections prévues avant la fusion des phases 3d, 4a et 4b parties 1 et 2 (voir leurs suivis), après la relecture finale de la branche.
 2. Essayer les phases 3b, 3c et 3d sur les vrais sites, avec les listes des suivis.
 3. Relever la valeur réelle de `sellerType` pour un professionnel sur 2ememain.
 4. Lancer `pnpm e2e:scan` contre OpenRouter (le fournisseur de production), avec Gemini : sortie stricte et outils ensemble, réflexion recopiée d'un tour à l'autre, flux derrière Caddy.
@@ -245,5 +269,5 @@ Coût estimé avec `google/gemini-3.1-flash-lite` : environ 1,1 ¢ par analyse a
 8. Essayer la suppression du compte et la purge sur la vraie pile (voir le [suivi 4a](superpowers/plans/2026-10-20-phase-4a-suivi.md)).
 9. Préparer les déclarations du Chrome Web Store (liste dans le suivi 4a).
 10. Essayer l'admin (partie 1) sur la vraie pile, avec les vérifications du [suivi 4b partie 1](superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md) : connexion par lien et par code, essais du modèle et de la recherche, en-têtes de Caddy, présence de `scripts/` dans l'image auth.
-11. Faire la partie 2 de la phase 4b : Tableau de bord, Offre (dont `/pricing`) et Analyses.
+11. Essayer la partie 2 de l'admin sur la vraie pile, avec les vérifications du [suivi 4b partie 2](superpowers/plans/2026-10-21-phase-4b-partie-2-suivi.md) : Tableau de bord sur la base de dev, graphique dans le navigateur, modifications de l'offre, `/pricing` en FR et NL, en-tête de cache derrière Caddy, détail d'une analyse, boîte de confirmation au clavier.
 12. Faire la passe de design.
