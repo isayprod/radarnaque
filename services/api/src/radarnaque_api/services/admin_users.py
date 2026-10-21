@@ -200,7 +200,12 @@ async def assign_plan(session: AsyncSession, *, admin_id: str, user_id: str, pla
         raise ApiError(422, "invalid_value", "Plan inconnu.", {"field": "plan"})
     active = await get_active_subscription(session, user_id)
     if active is not None and active.provider == "stripe":
-        raise ApiError(409, "conflict", "L'abonnement actif vient de Stripe : à gérer dans Stripe.")
+        raise ApiError(
+            409,
+            "conflict",
+            "L'abonnement actif vient de Stripe : à gérer dans Stripe.",
+            {"reason": "stripe"},
+        )
     previous = None if active is None else active.plan
     if active is not None:
         active.status = "expired"
@@ -232,7 +237,12 @@ async def set_role(
     retrait d'un admin verrouille les admins comme la commande `admin:revoke` du service auth
     (même requête, même ordre), puis refuse (409) de retirer le dernier."""
     if user_id == admin_id:
-        raise ApiError(409, "conflict", "Vous ne pouvez pas modifier votre propre rôle.")
+        raise ApiError(
+            409,
+            "conflict",
+            "Vous ne pouvez pas modifier votre propre rôle.",
+            {"reason": "self"},
+        )
     admin_ids: list[str] = []
     if role == "user":
         admin_ids = list(
@@ -247,7 +257,9 @@ async def set_role(
     if user.role == role:
         return
     if user.role == "admin" and not any(other != user.id for other in admin_ids):
-        raise ApiError(409, "conflict", "Impossible de retirer le dernier admin.")
+        raise ApiError(
+            409, "conflict", "Impossible de retirer le dernier admin.", {"reason": "last_admin"}
+        )
     previous = user.role
     user.role = role
     await session.flush()
@@ -264,7 +276,12 @@ async def delete_user(session: AsyncSession, *, admin_id: str, user_id: str) -> 
     """Supprime le compte comme `DELETE /api/me` (cascade). La ligne du journal garde
     l'identifiant, pas l'email."""
     if user_id == admin_id:
-        raise ApiError(409, "conflict", "Vous ne pouvez pas supprimer votre propre compte.")
+        raise ApiError(
+            409,
+            "conflict",
+            "Vous ne pouvez pas supprimer votre propre compte.",
+            {"reason": "self"},
+        )
     # 404 ; le compte ne peut plus disparaître sous nos pieds (seul verrou `FOR UPDATE`)
     await _lock_user(session, user_id, deleting=True)
     record_action(session, admin_id=admin_id, action="user.deleted", target_user_id=user_id)

@@ -20,6 +20,11 @@ AdminActionCode = Literal[
     "ai.prompt_created",
     "ai.prompt_activated",
     "ai.settings_set",
+    "offer.price_set",
+    "offer.quota_set",
+    "offer.feature_set",
+    "offer.max_images_set",
+    "offer.total_cap_set",
 ]
 
 

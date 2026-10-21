@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DataError
 
 
 class ApiError(Exception):
@@ -41,4 +42,12 @@ def install_error_handlers(app: FastAPI) -> None:
             content=error_body(
                 "invalid_request", "Requête invalide.", {"errors": validation_issues(exc)}
             ),
+        )
+
+    @app.exception_handler(DataError)
+    async def _data_error(_request: Request, _exc: DataError) -> JSONResponse:
+        # Valeur que Postgres refuse (un caractère NUL, par exemple) : 422, sans jamais renvoyer
+        # la valeur reçue ni le texte de Postgres.
+        return JSONResponse(
+            status_code=422, content=error_body("invalid_request", "Requête invalide.")
         )
