@@ -1,4 +1,5 @@
 import type { Locale } from "@radarnaque/shared";
+import type { Offer, OfferPlan } from "./offer";
 import {
 	fill,
 	formatCents,
@@ -38,19 +39,40 @@ function langSwitch(doc: Document, locale: Locale, label: string): HTMLElement {
 	return nav;
 }
 
+/** Lignes d'une carte : quota, photos, bouton, puis icônes seulement si le plan les a. */
+function featureLines(
+	text: PlanText,
+	plan: OfferPlan,
+	locale: Locale,
+	quota: "scansTotal" | "scansMonth",
+): string[] {
+	const f = text.features;
+	const photos =
+		plan.maxImages === 0
+			? f.photosNone
+			: plan.maxImages === 1
+				? f.photosOne
+				: fill(f.photosMany, { photos: formatInt(plan.maxImages, locale) });
+	const lines = [
+		fill(f[quota] ?? "", { scans: formatInt(plan.scans, locale) }),
+		photos,
+		f.button,
+	];
+	if (plan.cardIcons) lines.push(f.icons);
+	return lines;
+}
+
 function planCard(
 	doc: Document,
 	text: PlanText,
-	vars: Record<string, string | number>,
+	lines: string[],
 	priceLines: string[],
 ): HTMLElement {
 	const card = el(doc, "article", undefined, "plan");
 	card.append(el(doc, "h2", text.name), el(doc, "p", text.tagline, "tagline"));
 	for (const line of priceLines) card.append(el(doc, "p", line, "price"));
 	const ul = el(doc, "ul");
-	for (const tpl of Object.values(text.features)) {
-		ul.append(el(doc, "li", fill(tpl, vars)));
-	}
+	for (const line of lines) ul.append(el(doc, "li", line));
 	card.append(ul);
 	return card;
 }
@@ -59,37 +81,49 @@ export function renderPricing(
 	doc: Document,
 	root: HTMLElement,
 	locale: Locale,
+	offer: Offer = PLANS,
 ): void {
 	const t = PRICING[locale];
-	const { standard, premium, trial } = PLANS;
+	const { standard, premium, trial } = offer;
 	doc.documentElement.lang = locale;
 	doc.title = `${t.title} – Radarnaque`;
 
-	const priceLines = (monthly: number, yearly: number) => [
-		fill(t.perMonth, { price: formatCents(monthly, locale) }),
-		fill(t.perYear, { price: formatCents(yearly, locale) }),
-		t.vatIncluded,
-	];
+	// Un prix absent n'est pas affiché ; la mention TVA suit seulement s'il y a un prix.
+	const priceLines = (plan: OfferPlan) => {
+		const lines: string[] = [];
+		if (plan.monthlyCents !== null) {
+			lines.push(
+				fill(t.perMonth, { price: formatCents(plan.monthlyCents, locale) }),
+			);
+		}
+		if (plan.yearlyCents !== null) {
+			lines.push(
+				fill(t.perYear, { price: formatCents(plan.yearlyCents, locale) }),
+			);
+		}
+		if (lines.length > 0) lines.push(t.vatIncluded);
+		return lines;
+	};
 
 	const plans = el(doc, "div", undefined, "plans");
 	plans.append(
-		planCard(doc, t.plans.trial, { scans: formatInt(trial.scans, locale) }, [
-			t.free,
-		]),
+		planCard(
+			doc,
+			t.plans.trial,
+			featureLines(t.plans.trial, trial, locale, "scansTotal"),
+			[t.free],
+		),
 		planCard(
 			doc,
 			t.plans.standard,
-			{ texts: formatInt(standard.textPerMonth, locale) },
-			priceLines(standard.monthlyCents, standard.yearlyCents),
+			featureLines(t.plans.standard, standard, locale, "scansMonth"),
+			priceLines(standard),
 		),
 		planCard(
 			doc,
 			t.plans.premium,
-			{
-				texts: formatInt(premium.textPerMonth, locale),
-				photos: formatInt(premium.photoPerMonth, locale),
-			},
-			priceLines(premium.monthlyCents, premium.yearlyCents),
+			featureLines(t.plans.premium, premium, locale, "scansMonth"),
+			priceLines(premium),
 		),
 	);
 

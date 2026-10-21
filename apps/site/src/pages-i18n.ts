@@ -1,21 +1,30 @@
 import type { Locale } from "@radarnaque/shared";
+import type { Offer } from "./offer";
 
-/** Single source of truth for prices (cents, VAT included) and quotas (spec 2.2). */
-export const PLANS = {
-	trial: { scans: 3 },
+/** Offre de secours (centimes, TVA comprise) : affichée tant que `GET /api/offer` n'a pas répondu, ou s'il échoue. */
+export const PLANS: Offer = {
+	trial: {
+		scans: 3,
+		maxImages: 4,
+		cardIcons: true,
+		monthlyCents: null,
+		yearlyCents: null,
+	},
 	standard: {
+		scans: 150,
+		maxImages: 1,
+		cardIcons: false,
 		monthlyCents: 299,
 		yearlyCents: 2900,
-		textPerMonth: 150,
-		photoPerMonth: 0,
 	},
 	premium: {
+		scans: 300,
+		maxImages: 4,
+		cardIcons: true,
 		monthlyCents: 699,
 		yearlyCents: 6900,
-		textPerMonth: 1000,
-		photoPerMonth: 100,
 	},
-} as const;
+};
 
 // To be confirmed by the owner before going live.
 export const PRIVACY_EMAIL = "privacy@mostconsult.be";
@@ -52,8 +61,16 @@ export function fill(
 export interface PlanText {
 	name: string;
 	tagline: string;
-	/** Placeholders: {scans} {texts} {photos}. */
-	features: Record<string, string>;
+	/** Placeholders: {scans} {photos}. `scansTotal` pour l'essai, `scansMonth` pour les plans payants. */
+	features: {
+		scansTotal?: string;
+		scansMonth?: string;
+		photosNone: string;
+		photosOne: string;
+		photosMany: string;
+		button: string;
+		icons: string;
+	};
 }
 
 export interface PricingText {
@@ -87,26 +104,35 @@ export const PRICING: Record<Locale, PricingText> = {
 				name: "Essai",
 				tagline: "Pour découvrir",
 				features: {
-					scans: "{scans} analyses offertes au total, une fois pour toutes",
-					all: "Toutes les fonctionnalités",
+					scansTotal: "{scans} analyses offertes au total",
+					photosNone: "Pas de photo analysée",
+					photosOne: "1 photo analysée par annonce",
+					photosMany: "Jusqu'à {photos} photos analysées par annonce",
+					button: "Bouton d'analyse IA sur la page de l'annonce",
+					icons: "Icônes sur les résultats de recherche",
 				},
 			},
 			standard: {
 				name: "Standard",
 				tagline: "Pour un usage régulier",
 				features: {
-					texts: "{texts} analyses de texte par mois",
-					photos: "Pas d'analyse de photos",
+					scansMonth: "{scans} analyses par mois",
+					photosNone: "Pas de photo analysée",
+					photosOne: "1 photo analysée par annonce",
+					photosMany: "Jusqu'à {photos} photos analysées par annonce",
 					button: "Bouton d'analyse IA sur la page de l'annonce",
+					icons: "Icônes sur les résultats de recherche",
 				},
 			},
 			premium: {
 				name: "Premium",
 				tagline: "Pour un usage intensif",
 				features: {
+					scansMonth: "{scans} analyses par mois",
+					photosNone: "Pas de photo analysée",
+					photosOne: "1 photo analysée par annonce",
+					photosMany: "Jusqu'à {photos} photos analysées par annonce",
 					button: "Bouton d'analyse IA sur la page de l'annonce",
-					texts: "{texts} analyses de texte par mois",
-					photos: "{photos} analyses avec photos par mois",
 					icons: "Icônes sur les résultats de recherche",
 				},
 			},
@@ -128,26 +154,35 @@ export const PRICING: Record<Locale, PricingText> = {
 				name: "Proef",
 				tagline: "Om kennis te maken",
 				features: {
-					scans: "{scans} gratis analyses in totaal, eenmalig",
-					all: "Alle functies",
+					scansTotal: "{scans} gratis analyses in totaal",
+					photosNone: "Geen foto's geanalyseerd",
+					photosOne: "1 foto geanalyseerd per advertentie",
+					photosMany: "Tot {photos} foto's geanalyseerd per advertentie",
+					button: "AI-analyseknop op de pagina van de advertentie",
+					icons: "Iconen op de zoekresultaten",
 				},
 			},
 			standard: {
 				name: "Standard",
 				tagline: "Voor regelmatig gebruik",
 				features: {
-					texts: "{texts} tekstanalyses per maand",
-					photos: "Geen foto-analyses",
+					scansMonth: "{scans} analyses per maand",
+					photosNone: "Geen foto's geanalyseerd",
+					photosOne: "1 foto geanalyseerd per advertentie",
+					photosMany: "Tot {photos} foto's geanalyseerd per advertentie",
 					button: "AI-analyseknop op de pagina van de advertentie",
+					icons: "Iconen op de zoekresultaten",
 				},
 			},
 			premium: {
 				name: "Premium",
 				tagline: "Voor intensief gebruik",
 				features: {
+					scansMonth: "{scans} analyses per maand",
+					photosNone: "Geen foto's geanalyseerd",
+					photosOne: "1 foto geanalyseerd per advertentie",
+					photosMany: "Tot {photos} foto's geanalyseerd per advertentie",
 					button: "AI-analyseknop op de pagina van de advertentie",
-					texts: "{texts} tekstanalyses per maand",
-					photos: "{photos} analyses met foto's per maand",
 					icons: "Iconen op de zoekresultaten",
 				},
 			},

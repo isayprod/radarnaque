@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { detectLocale } from "../src/i18n";
+import type { Offer } from "../src/offer";
 import {
 	formatCents,
 	formatInt,
@@ -63,20 +64,22 @@ describe("FR/NL parity", () => {
 	});
 });
 
-describe("PLANS (spec 2.2)", () => {
+describe("PLANS (offre de secours)", () => {
 	it("holds the exact prices in cents and quotas", () => {
 		expect(PLANS.trial.scans).toBe(3);
 		expect(PLANS.standard).toMatchObject({
 			monthlyCents: 299,
 			yearlyCents: 2900,
-			textPerMonth: 150,
-			photoPerMonth: 0,
+			scans: 150,
+			maxImages: 1,
+			cardIcons: false,
 		});
 		expect(PLANS.premium).toMatchObject({
 			monthlyCents: 699,
 			yearlyCents: 6900,
-			textPerMonth: 1000,
-			photoPerMonth: 100,
+			scans: 300,
+			maxImages: 4,
+			cardIcons: true,
 		});
 	});
 	it("formats euros per locale", () => {
@@ -115,10 +118,9 @@ describe("renderPricing", () => {
 				renderPricing(document, root, locale);
 				expect(root.querySelectorAll("article.plan")).toHaveLength(3);
 				const text = norm(root.textContent);
-				for (const needle of ["2,99", "29", "6,99", "69", "150", "100"]) {
+				for (const needle of ["2,99", "29", "6,99", "69", "150", "300"]) {
 					expect(text, needle).toContain(needle);
 				}
-				expect(text).toContain(locale === "fr" ? "1 000" : "1.000");
 				const trial = norm(root.querySelector("article.plan")?.textContent);
 				const firstFeature = root.querySelector("article.plan li")?.textContent;
 				expect(norm(firstFeature)).toMatch(/^3 /);
@@ -159,6 +161,111 @@ describe("renderPricing", () => {
 				);
 				expect(link?.getAttribute("href")).toBe(`?lang=${other}`);
 				expect(link?.getAttribute("hreflang")).toBe(other);
+			});
+
+			it("renders the exact lines of each card from the fallback offer", () => {
+				renderPricing(document, root, locale);
+				const cards = [...root.querySelectorAll("article.plan")].map((card) =>
+					[...card.querySelectorAll("li")].map((li) => norm(li.textContent)),
+				);
+				const fr = locale === "fr";
+				const button = fr
+					? "Bouton d'analyse IA sur la page de l'annonce"
+					: "AI-analyseknop op de pagina van de advertentie";
+				const icons = fr
+					? "Icônes sur les résultats de recherche"
+					: "Iconen op de zoekresultaten";
+				expect(cards[0]).toEqual([
+					fr ? "3 analyses offertes au total" : "3 gratis analyses in totaal",
+					fr
+						? "Jusqu'à 4 photos analysées par annonce"
+						: "Tot 4 foto's geanalyseerd per advertentie",
+					button,
+					icons,
+				]);
+				expect(cards[1]).toEqual([
+					fr ? "150 analyses par mois" : "150 analyses per maand",
+					fr
+						? "1 photo analysée par annonce"
+						: "1 foto geanalyseerd per advertentie",
+					button,
+				]);
+				expect(cards[2]).toEqual([
+					fr ? "300 analyses par mois" : "300 analyses per maand",
+					fr
+						? "Jusqu'à 4 photos analysées par annonce"
+						: "Tot 4 foto's geanalyseerd per advertentie",
+					button,
+					icons,
+				]);
+			});
+
+			it("renders the offer given by the API", () => {
+				const offer: Offer = {
+					...PLANS,
+					premium: { ...PLANS.premium, scans: 400, monthlyCents: 799 },
+				};
+				renderPricing(document, root, locale, offer);
+				const premium = norm(
+					root.querySelectorAll("article.plan")[2].textContent,
+				);
+				expect(premium).toContain(
+					locale === "fr" ? "400 analyses par mois" : "400 analyses per maand",
+				);
+				expect(premium).toContain("7,99");
+				expect(premium).not.toContain("300");
+			});
+
+			it("drops the icons line when the plan has no card icons", () => {
+				const offer: Offer = {
+					...PLANS,
+					premium: { ...PLANS.premium, cardIcons: false },
+				};
+				renderPricing(document, root, locale, offer);
+				const premium = root.querySelectorAll("article.plan")[2];
+				expect(premium.querySelectorAll("li")).toHaveLength(3);
+				expect(premium.textContent).not.toMatch(/Icônes|Iconen/);
+			});
+
+			it("words the photo line by count: none, one, many", () => {
+				const withImages = (n: number) => {
+					renderPricing(document, root, locale, {
+						...PLANS,
+						standard: { ...PLANS.standard, maxImages: n },
+					});
+					return norm(
+						root.querySelectorAll("article.plan")[1].querySelectorAll("li")[1]
+							.textContent,
+					);
+				};
+				const fr = locale === "fr";
+				expect(withImages(0)).toBe(
+					fr ? "Pas de photo analysée" : "Geen foto's geanalyseerd",
+				);
+				expect(withImages(1)).toBe(
+					fr
+						? "1 photo analysée par annonce"
+						: "1 foto geanalyseerd per advertentie",
+				);
+				expect(withImages(4)).toBe(
+					fr
+						? "Jusqu'à 4 photos analysées par annonce"
+						: "Tot 4 foto's geanalyseerd per advertentie",
+				);
+				expect(root.textContent).not.toContain("0 photo");
+			});
+
+			it("shows no price (and no VAT note) for a paid plan without price", () => {
+				renderPricing(document, root, locale, {
+					...PLANS,
+					standard: {
+						...PLANS.standard,
+						monthlyCents: null,
+						yearlyCents: null,
+					},
+				});
+				const standard = root.querySelectorAll("article.plan")[1];
+				expect(standard.querySelectorAll("p.price")).toHaveLength(0);
 			});
 
 			it("re-rendering replaces the content instead of appending", () => {
@@ -376,6 +483,37 @@ describe("privacy wording (spec 10)", () => {
 		);
 		expect(PRIVACY.nl.sections.seller.body).not.toContain(
 			"leeftijd van het account",
+		);
+	});
+});
+
+describe("pricing wording (offre actuelle)", () => {
+	it("n'a plus les anciens textes de texte / photos par mois", () => {
+		const all = JSON.stringify(PRICING);
+		for (const old of [
+			"analyses de texte",
+			"analyses avec photos",
+			"tekstanalyses",
+			"met foto's per maand",
+			"Toutes les fonctionnalités",
+			"Alle functies",
+		]) {
+			expect(all, old).not.toContain(old);
+		}
+	});
+
+	it("garde les textes du bouton et des icônes", () => {
+		expect(PRICING.fr.plans.premium.features.button).toBe(
+			"Bouton d'analyse IA sur la page de l'annonce",
+		);
+		expect(PRICING.fr.plans.premium.features.icons).toBe(
+			"Icônes sur les résultats de recherche",
+		);
+		expect(PRICING.nl.plans.premium.features.button).toBe(
+			"AI-analyseknop op de pagina van de advertentie",
+		);
+		expect(PRICING.nl.plans.premium.features.icons).toBe(
+			"Iconen op de zoekresultaten",
 		);
 	});
 });
