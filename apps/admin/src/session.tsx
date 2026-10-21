@@ -20,7 +20,8 @@ export type SessionState =
 
 type Session = SessionState & {
 	signOut: () => Promise<void>;
-	refresh: () => Promise<void>;
+	/** Vrai quand une session est établie (prête ou refusée), faux si on retombe sur la connexion. */
+	refresh: () => Promise<boolean>;
 };
 
 const SessionContext = createContext<Session | null>(null);
@@ -37,7 +38,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 	);
 
 	// Démarrage : jeton, puis rôle. Aucun appel /api/admin/* avant `ready`.
-	const refresh = useCallback(async () => {
+	const refresh = useCallback(async (): Promise<boolean> => {
 		const signedOut = () => update({ status: "signedOut", linkError: false });
 		try {
 			const first = await fetchToken();
@@ -45,7 +46,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 				const linkError =
 					new URLSearchParams(window.location.search).get("erreur") === "lien";
 				update({ status: "signedOut", linkError });
-				return;
+				return false;
 			}
 			// Le jeton déjà obtenu sert à la première requête, sans second appel.
 			let pending: string | null = first;
@@ -69,9 +70,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 					? { status: "ready", email: me.email, api }
 					: { status: "denied", email: me.email },
 			);
+			return true;
 		} catch {
 			// 401 déjà traité par onSignedOut ; toute autre panne ramène à la connexion.
 			signedOut();
+			return false;
 		}
 	}, [update]);
 
