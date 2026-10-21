@@ -17,8 +17,9 @@ Relire les analyses produites par l'IA pour juger leur qualité, comprendre un s
   - professionnel ;
   - modèle et version du prompt ;
   - photos analysées et recherches web ;
-  - coût ;
-  - nombre de fois servie (nombre de `scan_results` qui pointent vers l'analyse).
+  - coût total (somme de ses `llm_calls`) et nombre d'appels au modèle ;
+  - nombre de fois servie (nombre de `scan_results` qui pointent vers l'analyse, y compris les scans qui ont appelé le modèle).
+- **Date :** celle du dernier appel au modèle (`analyses.created_at`). Une analyse rafraîchie sur place remonte donc en tête de liste ; son contenu est celui du dernier appel (socle §5 bis).
 - **Filtres :**
   - site ;
   - niveau de risque ;
@@ -43,10 +44,11 @@ Relire les analyses produites par l'IA pour juger leur qualité, comprendre un s
 - **Les recherches web :** les requêtes et leur aspect, dans l'ordre.
 - **Le contexte technique :**
   - modèle, version du prompt (avec un lien vers son texte dans l'écran IA) ;
-  - tokens en entrée et en sortie, coût ;
+  - tokens en entrée et en sortie, coût, du dernier appel ;
+  - les appels au modèle (`llm_calls`), du plus récent au plus ancien : date, tokens, coût, photos, recherches ;
   - photos analysées ;
   - empreinte d'entrée (`input_hash`) ;
-  - date de création.
+  - date du dernier appel.
 - **L'usage :** nombre de fois servie, et date du premier et du dernier service. L'écran ne dit pas qui l'a demandée.
 
 ## 4. Données personnelles
@@ -66,6 +68,7 @@ Les deux routes sont en lecture seule. Elles n'écrivent rien dans `admin_action
 
 - **Liste :** chaque filtre seul et combinés ; pagination ; titre de moins de 3 caractères donne `422`.
 - **« Nombre de fois servie » :** égal au nombre de `scan_results` de l'analyse.
+- **Analyse rafraîchie :** deux appels listés, coût total égal à leur somme.
 - **Détail :**
   - textes FR et NL ;
   - raisons dans l'ordre ;

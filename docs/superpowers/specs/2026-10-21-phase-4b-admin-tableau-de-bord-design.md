@@ -13,21 +13,24 @@ Montrer en un coup d'œil l'activité, les coûts et la santé du service. Écra
 | Carte | Calcul |
 |---|---|
 | Analyses | `scan_events` créés dans la période |
-| Servies depuis le cache | part des analyses réussies servies depuis le cache partagé (`from_cache_expr`), en % |
+| Appels au modèle | lignes `llm_calls` de la période (socle §5 bis) |
+| Servies depuis le cache | scans réussis (avec `scan_results`) moins appels au modèle, rapporté aux scans réussis, en % (borné à 0) |
 | Échecs | part des `scan_events` qui ont un `scan_failures`, en %, avec les trois codes les plus fréquents |
-| Coût IA | somme de `analyses.cost_usd_micros` des analyses **créées** dans la période, en dollars, sur 2 décimales |
-| Coût moyen par analyse | coût IA divisé par le nombre d'analyses créées (appels au modèle) |
-| Recherches web | nombre de lignes `analysis_web_searches` des analyses créées dans la période, et la moyenne par analyse |
+| Coût IA | somme de `llm_calls.cost_usd_micros` de la période, en dollars, sur 2 décimales |
+| Coût moyen par appel | coût IA divisé par le nombre d'appels au modèle |
+| Recherches web | somme de `llm_calls.web_searches` de la période, et la moyenne par appel |
+
+Ces calculs ne lisent ni `analyses.cost_usd_micros` ni `from_cache_expr` : un rafraîchissement sur place écrase le coût et la date d'une analyse (socle §5 bis). Un scan servi par l'analyse d'un autre scan en cours (course sur le verrou) compte comme servi depuis le cache, puisqu'il n'a pas fait d'appel.
 
 **Abonnés actifs par plan :** essai, Standard et Premium (abonnements `active`), avec le nombre de nouveaux comptes dans les 7 derniers jours.
 
-**Graphique des 30 derniers jours :** analyses par jour, en barres empilées (réussies servies depuis le cache, réussies avec un appel au modèle, en échec), avec le coût IA du jour en ligne.
+**Graphique des 30 derniers jours :** analyses par jour, en barres empilées (réussies servies depuis le cache, réussies avec un appel au modèle, en échec), avec le coût IA du jour en ligne. Les mêmes règles que les cartes : appels et coût viennent de `llm_calls`, « depuis le cache » est la différence.
 
 **Mois en cours :** coût IA du mois civil, et projection linéaire sur le mois entier.
 
 **Santé :**
 - modèle actif et fournisseur du type `full` ;
-- moteur de recherche (`SEARCH_BACKEND`) et sa disponibilité : un appel `GET /search?q=test&format=json` au moteur, avec un délai de 3 s, et le résultat gardé 60 s ;
+- moteur de recherche (`SEARCH_BACKEND`) et sa disponibilité, selon la vérification du socle (§6) ;
 - date de la dernière purge (§4 de la phase 4a), et le nombre d'événements supprimés.
 
 ## 3. Fuseau et périodes
@@ -39,8 +42,9 @@ Les jours sont des jours civils de Bruxelles (Europe/Brussels), comme `today` da
 - **`GET /api/admin/dashboard`** renvoie toutes les cartes, les abonnés et la santé en une seule réponse :
   `{ today: Stats, last7Days: Stats, subscribers: {...}, month: { costUsd, projectedUsd }, health: {...} }`.
 - **`GET /api/admin/dashboard/daily?days=30`** renvoie un point par jour (`date`, `fromCache`, `llm`, `failed`, `costUsd`). `days` vaut entre 1 et 90.
-- **Requêtes :** des agrégats SQL sur `scan_events`, `scan_results`, `scan_failures`, `analyses` et `analysis_web_searches`. Aucune donnée personnelle n'est renvoyée, seulement des nombres.
-- **Dernière purge :** la purge de la phase 4a enregistre sa dernière passe dans une ligne de `admin_actions`, avec `action = 'system.purge'`, l'administrateur `NULL`, et `{ "deleted": n }` dans `details`.
+- **`Stats`** : `{ scans, llmCalls, fromCachePct, failedPct, topFailures: [{ code, count }], costUsd, avgCostUsd, webSearches, avgWebSearches }`.
+- **Requêtes :** des agrégats SQL sur `scan_events`, `scan_results`, `scan_failures` et `llm_calls`. Aucune donnée personnelle n'est renvoyée, seulement des nombres.
+- **Dernière purge :** la dernière ligne `system.purge` de `admin_actions` (socle §5), avec sa date et `deletedScans`.
 
 ## 5. Comportement
 
@@ -56,7 +60,8 @@ Les jours sont des jours civils de Bruxelles (Europe/Brussels), comme `today` da
   - part d'échecs et codes les plus fréquents ;
   - coût et coût moyen ;
   - recherches web.
+- Rafraîchissement : une analyse appelée le 18, servie le 19 et rafraîchie le 20 donne un appel et son coût le 18, un scan servi depuis le cache le 19, un appel et son coût le 20.
 - Limite d'un jour au fuseau de Bruxelles : une analyse à 23 h 30 UTC un 20 octobre compte pour le 21.
 - `days` hors de 1 à 90 donne `422`.
-- Santé : moteur joignable, en échec, et désactivé (`none`).
+- Santé : moteur joignable, en échec, et désactivé (`none`) ; dernière purge lue dans `system.purge`.
 - Interface : cartes, graphique et bouton « Actualiser ».

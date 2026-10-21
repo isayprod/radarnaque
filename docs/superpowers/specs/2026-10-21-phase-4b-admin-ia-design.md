@@ -12,11 +12,11 @@ Piloter l'IA sans ligne de commande. On change le modèle actif, on ajoute un mo
 - **Fournisseurs :** ce sont les entrées de `services/api/providers.toml`, en lecture seule. On affiche pour chacun :
   - l'API (`chat` ou `responses`) ;
   - le mode de sortie (`json_schema` ou `json_object`) ;
-  - `reasoning_effort` et `max_images` ;
-  - la présence de la clé dans l'environnement (« clé présente » ou « clé absente »), jamais sa valeur.
+  - `reasoning_effort` et `max_images`, ou « — » quand le fournisseur ne les définit pas ;
+  - l'état de la clé, jamais sa valeur : « clé présente » ou « clé absente » quand le fournisseur déclare `api_key_env`, « pas de clé requise » sinon (`openai-oauth`, `ollama`, `stub`).
 - **Ajouter un modèle :** un fournisseur choisi dans la liste de `providers.toml` et un slug (1 à 200 caractères, sans espace). Le couple est unique (`409` sinon). Action journalisée `ai.model_added`.
 - **Modèle actif** du type `full` (`scan_kinds.active_model_id`) : un menu, puis une confirmation. Le cache des analyses est lié au modèle : changer de modèle relance des analyses neuves, et les résultats de l'ancien modèle restent en base. Action journalisée `ai.model_activated`.
-- **Essai du modèle :** le bouton « Tester » envoie une petite annonce fictive fixe au modèle choisi, avec le prompt actif, sans recherche web ni photo, hors quota et hors cache. Il affiche le score, la durée, les tokens et la réponse brute. Le but est de vérifier un modèle avant de l'activer. Un fournisseur sans clé donne l'erreur `configuration` sans appel réseau.
+- **Essai du modèle :** le bouton « Tester » envoie une petite annonce fictive fixe au modèle choisi, avec le prompt actif, sans recherche web ni photo, hors quota et hors cache. Il affiche le score, la durée, les tokens et la réponse brute. Le but est de vérifier un modèle avant de l'activer. Un fournisseur dont la clé est absente donne l'erreur `configuration` sans appel réseau. L'essai n'écrit ni `scan_events` ni `llm_calls` : son coût n'entre pas dans le tableau de bord.
 
 ## 3. Prompts
 
@@ -35,13 +35,13 @@ Piloter l'IA sans ligne de commande. On change le modèle actif, on ajoute un mo
 | `rate_limit_per_minute` | de 1 à 600 | limite de scans par utilisateur et par minute |
 | `max_web_searches` | de 0 à 5 (CHECK) | recherches web par analyse ; 0 désactive la recherche |
 
-- Un formulaire, une confirmation, puis l'action journalisée `ai.settings_set` avec `{ field, from, to }`.
+- Un formulaire, une confirmation, puis une ligne `ai.settings_set` par réglage modifié, avec `{ field, from, to }`.
 - La page `/privacy` affiche « jusqu'à 3 recherches » : quand `max_web_searches` change, un avertissement rappelle de mettre la page à jour (décision R9 de la phase 4a).
 
 ## 5. Recherche web
 
-- **État du moteur :** `SEARCH_BACKEND`, l'URL de SearXNG (sans identifiants), sa disponibilité (même vérification que le tableau de bord) et la taille du cache des recherches.
-- **Essai :** le bouton « Tester une recherche » envoie une requête libre au moteur et affiche les résultats tels qu'ils sont renvoyés au modèle (`format_hits`), contacts masqués. La requête n'est pas journalisée.
+- **État du moteur :** `SEARCH_BACKEND`, l'URL de SearXNG (sans identifiants), sa disponibilité (vérification du socle, §6) et la taille du cache des recherches (cache en mémoire du processus qui répond).
+- **Essai :** le bouton « Tester une recherche » envoie une requête libre au moteur, sans passer par le cache ni l'alimenter, et affiche les résultats tels qu'ils sont renvoyés au modèle (`format_hits`), contacts masqués. La requête n'est pas journalisée.
 
 ## 6. API
 
@@ -77,6 +77,6 @@ Piloter l'IA sans ligne de commande. On change le modèle actif, on ajoute un mo
   - texte hors bornes donne `422` ;
   - aucune route ne modifie une version existante.
 - **Réglages :** bornes, effet sur le scan suivant (`max_web_searches = 0` : aucun outil proposé), journal.
-- **Fournisseurs :** la valeur de la clé n'apparaît jamais dans la réponse, seulement sa présence.
-- **Essai de recherche :** contacts masqués, limite de 30 par heure, moteur désactivé donne un message clair.
+- **Fournisseurs :** la valeur de la clé n'apparaît jamais dans la réponse, seulement son état ; « pas de clé requise » pour un fournisseur sans `api_key_env`.
+- **Essai de recherche :** contacts masqués, cache ni lu ni écrit, limite de 30 par heure, moteur désactivé donne un message clair.
 - **Interface :** confirmations, éditeur de prompt, résultats des essais.

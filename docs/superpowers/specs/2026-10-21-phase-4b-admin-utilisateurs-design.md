@@ -35,7 +35,7 @@ Retrouver un compte, voir son plan et sa consommation, et agir dessus : donner u
 | Action | Effet | Garde-fous |
 |---|---|---|
 | **Attribuer un plan** | Termine l'abonnement actif (`status = 'expired'`, statut existant de `subscription_statuses`, `period_end = now()`), puis crée un abonnement `active` du plan choisi, `provider = 'manual'`, `period_start = now()`. La consommation repart de zéro pour un plan mensuel. | Confirmation qui rappelle le plan actuel. Refusé (`409`) si l'abonnement actif vient de Stripe : on le gère dans Stripe (phase 5). |
-| **Nommer admin / retirer le rôle** | Modifie `auth.user.role` (`admin` ou `user`). | Pas sur soi-même. Pas de retrait du dernier admin (`409 conflict`). Le rôle `superuser` n'est jamais attribué depuis l'admin. |
+| **Nommer admin / retirer le rôle** | Modifie `auth.user.role` (`admin` ou `user`). | Pas sur soi-même. Pas de retrait du dernier admin (`409 conflict`), contrôle sous verrou (socle §4). Le rôle `superuser` n'est jamais attribué depuis l'admin. Pas de session révoquée : le rôle est relu à chaque requête. |
 | **Supprimer le compte** | Même effet que `DELETE /api/me` (phase 4a) : suppression en cascade. La ligne `admin_actions` garde l'identifiant visé, pas l'email. | Confirmation par la saisie de l'email du compte. Pas sur soi-même (`409`). |
 
 Chaque action écrit sa ligne `admin_actions` (`user.plan_set`, `user.role_set`, `user.deleted`) dans la même transaction.
@@ -51,7 +51,7 @@ Chaque action écrit sa ligne `admin_actions` (`user.plan_set`, `user.role_set`,
 ## 6. Données personnelles
 
 - L'email n'apparaît que dans l'interface de l'admin et dans les réponses de ces routes, jamais dans les journaux de l'API ni dans `admin_actions`.
-- La recherche par email n'est pas journalisée.
+- La recherche par email n'est pas journalisée : pas de journal d'accès HTTP (socle §6), et aucune ligne `radarnaque.admin` pour une lecture.
 
 ## 7. Tests
 
@@ -67,7 +67,7 @@ Chaque action écrit sa ligne `admin_actions` (`user.plan_set`, `user.role_set`,
   - plan inconnu donne `422`.
 - **Rôle :**
   - nommer et retirer un admin ;
-  - `409` sur soi-même et sur le dernier admin ;
+  - `409` sur soi-même et sur le dernier admin, y compris pour deux retraits simultanés ;
   - `superuser` refusé.
 - **Suppression :**
   - cascade identique à la phase 4a ;
