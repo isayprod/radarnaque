@@ -4,6 +4,147 @@
  */
 
 export interface paths {
+    "/api/admin/ai": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Overview
+         * @description Modèles, fournisseurs (état des clés, jamais leur valeur), versions de prompt sans leur
+         *     texte, réglages, moteur de recherche et 20 dernières actions IA.
+         */
+        get: operations["overview_api_admin_ai_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/active-model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate Model
+         * @description Active un modèle pour les scans suivants (le cache est lié au modèle).
+         */
+        post: operations["activate_model_api_admin_ai_active_model_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Model
+         * @description Ajoute un modèle : fournisseur de `providers.toml` (422), couple unique (409).
+         */
+        post: operations["add_model_api_admin_ai_models_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Prompt
+         * @description Crée la version suivante, non active.
+         */
+        post: operations["create_prompt_api_admin_ai_prompts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/prompts/{prompt_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Prompt
+         * @description Le texte d'une version, en lecture seule : aucune route ne modifie une version.
+         */
+        get: operations["get_prompt_api_admin_ai_prompts__prompt_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/prompts/{prompt_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate Prompt
+         * @description Active une version du type `full` pour les scans suivants (le cache est lié au prompt).
+         */
+        post: operations["activate_prompt_api_admin_ai_prompts__prompt_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Settings
+         * @description Modifie les réglages fournis ; une ligne de journal par champ réellement changé.
+         */
+        patch: operations["update_settings_api_admin_ai_settings_patch"];
+        trace?: never;
+    };
     "/api/admin/users": {
         parameters: {
             query?: never;
@@ -259,6 +400,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActiveModelIn */
+        ActiveModelIn: {
+            /** Modelid */
+            modelId: number;
+        };
         /**
          * AdminActionOut
          * @description Une ligne du journal des modifications faites depuis l'admin. `admin_email` vient de
@@ -402,6 +548,45 @@ export interface components {
             role: "user" | "admin" | "superuser";
             /** Used */
             used: number | null;
+        };
+        /**
+         * AiOverviewOut
+         * @description Vue d'ensemble de l'IA : modèle et prompt actifs du type `full`, versions sans leur texte,
+         *     et les 20 dernières actions `ai.*`.
+         */
+        AiOverviewOut: {
+            /** Actions */
+            actions: components["schemas"]["AdminActionOut"][];
+            /** Activemodelid */
+            activeModelId: number;
+            /** Activepromptversionid */
+            activePromptVersionId: number | null;
+            /** Models */
+            models: components["schemas"]["ModelOut"][];
+            /** Prompts */
+            prompts: components["schemas"]["PromptVersionOut"][];
+            /** Providers */
+            providers: components["schemas"]["ProviderOut"][];
+            search: components["schemas"]["SearchStatusOut"];
+            settings: components["schemas"]["AiSettingsOut"];
+        };
+        /** AiSettingsIn */
+        AiSettingsIn: {
+            /** Cachettlhours */
+            cacheTtlHours?: number | null;
+            /** Maxwebsearches */
+            maxWebSearches?: number | null;
+            /** Ratelimitperminute */
+            rateLimitPerMinute?: number | null;
+        };
+        /** AiSettingsOut */
+        AiSettingsOut: {
+            /** Cachettlhours */
+            cacheTtlHours: number;
+            /** Maxwebsearches */
+            maxWebSearches: number;
+            /** Ratelimitperminute */
+            rateLimitPerMinute: number;
         };
         /** AnalysisReasonOut */
         AnalysisReasonOut: {
@@ -600,6 +785,32 @@ export interface components {
             /** Userid */
             userId: string;
         };
+        /** ModelIn */
+        ModelIn: {
+            /** Provider */
+            provider: string;
+            /** Slug */
+            slug: string;
+        };
+        /**
+         * ModelOut
+         * @description Un modèle de `app.models`. `known_provider` : son fournisseur figure encore dans
+         *     `providers.toml` (sinon il ne peut pas être activé).
+         */
+        ModelOut: {
+            /** Active */
+            active: boolean;
+            /** Analyses */
+            analyses: number;
+            /** Id */
+            id: number;
+            /** Knownprovider */
+            knownProvider: boolean;
+            /** Provider */
+            provider: string;
+            /** Slug */
+            slug: string;
+        };
         /** MonthRangeIn */
         MonthRangeIn: {
             /** Max */
@@ -617,6 +828,29 @@ export interface components {
              */
             currency: "EUR";
         };
+        /** PromptIn */
+        PromptIn: {
+            /** Systemprompt */
+            systemPrompt: string;
+        };
+        /** PromptTextOut */
+        PromptTextOut: {
+            /** Active */
+            active: boolean;
+            /** Analyses */
+            analyses: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Id */
+            id: number;
+            /** Systemprompt */
+            systemPrompt: string;
+            /** Version */
+            version: number;
+        };
         /** PromptVersionDebugOut */
         PromptVersionDebugOut: {
             /**
@@ -626,6 +860,50 @@ export interface components {
             scanKind: "text" | "image" | "full";
             /** Version */
             version: number;
+        };
+        /** PromptVersionOut */
+        PromptVersionOut: {
+            /** Active */
+            active: boolean;
+            /** Analyses */
+            analyses: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Id */
+            id: number;
+            /** Version */
+            version: number;
+        };
+        /**
+         * ProviderOut
+         * @description Un fournisseur de `providers.toml`, en lecture seule. `key` : l'état de la variable
+         *     d'environnement de la clé, jamais sa valeur ; `not_required` sans `api_key_env`.
+         */
+        ProviderOut: {
+            /**
+             * Api
+             * @enum {string}
+             */
+            api: "chat" | "responses";
+            /** Code */
+            code: string;
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "present" | "absent" | "not_required";
+            /** Maximages */
+            maxImages: number | null;
+            /** Reasoningeffort */
+            reasoningEffort: string | null;
+            /**
+             * Structuredoutput
+             * @enum {string}
+             */
+            structuredOutput: "json_schema" | "json_object";
         };
         /** QuotaOut */
         QuotaOut: {
@@ -764,6 +1042,27 @@ export interface components {
             trigger: "button" | "card";
         };
         /**
+         * SearchStatusOut
+         * @description Moteur de recherche web. `url` : celle de SearXNG sans `user:pass@` (`None` quand le moteur
+         *     est désactivé). `cache_entries` : taille du cache en mémoire du processus qui répond.
+         */
+        SearchStatusOut: {
+            /**
+             * Backend
+             * @enum {string}
+             */
+            backend: "searxng" | "none";
+            /** Cacheentries */
+            cacheEntries: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "down" | "disabled";
+            /** Url */
+            url: string | null;
+        };
+        /**
          * SellerFactsIn
          * @description Faits sur le vendeur, jamais son identité : `id`, `name` et `profileUrl` sont refusés.
          */
@@ -831,6 +1130,220 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    overview_api_admin_ai_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiOverviewOut"];
+                };
+            };
+        };
+    };
+    activate_model_api_admin_ai_active_model_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveModelIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiOverviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_model_api_admin_ai_models_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiOverviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_prompt_api_admin_ai_prompts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptTextOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_prompt_api_admin_ai_prompts__prompt_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                prompt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptTextOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_prompt_api_admin_ai_prompts__prompt_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                prompt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiOverviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_settings_api_admin_ai_settings_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiSettingsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiOverviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_users_api_admin_users_get: {
         parameters: {
             query?: {
