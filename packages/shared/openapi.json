@@ -15,6 +15,24 @@
         "title": "ActiveModelIn",
         "type": "object"
       },
+      "ActiveModelOut": {
+        "properties": {
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "slug"
+        ],
+        "title": "ActiveModelOut",
+        "type": "object"
+      },
       "AdminActionOut": {
         "description": "Une ligne du journal des modifications faites depuis l'admin. `admin_email` vient de\n`auth.user` (affichage seulement) ; il est `None` quand l'admin a \u00e9t\u00e9 supprim\u00e9.",
         "properties": {
@@ -728,6 +746,206 @@
         "title": "CheckoutIn",
         "type": "object"
       },
+      "DailyOut": {
+        "description": "Un point par jour, jours vides compris, du plus ancien au plus r\u00e9cent.",
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/DailyPointOut"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "title": "DailyOut",
+        "type": "object"
+      },
+      "DailyPointOut": {
+        "description": "Un jour civil de Bruxelles : scans r\u00e9ussis servis depuis le cache, appels au mod\u00e8le,\nscans en \u00e9chec, et co\u00fbt du jour en dollars.",
+        "properties": {
+          "costUsd": {
+            "title": "Costusd",
+            "type": "number"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "fromCache": {
+            "title": "Fromcache",
+            "type": "integer"
+          },
+          "llm": {
+            "title": "Llm",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "fromCache",
+          "llm",
+          "failed",
+          "costUsd"
+        ],
+        "title": "DailyPointOut",
+        "type": "object"
+      },
+      "DashboardHealthOut": {
+        "description": "`active_model` : mod\u00e8le actif du type `full` (`None` sans mod\u00e8le actif). `last_purge` :\nderni\u00e8re ligne `system.purge` du journal (`None` sans purge).",
+        "properties": {
+          "activeModel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActiveModelOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastPurge": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LastPurgeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "search": {
+            "$ref": "#/components/schemas/SearchStatusOut"
+          }
+        },
+        "required": [
+          "activeModel",
+          "search",
+          "lastPurge"
+        ],
+        "title": "DashboardHealthOut",
+        "type": "object"
+      },
+      "DashboardOut": {
+        "properties": {
+          "health": {
+            "$ref": "#/components/schemas/DashboardHealthOut"
+          },
+          "last7Days": {
+            "$ref": "#/components/schemas/DashboardStatsOut"
+          },
+          "month": {
+            "$ref": "#/components/schemas/MonthCostOut"
+          },
+          "subscribers": {
+            "$ref": "#/components/schemas/SubscribersOut"
+          },
+          "today": {
+            "$ref": "#/components/schemas/DashboardStatsOut"
+          }
+        },
+        "required": [
+          "today",
+          "last7Days",
+          "subscribers",
+          "month",
+          "health"
+        ],
+        "title": "DashboardOut",
+        "type": "object"
+      },
+      "DashboardStatsOut": {
+        "description": "Les cartes du Tableau de bord sur une p\u00e9riode. Parts et moyennes valent `None` quand leur\nd\u00e9nominateur est nul (aucun scan, aucun scan r\u00e9ussi, aucun appel). `from_cache_pct` et\n`failed_pct` sont des pourcentages de 0 \u00e0 100. Co\u00fbts en dollars, lus dans `llm_calls`.",
+        "properties": {
+          "avgCostUsd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avgcostusd"
+          },
+          "avgWebSearches": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avgwebsearches"
+          },
+          "costUsd": {
+            "title": "Costusd",
+            "type": "number"
+          },
+          "failedPct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failedpct"
+          },
+          "fromCachePct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fromcachepct"
+          },
+          "llmCalls": {
+            "title": "Llmcalls",
+            "type": "integer"
+          },
+          "scans": {
+            "title": "Scans",
+            "type": "integer"
+          },
+          "topFailures": {
+            "items": {
+              "$ref": "#/components/schemas/TopFailureOut"
+            },
+            "title": "Topfailures",
+            "type": "array"
+          },
+          "webSearches": {
+            "title": "Websearches",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scans",
+          "llmCalls",
+          "fromCachePct",
+          "failedPct",
+          "topFailures",
+          "costUsd",
+          "avgCostUsd",
+          "webSearches",
+          "avgWebSearches"
+        ],
+        "title": "DashboardStatsOut",
+        "type": "object"
+      },
       "DebugMessageOut": {
         "description": "Message envoy\u00e9 au LLM, en texte : chaque photo y est r\u00e9sum\u00e9e (`[image n : N octets]`).",
         "properties": {
@@ -848,6 +1066,25 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "LastPurgeOut": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "deletedScans": {
+            "title": "Deletedscans",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "at",
+          "deletedScans"
+        ],
+        "title": "LastPurgeOut",
         "type": "object"
       },
       "ListingIn": {
@@ -1249,6 +1486,32 @@
           "error"
         ],
         "title": "ModelTestOut",
+        "type": "object"
+      },
+      "MonthCostOut": {
+        "description": "Co\u00fbt du mois civil et projection lin\u00e9aire sur le mois entier (`None` pendant les\npremi\u00e8res 24 h du mois).",
+        "properties": {
+          "costUsd": {
+            "title": "Costusd",
+            "type": "number"
+          },
+          "projectedUsd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectedusd"
+          }
+        },
+        "required": [
+          "costUsd",
+          "projectedUsd"
+        ],
+        "title": "MonthCostOut",
         "type": "object"
       },
       "MonthRangeIn": {
@@ -2326,6 +2589,54 @@
         "title": "SignalIn",
         "type": "object"
       },
+      "SubscribersOut": {
+        "description": "Abonnements `active` par plan, et comptes cr\u00e9\u00e9s dans les 7 derniers jours civils.",
+        "properties": {
+          "newAccounts7Days": {
+            "title": "Newaccounts7Days",
+            "type": "integer"
+          },
+          "premium": {
+            "title": "Premium",
+            "type": "integer"
+          },
+          "standard": {
+            "title": "Standard",
+            "type": "integer"
+          },
+          "trial": {
+            "title": "Trial",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "trial",
+          "standard",
+          "premium",
+          "newAccounts7Days"
+        ],
+        "title": "SubscribersOut",
+        "type": "object"
+      },
+      "TopFailureOut": {
+        "description": "Un code d'erreur et le nombre de scans en \u00e9chec qui le portent.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "count"
+        ],
+        "title": "TopFailureOut",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -2731,6 +3042,68 @@
           }
         },
         "summary": "Update Settings"
+      }
+    },
+    "/api/admin/dashboard": {
+      "get": {
+        "description": "Cartes du jour et des 7 derniers jours civils de Bruxelles, abonn\u00e9s actifs, co\u00fbt du mois\net sant\u00e9 du service. Aucune donn\u00e9e personnelle.",
+        "operationId": "overview_api_admin_dashboard_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Overview"
+      }
+    },
+    "/api/admin/dashboard/daily": {
+      "get": {
+        "description": "Un point par jour civil de Bruxelles, jours vides compris, du plus ancien au plus r\u00e9cent.",
+        "operationId": "daily_api_admin_dashboard_daily_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 90,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Daily"
       }
     },
     "/api/admin/offer": {
