@@ -1,5 +1,5 @@
 import type { components } from "@radarnaque/shared";
-import { formatDateTime } from "../format";
+import { formatDateTime, formatEuros } from "../format";
 
 type AdminAction = components["schemas"]["AdminActionOut"];
 
@@ -23,11 +23,6 @@ const LABELS: Record<string, string> = {
 const INTERVALS: Record<string, string> = { month: "mois", year: "an" };
 const FEATURES: Record<string, string> = { card_icons: "icônes des cartes" };
 
-const euros = new Intl.NumberFormat("fr-BE", {
-	style: "currency",
-	currency: "EUR",
-});
-
 function show(value: unknown): string {
 	if (value === null || value === undefined) return "aucun";
 	if (typeof value === "boolean") return value ? "oui" : "non";
@@ -36,7 +31,7 @@ function show(value: unknown): string {
 
 // Un prix de l'offre est en centimes ; le journal l'affiche en euros.
 function showPrice(value: unknown): string {
-	return typeof value === "number" ? euros.format(value / 100) : show(value);
+	return typeof value === "number" ? formatEuros(value) : show(value);
 }
 
 /** Le plan visé par une action de l'offre, avec l'intervalle ou la fonctionnalité s'il y en a un. */

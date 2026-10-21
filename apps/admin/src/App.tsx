@@ -4,6 +4,7 @@ import { AccessDenied } from "./pages/AccessDenied";
 import { Ai } from "./pages/Ai";
 import { Dashboard } from "./pages/Dashboard";
 import { NotFound } from "./pages/NotFound";
+import { Offer } from "./pages/Offer";
 import { SignIn } from "./pages/SignIn";
 import { UserCard } from "./pages/UserCard";
 import { Users } from "./pages/Users";
@@ -61,7 +62,7 @@ function title(route: Route): string {
 	}
 }
 
-// Offre et analyses n'ont pas encore d'écran : contenu vide.
+// Les analyses n'ont pas encore d'écran : contenu vide.
 function Content({ route }: { route: Route }) {
 	switch (route.name) {
 		case "dashboard":
@@ -70,6 +71,8 @@ function Content({ route }: { route: Route }) {
 			return <Users />;
 		case "user":
 			return <UserCard id={route.id} />;
+		case "offer":
+			return <Offer />;
 		case "ai":
 			return <Ai promptId={route.promptId} />;
 		case "notFound":
