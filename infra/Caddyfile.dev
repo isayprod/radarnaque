@@ -1,6 +1,7 @@
 # Caddy de développement : une seule origine http://localhost:8080.
 # auth (port 3000) et api (port 8000) tournent sur l'hôte ; le site est servi depuis
-# apps/site/dist (monté en lecture seule dans /srv/site).
+# apps/site/dist (monté en lecture seule dans /srv/site) ; l'admin sous /admin/ vient de
+# apps/admin/dist (monté dans /srv/admin).
 {
 	admin off
 	auto_https off
@@ -45,6 +46,25 @@
 			max_size 1MB
 		}
 		reverse_proxy host.docker.internal:8000
+	}
+
+	# Application d'administration (SPA) : /admin/* → /srv/admin, repli sur index.html.
+	redir /admin /admin/ 308
+	handle /admin/* {
+		header {
+			Content-Security-Policy "default-src 'self'; frame-ancestors 'none'"
+			X-Frame-Options DENY
+			Referrer-Policy no-referrer
+		}
+		# Deux matchers exclusifs : Caddy trie les directives `header` par matcher, un
+		# `Cache-Control` sans matcher écraserait celui des assets.
+		@adminAssets path /admin/assets/*
+		@adminPages not path /admin/assets/*
+		header @adminAssets Cache-Control "public, max-age=31536000, immutable"
+		header @adminPages Cache-Control no-store
+		root * /srv
+		try_files {path} /admin/index.html
+		file_server
 	}
 
 	handle {

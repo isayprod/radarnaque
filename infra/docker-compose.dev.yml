@@ -18,7 +18,7 @@ services:
       retries: 10
 
   # Origine unique http://localhost:8080 : /auth/* → auth (hôte:3000), /api/* → api
-  # (hôte:8000), le reste → apps/site/dist. Voir Caddyfile.dev.
+  # (hôte:8000), /admin/* → apps/admin/dist, le reste → apps/site/dist. Voir Caddyfile.dev.
   caddy:
     image: caddy:2
     ports:
@@ -28,6 +28,7 @@ services:
     volumes:
       - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro
       - ../apps/site/dist:/srv/site:ro
+      - ../apps/admin/dist:/srv/admin:ro
 
   # Moteur de recherche web de l'API (outil web_search), joint sur http://127.0.0.1:8888
   # (SEARXNG_URL par défaut de l'API). Configuration : searxng/settings.yml. Le secret ne sert
