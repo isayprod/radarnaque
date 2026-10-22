@@ -6,18 +6,31 @@ import { shownResult } from "../lib/content/shown-result";
 import type { AiScan } from "../lib/content/use-ai-scan";
 import { aiErrorText, contentText } from "../lib/content-i18n";
 import { RELAUNCH_CODES } from "./AiSection";
-import { LiveLine, Spinner, useThrottled, useWaiting } from "./LiveStatus";
+import { LiveLine, useThrottled, useWaiting } from "./LiveStatus";
+import { Logo } from "./Logo";
 import { LEVEL_KEY, LEVEL_STYLE } from "./risk-styles";
 
 type Access = AiScan["access"];
 
-// Pilule qui ouvre le panneau : analyse en cours, ou résultat IA.
-const TOGGLE_CLASS =
-	"inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[13px] leading-[1.4] font-semibold shadow-sm hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700";
+/**
+ * Surface de la pilule (tableau des valeurs du spec) : verre sombre et flou si
+ * disponible, bordure blanche à 12 %, ombre de la pilule primaire, Inter poids 500
+ * en blanc, anneau de focus au clavier. Sans taille : chaque usage donne la sienne
+ * (28 px pour la fiche, 22 px pour les cartes).
+ */
+export const PILL_CLASS =
+	"inline-flex items-center rounded-pill border border-white/12 bg-glass-strong font-sans font-medium whitespace-nowrap text-text-1 no-underline shadow-[var(--shadow-pill)] supports-[backdrop-filter]:backdrop-blur-[18px] focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
 
-// Pilule qui lance l'analyse : au repos, ou après une erreur.
-const LAUNCH_CLASS =
-	"inline-flex cursor-pointer items-center gap-1 rounded-full border border-slate-300 bg-white px-2 py-1 text-[12px] leading-[1.4] font-semibold text-slate-900 no-underline shadow-sm hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700 aria-disabled:cursor-default aria-disabled:bg-slate-100 aria-disabled:text-slate-500";
+// Pilule de la fiche : 28 px de haut, au plus 340 px de large (seule la ligne
+// d'état ou le message se tronquent), texte 13 px.
+const BADGE_PILL_CLASS = `${PILL_CLASS} h-7 max-w-[340px] min-w-0 gap-2 px-3 text-[13px] leading-none`;
+
+// Pilule cliquable : repos, analyse en cours, résultat.
+const ACTION_PILL_CLASS = `${BADGE_PILL_CLASS} cursor-pointer hover:border-border-strong aria-disabled:cursor-default aria-disabled:text-text-3 aria-disabled:hover:border-white/12`;
+
+// Action dans la pilule d'erreur : « Relancer » ou « Analyser », soulignée.
+const INLINE_ACTION_CLASS =
+	"shrink-0 cursor-pointer rounded-xs text-text-1 underline underline-offset-2 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
 
 /** Plus aucune analyse d'après l'accès lu (quota du plan ou plafond de l'essai). */
 const noScansLeft = (access: Access) =>
@@ -93,71 +106,18 @@ export function useLaunch(scan: AiScan, key: string, openPanel: () => void) {
 }
 
 /**
- * Contrôle de lancement : « Analyser », nommé « Analyser avec l'IA ». Un lien
- * vers les formules sans abonnement ; grisé sans analyse restante, mais
- * focusable, la raison lue avec lui.
- */
-function LaunchControl({
-	access,
-	locale,
-	pricingUrl,
-	onLaunch,
-}: {
-	access: Access;
-	locale: Locale;
-	pricingUrl: string;
-	onLaunch(): void;
-}) {
-	const reasonId = useId();
-	const label = contentText(locale, "ai.launch");
-	const text = contentText(locale, "ai.launchShort");
-	const known = access !== "loading" && !("error" in access);
-	if (known && access.status === "noSubscription") {
-		return (
-			<a
-				href={pricingUrl}
-				target="_blank"
-				rel="noopener"
-				aria-label={label}
-				className={LAUNCH_CLASS}
-			>
-				{text}
-			</a>
-		);
-	}
-	const empty = noScansLeft(access);
-	const reason = contentText(locale, "ai.noScansLeft");
-	return (
-		<>
-			<button
-				type="button"
-				aria-label={label}
-				aria-disabled={empty ? true : undefined}
-				aria-describedby={empty ? reasonId : undefined}
-				title={empty ? reason : undefined}
-				onClick={onLaunch}
-				className={LAUNCH_CLASS}
-			>
-				{text}
-			</button>
-			{empty && (
-				<span id={reasonId} className="sr-only">
-					{reason}
-				</span>
-			)}
-		</>
-	);
-}
-
-/**
  * La pilule de la fiche, seule à porter un résultat, et toujours celui de l'IA.
  * Selon l'état, dans cet ordre :
- * 1. résultat IA : niveau et score, le clic ouvre ou ferme le panneau ;
- * 2. analyse en cours : l'icône qui tourne et la ligne d'état, même clic ;
- * 3. erreur : son texte (sauf panneau ouvert, qui l'affiche déjà), puis
- *    « Relancer » (analyse coupée en route) ou le contrôle de lancement, ni l'un
+ * 1. résultat IA : point, niveau, score ; le clic ouvre ou ferme le panneau ;
+ * 2. analyse en cours : le logo animé et la ligne d'état, même clic ;
+ * 3. erreur : le logo atténué, son texte (sauf panneau ouvert, qui l'affiche
+ *    déjà), puis « Relancer » (analyse coupée en route) ou « Analyser », ni l'un
  *    ni l'autre si l'accès relu ne laisse plus d'analyse ;
- * 4. repos : le contrôle de lancement.
+ * 4. repos : le logo et « Analyser », nommé « Analyser avec l'IA » ; un lien vers
+ *    les formules sans abonnement ; grisé sans analyse restante, mais focusable,
+ *    la raison lue avec lui.
+ * Repos, analyse en cours et résultat sont un même `<button>` à la même place :
+ * lancée au clavier, l'analyse garde le focus sur la pilule.
  * Rien tant que le magasin des résultats IA n'est pas lu (`restoring`) : une
  * fiche déjà analysée affiche directement son résultat, sans « Analyser » avant.
  * L'analyse locale (règles) n'est jamais affichée : elle part seulement avec la
@@ -179,9 +139,10 @@ export function BadgePill({
 }) {
 	const levelId = useId();
 	const scoreId = useId();
+	const reasonId = useId();
 	const { ai, access } = scan;
 	const shown = shownResult(ai);
-	// Analyse en cours : l'icône qui tourne et la ligne d'état du dernier événement.
+	// Analyse en cours : le logo animé et la ligne d'état du dernier événement.
 	const progress = ai.status === "loading" ? ai.progress : null;
 	const line = progress ? statusLine(progress, locale) : "";
 	const waiting = useWaiting(progress?.lastAt ?? 0, progress !== null);
@@ -190,8 +151,30 @@ export function BadgePill({
 	const error = open ? null : badgeError(ai, locale);
 	const announced = useThrottled(line || error || "");
 	const ariaLabel = contentText(locale, "badge.aria");
+	const launchLabel = contentText(locale, "ai.launch");
+	const launchText = contentText(locale, "ai.launchShort");
+	const empty = noScansLeft(access);
+	const reason = contentText(locale, "ai.noScansLeft");
+	const noSubscription =
+		access !== "loading" &&
+		!("error" in access) &&
+		access.status === "noSubscription";
+	// Sans abonnement, « Analyser » est un lien vers les formules.
+	const pricingLink = (className: string, children: ReactNode) => (
+		<a
+			href={scan.pricingUrl}
+			target="_blank"
+			rel="noopener"
+			aria-label={launchLabel}
+			className={className}
+		>
+			{children}
+		</a>
+	);
 
 	let pill: ReactNode = null;
+	// Pilule de repos grisée : la raison, lue avec elle.
+	let disabledReason = false;
 	if (scan.restoring) {
 		// Lecture du magasin en cours : rien à cliquer.
 	} else if (shown) {
@@ -203,16 +186,15 @@ export function BadgePill({
 				aria-label={ariaLabel}
 				aria-describedby={`${levelId} ${scoreId}`}
 				onClick={onToggle}
-				className={TOGGLE_CLASS}
+				className={ACTION_PILL_CLASS}
 			>
 				<span
 					aria-hidden="true"
-					className={`inline-block size-2.5 rounded-full ${style.dot}`}
+					className={`size-2 shrink-0 rounded-full ${style.dot}`}
 				/>
-				<span id={levelId} className={style.text}>
-					{contentText(locale, LEVEL_KEY[shown.level])}
-				</span>
-				<span id={scoreId} className="text-slate-600">
+				<span id={levelId}>{contentText(locale, LEVEL_KEY[shown.level])}</span>
+				<span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-white/12" />
+				<span id={scoreId} className="text-text-3 tabular-nums">
 					{shown.score}/100
 				</span>
 			</button>
@@ -225,50 +207,93 @@ export function BadgePill({
 				aria-busy={true}
 				aria-label={ariaLabel}
 				onClick={onToggle}
-				className={TOGGLE_CLASS}
+				className={ACTION_PILL_CLASS}
 			>
-				<Spinner />
+				<Logo size={16} animated className="shrink-0" />
 				<LiveLine text={line} waiting={waiting} />
 			</button>
 		);
-	} else {
-		const launch = (
-			<LaunchControl
-				access={access}
-				locale={locale}
-				pricingUrl={scan.pricingUrl}
-				onLaunch={onLaunch}
-			/>
-		);
-		if (ai.status !== "error") pill = launch;
-		else {
-			// Après un échec, plus aucune analyse d'après l'accès relu : le message
-			// suffit, jamais un bouton qui ne ferait rien.
-			let action: ReactNode = null;
-			if (!noScansLeft(access))
-				action = RELAUNCH_CODES.has(ai.code) ? (
-					<button type="button" onClick={onLaunch} className={LAUNCH_CLASS}>
-						{contentText(locale, "ai.retry")}
-					</button>
-				) : (
-					launch
-				);
-			pill = (
-				<>
-					{error !== null && (
-						<span className="max-w-[260px] text-[12px] font-semibold text-red-800">
-							{error}
-						</span>
-					)}
-					{action}
-				</>
+	} else if (ai.status === "error") {
+		// Après un échec, plus aucune analyse d'après l'accès relu : le message
+		// suffit, jamais un bouton qui ne ferait rien. Panneau ouvert, sans message
+		// ni action, il reste le logo atténué : jamais une pilule vide.
+		let action: ReactNode = null;
+		if (RELAUNCH_CODES.has(ai.code) && !empty)
+			action = (
+				<button
+					type="button"
+					onClick={onLaunch}
+					className={INLINE_ACTION_CLASS}
+				>
+					{contentText(locale, "ai.retry")}
+				</button>
 			);
-		}
+		else if (noSubscription)
+			action = pricingLink(INLINE_ACTION_CLASS, launchText);
+		else if (!empty)
+			action = (
+				<button
+					type="button"
+					aria-label={launchLabel}
+					onClick={onLaunch}
+					className={INLINE_ACTION_CLASS}
+				>
+					{launchText}
+				</button>
+			);
+		pill = (
+			<span className={BADGE_PILL_CLASS}>
+				<Logo size={16} className="shrink-0 opacity-60" />
+				{error !== null && (
+					<span title={error} className="min-w-0 truncate text-text-2">
+						{error}
+					</span>
+				)}
+				{error !== null && action !== null && (
+					<span
+						aria-hidden="true"
+						className="h-3.5 w-px shrink-0 bg-white/12"
+					/>
+				)}
+				{action}
+			</span>
+		);
+	} else if (noSubscription) {
+		pill = pricingLink(
+			ACTION_PILL_CLASS,
+			<>
+				<Logo size={16} className="shrink-0" />
+				{launchText}
+			</>,
+		);
+	} else {
+		disabledReason = empty;
+		pill = (
+			<button
+				type="button"
+				aria-label={launchLabel}
+				aria-disabled={empty ? true : undefined}
+				aria-describedby={empty ? reasonId : undefined}
+				title={empty ? reason : undefined}
+				onClick={onLaunch}
+				className={ACTION_PILL_CLASS}
+			>
+				<Logo size={16} className="shrink-0" />
+				{launchText}
+			</button>
+		);
 	}
 
 	return (
 		<>
-			<span className="inline-flex flex-wrap items-center gap-1.5">{pill}</span>
+			<span className="inline-flex max-w-full items-center align-middle">
+				{pill}
+				{disabledReason && (
+					<span id={reasonId} className="sr-only">
+						{reason}
+					</span>
+				)}
+			</span>
 			{/* Annonces de la ligne d'état : au plus une toutes les 2 s. */}
 			<span role="status" aria-live="polite" className="sr-only">
 				{announced}
