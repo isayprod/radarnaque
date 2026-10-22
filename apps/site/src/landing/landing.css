@@ -1,7 +1,9 @@
 /*
- * Landing (spec landing §3, DESIGN.md §4.1) : hero sur le dégradé, sections sur
- * --bg-0, formules en panneaux opaques. Le dégradé qui suit le scroll et les
- * apparitions arrivent en tâche 6 ; sans JavaScript, la page reste celle-ci.
+ * Landing (spec landing §3 et §5, DESIGN.md §4.1) : formules en panneaux opaques.
+ * Sans JavaScript, le hero peint son dégradé et les sections sont sur --bg-0. Avec
+ * JavaScript (html.js, posée par main.ts), un calque fixe (.sky) porte le dégradé
+ * qui suit le scroll, la page devient transparente au-dessus, et les blocs
+ * data-reveal apparaissent en entrant dans la fenêtre.
  * Aucune valeur brute : couleurs, rayons et ombres viennent des tokens ; tailles
  * de police de DESIGN.md §2.3 en rem (display-xl 48-104 px, display-l 36-64,
  * text-l 16, text-m 14, text-s 13, text-xs 12, label 11).
@@ -20,6 +22,8 @@
 	/* Bas du hero : la maquette en recouvre tout sauf --mockup-gap. */
 	--hero-pad-bottom: clamp(200px, 24vw, 300px);
 	--mockup-gap: 56px;
+	/* Queue colorée du hero (bleu ciel → orange) : marge du bas + pilule et son écart. */
+	--hero-tail: calc(var(--hero-pad-bottom) + 84px);
 }
 
 /* --- Hero (spec landing §3.2) --- */
@@ -30,9 +34,10 @@
  * restent sur le cobalt plein (blanc à 7,9:1, au-delà de 3:1 et 4,5:1). Le bleu
  * ciel, le lilas, la pêche et l'orange occupent la queue du hero : la pilule et
  * la place de la maquette (--hero-tail = marge du bas + pilule et son écart).
+ * Avec JavaScript, le hero est transparent : le calque .sky peint ce même dégradé
+ * aux mêmes positions tant que la page est en haut.
  */
 .landing-hero {
-	--hero-tail: calc(var(--hero-pad-bottom) + 84px);
 	position: relative;
 	padding: 0 var(--gutter);
 	background-color: var(--grad-1);
@@ -47,6 +52,88 @@
 	);
 	color: var(--text-1);
 	text-align: center;
+}
+
+/* --- Calque du dégradé qui suit le scroll (spec landing §5.1) --- */
+
+/*
+ * Cinq arrêts --s1 à --s5 écrits par gradient.ts (startSky), au plus une fois par
+ * image ; par défaut, la palette 0 (le hero). --sky-mix glisse les positions des
+ * arrêts de celles du hero (0, en haut de page, --hero-h relu par le script) à un
+ * espacement régulier sur la fenêtre (1, dès la fin du hero).
+ */
+.sky {
+	--s1: var(--grad-1);
+	--s2: var(--grad-2);
+	--s3: var(--grad-3);
+	--s4: var(--grad-4);
+	--s5: var(--grad-5);
+	--hero-h: 100%;
+	--sky-mix: 0;
+	position: fixed;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+	background-color: var(--s1);
+	background-image: linear-gradient(
+		180deg,
+		var(--s1) 0%,
+		var(--s1) calc((var(--hero-h) - var(--hero-tail)) * (1 - var(--sky-mix))),
+		var(--s2)
+			calc(
+				(var(--hero-h) - var(--hero-tail) * 0.62) *
+				(1 - var(--sky-mix)) +
+				25% *
+				var(--sky-mix)
+			),
+		var(--s3)
+			calc(
+				(var(--hero-h) - var(--hero-tail) * 0.36) *
+				(1 - var(--sky-mix)) +
+				50% *
+				var(--sky-mix)
+			),
+		var(--s4)
+			calc(
+				(var(--hero-h) - var(--hero-tail) * 0.16) *
+				(1 - var(--sky-mix)) +
+				75% *
+				var(--sky-mix)
+			),
+		var(--s5) calc(var(--hero-h) * (1 - var(--sky-mix)) + 100% * var(--sky-mix))
+	);
+}
+
+/* --- Apparitions (spec landing §5.2) --- */
+
+/*
+ * Fondu et montée de 8 px, 320 ms, courbe d'entrée, 60 ms d'écart entre voisins
+ * (--i). Caché seulement sous html.js : sans JavaScript, tout est visible. La
+ * montée passe par `translate`, pour ne pas toucher au `transform` du survol de
+ * la pilule (dont la transition rapide est gardée).
+ */
+html.js [data-reveal] {
+	opacity: 0;
+	translate: 0 8px;
+}
+
+html.js [data-reveal].is-visible {
+	opacity: 1;
+	translate: none;
+	transition:
+		opacity var(--dur-slow) var(--ease-enter),
+		translate var(--dur-slow) var(--ease-enter),
+		transform var(--dur-fast) var(--ease-enter);
+	transition-delay: calc(var(--i, 0) * 60ms), calc(var(--i, 0) * 60ms), 0s;
+}
+
+/* Mouvement réduit : apparition instantanée, sans montée. */
+@media (prefers-reduced-motion: reduce) {
+	html.js [data-reveal],
+	html.js [data-reveal].is-visible {
+		translate: none;
+		transition: none;
+	}
 }
 
 /* La navigation flotte sur le dégradé (spec landing §3.1). */
@@ -439,6 +526,28 @@ a.landing-pill:hover {
 
 .landing .site-footer {
 	background-color: var(--bg-0);
+}
+
+/* --- Avec JavaScript : la page transparente au-dessus du calque --- */
+
+/*
+ * Avec JavaScript seulement : la page laisse voir le calque. Sans JavaScript, le
+ * hero garde son dégradé et les sections leur fond --bg-0 (le calque, derrière le
+ * fond du corps, n'est pas peint).
+ */
+html.js body.landing {
+	background-color: transparent;
+}
+
+html.js .landing-hero {
+	background-color: transparent;
+	background-image: none;
+}
+
+html.js .landing-main,
+html.js .landing-install,
+html.js .landing .site-footer {
+	background-color: transparent;
 }
 
 /* --- Tablette --- */

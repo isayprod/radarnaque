@@ -1,0 +1,243 @@
+// @vitest-environment happy-dom
+import { describe, expect, it, vi } from "vitest";
+import {
+	contrastRatio,
+	HERO_END,
+	PALETTE_KEYS,
+	paletteAt,
+	scrollProgress,
+	startSky,
+} from "../src/landing/gradient";
+
+/** `--text-2` des tokens (packages/design/src/tokens.css). */
+const TEXT_2 = "rgba(226, 232, 255, 0.74)";
+
+/** Dégradé du hero (`--grad-1` à `--grad-5`). */
+const HERO = ["#0649b8", "#4e8fe8", "#c7b9ec", "#ffd4ad", "#e16c3f"];
+
+/** Canaux 0-255 d'une couleur `#rrggbb`. */
+function canaux(couleur: string): number[] {
+	const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(couleur);
+	if (!m) throw new Error(`couleur inattendue : ${couleur}`);
+	return [m[1], m[2], m[3]].map((c) => Number.parseInt(c ?? "", 16));
+}
+
+describe("palettes clés", () => {
+	it("commencent au hero (p = 0) et finissent au pied de page (p = 1), dans l'ordre", () => {
+		expect(PALETTE_KEYS[0]?.p).toBe(0);
+		expect(PALETTE_KEYS[0]?.colors).toEqual(HERO);
+		expect(PALETTE_KEYS.at(-1)?.p).toBe(1);
+		const ps = PALETTE_KEYS.map((k) => k.p);
+		expect([...ps].sort((a, b) => a - b)).toEqual(ps);
+		expect(new Set(ps).size).toBe(ps.length);
+		// La fin du hero (spec §5.1) est une clé.
+		expect(ps).toContain(HERO_END);
+	});
+});
+
+describe("paletteAt", () => {
+	it("p = 0 : le dégradé du hero ; p = 1 : la dernière palette ; p hors de [0, 1] borné", () => {
+		expect(paletteAt(0)).toEqual(HERO);
+		expect(paletteAt(1)).toEqual(PALETTE_KEYS.at(-1)?.colors);
+		expect(paletteAt(-1)).toEqual(paletteAt(0));
+		expect(paletteAt(2)).toEqual(paletteAt(1));
+		expect(paletteAt(Number.NaN)).toEqual(paletteAt(0));
+	});
+
+	it("rend chaque palette clé à sa valeur de p", () => {
+		for (const key of PALETTE_KEYS)
+			expect(paletteAt(key.p), String(key.p)).toEqual(key.colors);
+	});
+
+	it("est continue : d'un pas de 0,001 au suivant, aucun canal ne bouge de 3 ou plus (sur 255)", () => {
+		let avant = paletteAt(0).map(canaux);
+		for (let i = 1; i <= 1000; i++) {
+			const p = i / 1000;
+			const apres = paletteAt(p).map(canaux);
+			apres.forEach((couleur, arret) => {
+				couleur.forEach((canal, c) => {
+					const ecart = Math.abs(canal - (avant[arret]?.[c] ?? 0));
+					expect(ecart, `p = ${p}, arrêt ${arret + 1}`).toBeLessThan(3);
+				});
+			});
+			avant = apres;
+		}
+	});
+
+	it("change visiblement entre la fin du hero et le pied de page (pas un aplat de navy)", () => {
+		// Écart simple : somme des écarts de canaux de l'arrêt du bas.
+		const bas = (p: number) => canaux(paletteAt(p)[4]);
+		const ecart = (a: number[], b: number[]) =>
+			a.reduce((s, v, i) => s + Math.abs(v - (b[i] ?? 0)), 0);
+		expect(ecart(bas(HERO_END), bas(0.6))).toBeGreaterThan(40);
+		expect(ecart(bas(0.6), bas(1))).toBeGreaterThan(40);
+	});
+
+	it("contraste : pour p de 0,15 à 1 (pas de 0,01), --text-2 garde 4,5:1 sur chaque arrêt", () => {
+		let minimum = Number.POSITIVE_INFINITY;
+		for (let i = 15; i <= 100; i++) {
+			const p = i / 100;
+			paletteAt(p).forEach((arret, n) => {
+				const ratio = contrastRatio(TEXT_2, arret);
+				minimum = Math.min(minimum, ratio);
+				expect(
+					ratio,
+					`p = ${p}, arrêt ${n + 1} (${arret})`,
+				).toBeGreaterThanOrEqual(4.5);
+			});
+		}
+		expect(minimum).toBeGreaterThanOrEqual(4.5);
+	});
+});
+
+describe("contrastRatio", () => {
+	it("blanc sur noir : 21:1 ; même couleur : 1:1 ; symétrique sans alpha", () => {
+		expect(contrastRatio("#ffffff", "#000000")).toBeCloseTo(21, 5);
+		expect(contrastRatio("#0649b8", "#0649b8")).toBeCloseTo(1, 5);
+		expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 5);
+	});
+
+	it("compose l'alpha du premier plan sur le fond", () => {
+		// Un premier plan transparent n'est que le fond : 1:1.
+		expect(contrastRatio("rgba(255, 255, 255, 0)", "#020b2d")).toBeCloseTo(
+			1,
+			5,
+		);
+		// 74 % de blanc sur navy : moins que le blanc plein.
+		const plein = contrastRatio("#ffffff", "#020b2d");
+		const voile = contrastRatio("rgba(255, 255, 255, 0.74)", "#020b2d");
+		expect(voile).toBeLessThan(plein);
+		expect(voile).toBeGreaterThan(4.5);
+		// Valeur de référence : --text-2 sur --bg-0, environ 8,8:1.
+		expect(contrastRatio(TEXT_2, "#020b2d")).toBeCloseTo(8.81, 2);
+	});
+
+	it("refuse une couleur illisible", () => {
+		expect(() => contrastRatio("bleu", "#000000")).toThrow();
+	});
+});
+
+describe("scrollProgress", () => {
+	it("0 en haut, HERO_END au repère de fin du hero, 1 en bas, borné", () => {
+		expect(scrollProgress(0, 3000, 600)).toBe(0);
+		expect(scrollProgress(600, 3000, 600)).toBeCloseTo(HERO_END, 10);
+		expect(scrollProgress(3000, 3000, 600)).toBe(1);
+		expect(scrollProgress(-50, 3000, 600)).toBe(0);
+		expect(scrollProgress(5000, 3000, 600)).toBe(1);
+	});
+
+	it("croît avec le scroll", () => {
+		let avant = -1;
+		for (let y = 0; y <= 3000; y += 10) {
+			const p = scrollProgress(y, 3000, 600);
+			expect(p).toBeGreaterThanOrEqual(avant);
+			avant = p;
+		}
+	});
+
+	it("page sans scroll : 0", () => {
+		expect(scrollProgress(0, 0, 0)).toBe(0);
+	});
+});
+
+/** Fenêtre factice : écouteurs, images (`requestAnimationFrame`) et hauteurs contrôlés. */
+function fenetre() {
+	const ecouteurs = new Map<string, EventListener>();
+	const images: FrameRequestCallback[] = [];
+	const win = {
+		scrollY: 0,
+		innerHeight: 900,
+		document: {
+			documentElement: { scrollHeight: 4900 },
+			querySelector: () => null,
+		},
+		addEventListener: vi.fn((type: string, fn: EventListener) => {
+			ecouteurs.set(type, fn);
+		}),
+		removeEventListener: vi.fn((type: string, fn: EventListener) => {
+			if (ecouteurs.get(type) === fn) ecouteurs.delete(type);
+		}),
+		requestAnimationFrame: vi.fn((fn: FrameRequestCallback) => {
+			images.push(fn);
+			return images.length;
+		}),
+		cancelAnimationFrame: vi.fn(),
+	};
+	const image = () => {
+		const enAttente = images.splice(0);
+		for (const fn of enAttente) fn(0);
+	};
+	const emettre = (type: string) => ecouteurs.get(type)?.(new Event(type));
+	return { win, ecouteurs, image, emettre };
+}
+
+describe("startSky", () => {
+	it("écrit les cinq couleurs de la position de départ à la première image", () => {
+		const { win, image } = fenetre();
+		const calque = document.createElement("div");
+		startSky(win as unknown as Window, calque);
+		image();
+		const attendu = paletteAt(0);
+		for (let i = 0; i < 5; i++)
+			expect(calque.style.getPropertyValue(`--s${i + 1}`)).toBe(attendu[i]);
+	});
+
+	it("écouteur scroll passif ; une seule écriture des cinq variables par image, même après dix événements", () => {
+		const { win, image, emettre } = fenetre();
+		const calque = document.createElement("div");
+		startSky(win as unknown as Window, calque);
+		expect(win.addEventListener).toHaveBeenCalledWith(
+			"scroll",
+			expect.any(Function),
+			expect.objectContaining({ passive: true }),
+		);
+		image();
+		const ecriture = vi.spyOn(calque.style, "setProperty");
+		win.requestAnimationFrame.mockClear();
+		for (let i = 1; i <= 10; i++) {
+			win.scrollY = i * 100;
+			emettre("scroll");
+		}
+		expect(win.requestAnimationFrame).toHaveBeenCalledTimes(1);
+		expect(ecriture).not.toHaveBeenCalled();
+		image();
+		for (let i = 1; i <= 5; i++) {
+			expect(
+				ecriture.mock.calls.filter(([nom]) => nom === `--s${i}`),
+			).toHaveLength(1);
+		}
+		// Écrit la palette de la dernière position (1000 px sur 4000 sans repère : p = 0,25).
+		expect(calque.style.getPropertyValue("--s5")).toBe(
+			paletteAt(scrollProgress(1000, 4000, HERO_END * 4000))[4],
+		);
+	});
+
+	it("relit la hauteur de la page au redimensionnement, pas à chaque image", () => {
+		const { win, image, emettre } = fenetre();
+		const calque = document.createElement("div");
+		startSky(win as unknown as Window, calque);
+		image();
+		win.document.documentElement.scrollHeight = 1900; // max = 1000
+		win.scrollY = 1000;
+		emettre("scroll");
+		image();
+		// Hauteur pas encore relue : 1000 sur 4000.
+		expect(calque.style.getPropertyValue("--s5")).not.toBe(paletteAt(1)[4]);
+		emettre("resize");
+		image();
+		expect(calque.style.getPropertyValue("--s5")).toBe(paletteAt(1)[4]);
+	});
+
+	it("s'arrête proprement : écouteurs retirés, image en attente annulée", () => {
+		const { win, ecouteurs, emettre } = fenetre();
+		const calque = document.createElement("div");
+		const arreter = startSky(win as unknown as Window, calque);
+		emettre("scroll");
+		arreter();
+		expect(ecouteurs.size).toBe(0);
+		expect(win.cancelAnimationFrame).toHaveBeenCalled();
+		win.requestAnimationFrame.mockClear();
+		emettre("scroll");
+		expect(win.requestAnimationFrame).not.toHaveBeenCalled();
+	});
+});

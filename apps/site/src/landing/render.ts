@@ -4,7 +4,9 @@
  * JavaScript). Construit avec `h`, rendu par `toHtml` (texte et attributs échappés).
  *
  * Les blocs qui apparaissent au scroll portent `data-reveal` et leur rang
- * `style="--i:n"` (écart de 60 ms, tâche 6) ; le hero n'en porte jamais.
+ * `style="--i:n"` (écart de 60 ms) ; le hero n'en porte jamais. Le calque `.sky`
+ * et le script de la page (`main.ts`, chargé par les gabarits `index.html`) les
+ * animent ; sans JavaScript, tout reste visible.
  */
 import type { Locale } from "@radarnaque/shared";
 import { type AttrValue, type Child, h, toHtml, type VNode } from "../h.ts";
@@ -155,7 +157,7 @@ function howItWorks(locale: Locale): VNode {
 /** Champs des lignes d'une formule, dans l'ordre de `featureLines`. */
 const LINE_FIELDS = ["scans", "photos", "button", "icons"] as const;
 
-/** Panneau d'une formule ; chaque valeur porte `data-field` (remplie par l'offre en cours, tâche 6). */
+/** Panneau d'une formule ; chaque valeur porte `data-field` (remplie par l'offre en cours, `main.ts`). */
 export function planPanelNode(
 	locale: Locale,
 	key: keyof Offer,
@@ -266,6 +268,8 @@ function install(locale: Locale, storeUrl: string | null): VNode {
 export function landingNodes(locale: Locale, options: LandingOptions): VNode[] {
 	const { offer, storeUrl } = options;
 	return [
+		// Calque fixe du dégradé qui suit le scroll (spec landing §5.1), derrière la page.
+		h("div", { class: "sky", "aria-hidden": "true" }),
 		hero(locale, storeUrl),
 		// Maquette du produit (spec landing §4), à cheval sur le bas du hero.
 		h(
