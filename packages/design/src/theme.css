@@ -38,6 +38,11 @@
 	--radius-lg: var(--r-l);
 	--radius-pill: var(--r-pill);
 
+	/* Même nom des deux côtés : Tailwind émet `--font-sans: var(--font-sans)` dans
+	   `@layer theme`. Ce n'est pas un cycle seulement parce que tokens.css est hors
+	   de toute couche : sa déclaration l'emporte sur celle, en couche, du thème.
+	   Placer un jour les tokens dans un `@layer` ferait gagner celle du thème, qui
+	   se référence elle-même : variable invalide, police par défaut du navigateur. */
 	--font-sans: var(--font-sans);
 	--font-serif: var(--font-serif);
 }
