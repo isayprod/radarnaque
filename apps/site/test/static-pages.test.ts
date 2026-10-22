@@ -115,3 +115,17 @@ describe("/auth/callback", () => {
 		});
 	});
 });
+
+describe("/privacy : largeur de lecture", () => {
+	it("colonne en rem, 32rem au plus (45 à 70 caractères d'Inter par ligne, mesuré au navigateur), plus en ch", () => {
+		const css = lire("src/pages.css");
+		const regle = /\.page-main--prose\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+		const largeur = /max-width:\s*calc\((\d+(?:\.\d+)?)rem \+ 48px\)/.exec(
+			regle,
+		);
+		expect(largeur, regle).not.toBeNull();
+		expect(Number(largeur?.[1])).toBeLessThanOrEqual(32);
+		expect(Number(largeur?.[1])).toBeGreaterThanOrEqual(24);
+		expect(regle).not.toContain("ch");
+	});
+});

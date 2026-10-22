@@ -56,9 +56,11 @@ h1 {
 	margin: 0;
 }
 
-/* /privacy : colonne de lecture d'environ 65 caractères. */
+/* /privacy : colonne de lecture de 45 à 70 caractères (spec landing §6). `65ch` (la
+   largeur de 65 « 0 ») laissait passer jusqu'à 90 caractères d'Inter par ligne à
+   1440 px ; 31rem en donne 68 au plus (mesuré en FR et en NL). */
 .page-main--prose {
-	max-width: calc(65ch + 48px);
+	max-width: calc(31rem + 48px);
 }
 
 .page-main--prose h2 {

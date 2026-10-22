@@ -204,6 +204,20 @@ describe("mockup.css", () => {
 		// Hors du bloc : aucune couleur brute.
 		const dehors = [...lignes.slice(0, debut), ...lignes.slice(fin + 1)];
 		expect(dehors.filter((l) => COULEUR.test(l))).toEqual([]);
+		// Rayons et police de la fiche imitée : dans le bloc aussi (--mk-r-*, --mk-font).
+		for (const nom of ["--mk-r-s", "--mk-r-m", "--mk-r-l", "--mk-font"])
+			expect(
+				variables.some((l) => l.includes(`${nom}:`)),
+				nom,
+			).toBe(true);
+		const rayonsBruts = dehors.filter((l) =>
+			/border-radius:[^;]*\b[1-9]\d*px/.test(l),
+		);
+		expect(rayonsBruts).toEqual([]);
+		const polices = dehors.filter((l) => /font-family:/.test(l));
+		expect(polices.length).toBeGreaterThan(0);
+		for (const ligne of polices)
+			expect(ligne, ligne).toMatch(/font-family:\s*var\(--[\w-]+\);/);
 	});
 
 	it("flottement de 6 s et 4 px coupé sous mouvement réduit ; sous 768 px, plus de fenêtre", () => {
@@ -214,6 +228,24 @@ describe("mockup.css", () => {
 		);
 		expect(CSS).toMatch(/@media \(max-width: 767px\)/);
 		const mobile = CSS.slice(CSS.indexOf("@media (max-width: 767px)"));
-		expect(mobile).toMatch(/\.mk-chrome[^{]*\{[^}]*display:\s*none/);
+		// Titre, pastille et panneau seuls : la fenêtre, la galerie, le prix et le
+		// vendeur disparaissent.
+		const cache = /^([^{]*)\{\s*display:\s*none;\s*\}/m.exec(
+			mobile.slice(mobile.indexOf(".mk-chrome")),
+		)?.[1];
+		for (const sel of [".mk-chrome", ".mk-main", ".mk-price", ".mk-seller"])
+			expect(cache?.split(",").map((s) => s.trim())).toContain(sel);
+		// Panneau à plat, dans le flux.
+		expect(mobile).toMatch(/\.mk-panel\s*\{[^}]*position:\s*static/);
+		expect(mobile).toMatch(/\.mk\s*\{[^}]*animation:\s*none/);
+	});
+
+	it("entre 768 et 1023 px, le panneau ne couvre que la colonne de droite (la description reste lisible)", () => {
+		const debut = CSS.indexOf("@media (max-width: 1023px)");
+		expect(debut).toBeGreaterThan(-1);
+		const bloc = CSS.slice(debut, CSS.indexOf("@media (max-width: 767px)"));
+		expect(bloc).toMatch(
+			/\.mk-panel\s*\{[^}]*width:\s*calc\(100% \+ var\(--mk-pad\) \+ var\(--mk-out\)\)/,
+		);
 	});
 });
