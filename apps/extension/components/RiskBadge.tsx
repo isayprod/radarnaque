@@ -3,7 +3,6 @@ import {
 	type RefObject,
 	useCallback,
 	useEffect,
-	useId,
 	useRef,
 	useState,
 } from "react";
@@ -11,29 +10,16 @@ import { isDebug } from "../lib/access";
 import type { AccessCache } from "../lib/content/access-policy";
 import type { AiClient } from "../lib/content/ai-client";
 import type { AiResultStore } from "../lib/content/ai-results";
-import { statusLine } from "../lib/content/scan-progress";
 import { shownResult } from "../lib/content/shown-result";
 import { useAiScan } from "../lib/content/use-ai-scan";
-import { contentText, signalText } from "../lib/content-i18n";
+import { contentText } from "../lib/content-i18n";
 import type { DebugLog } from "../lib/debug-log";
 import type { Listing } from "../lib/listing/types";
-import type { Severity, Signal } from "../lib/rules/rules";
 import type { RiskReport } from "../lib/rules/score";
 import { AiErrorBoundary } from "./AiErrorBoundary";
 import { AiSection } from "./AiSection";
-import { BadgeActions, badgeError, useLaunch } from "./BadgeActions";
+import { BadgePill, useLaunch } from "./BadgePill";
 import { DebugBoundary, DebugSection } from "./DebugSection";
-import { LiveLine, Spinner, useThrottled, useWaiting } from "./LiveStatus";
-import { LEVEL_KEY, LEVEL_STYLE, SEVERITY_STYLE } from "./risk-styles";
-
-const SEVERITY_ORDER: Record<Severity, number> = {
-	danger: 0,
-	warning: 1,
-	info: 2,
-};
-
-const byGravity = (a: Signal, b: Signal) =>
-	SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
 
 /** Ferme le panneau sur Escape et sur tout clic hors de `ref`, tant qu'il est ouvert. */
 function useDismiss(
@@ -72,35 +58,9 @@ function useDismiss(
 	}, [open, ref, close]);
 }
 
-/** Signaux de l'analyse locale, par gravité ; `panel.none` s'il n'y en a aucun. */
-function LocalSignals({
-	locale,
-	signals,
-}: {
-	locale: Locale;
-	signals: Signal[];
-}) {
-	if (signals.length === 0)
-		return <p className="m-0">{contentText(locale, "panel.none")}</p>;
-	return (
-		<ul className="m-0 flex list-none flex-col gap-1.5 p-0">
-			{[...signals].sort(byGravity).map((signal) => (
-				<li key={signal.id} className="flex items-start gap-2">
-					<span
-						className={`shrink-0 rounded-[4px] px-1.5 py-0.5 text-[11px] font-semibold ${SEVERITY_STYLE[signal.severity]}`}
-					>
-						{contentText(locale, `severity.${signal.severity}`)}
-					</span>
-					<span>{signalText(locale, signal)}</span>
-				</li>
-			))}
-		</ul>
-	);
-}
-
 /**
  * Bandeau des annonces professionnelles : une information neutre (ardoise),
- * jamais une alerte. Il s'ajoute au score, il ne le remplace pas.
+ * jamais une alerte. Il s'ajoute au résultat IA, il ne le remplace pas.
  */
 function ProNotice({ locale }: { locale: Locale }) {
 	return (
@@ -122,6 +82,7 @@ export function RiskBadge({
 	aiResults,
 	debugLog,
 }: {
+	/** Analyse locale (règles) : jamais affichée, envoyée avec la demande comme contexte pour l'IA. */
 	report: RiskReport;
 	listing: Listing;
 	locale: Locale;
@@ -136,8 +97,6 @@ export function RiskBadge({
 }) {
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
-	const levelId = useId();
-	const scoreId = useId();
 	const close = useCallback(() => setOpen(false), []);
 	const openPanel = useCallback(() => setOpen(true), []);
 	useDismiss(open, rootRef, close);
@@ -151,7 +110,8 @@ export function RiskBadge({
 		debugLog,
 	);
 	const { loadAccess } = scan;
-	// Accès lu à l'ouverture du panneau, jamais avant. Panneau ouvert, il est relu
+	// Accès lu au clic sur « Analyser » (`useLaunch`) ou à l'ouverture du panneau,
+	// jamais avant. Panneau ouvert, il est relu
 	// au retour sur l'onglet (connexion faite dans la popup) ; `loadAccess` ne fait
 	// rien s'il est déjà actif.
 	useEffect(() => {
@@ -169,14 +129,9 @@ export function RiskBadge({
 		};
 	}, [open, loadAccess]);
 
-	// Dès qu'un résultat IA existe, il remplace l'analyse locale dans la pastille
-	// et dans le panneau.
+	// Seul le résultat IA est affiché ; le rapport local ne sert qu'à la demande.
 	const shown = shownResult(scan.ai);
-	const level = shown ? shown.level : report.level;
-	const score = shown ? shown.score : report.score;
-	const style = LEVEL_STYLE[level];
-	const title = contentText(locale, shown ? "panel.titleAi" : "panel.title");
-	// Vendeur déclaré professionnel par le site, ou détecté par l'IA.
+	const title = contentText(locale, "panel.title");
 	// Section Debug : le serveur a renvoyé `debug` ET l'accès lu est celui du
 	// superuser. Un résultat repris du magasin n'a jamais de `debug`.
 	const debug =
@@ -186,6 +141,7 @@ export function RiskBadge({
 		isDebug(scan.access)
 			? shown.debug
 			: null;
+	// Vendeur déclaré professionnel par le site, ou détecté par l'IA.
 	const professional =
 		listing.seller.sellerKind === "professional" ||
 		shown?.professional === true;
@@ -195,15 +151,7 @@ export function RiskBadge({
 		`${listing.site}|${listing.externalId}`,
 		openPanel,
 	);
-	// Analyse en cours : l'icône qui tourne et la ligne d'état du dernier événement.
-	const progress = scan.ai.status === "loading" ? scan.ai.progress : null;
-	const line = progress ? statusLine(progress, locale) : "";
-	const waiting = useWaiting(progress?.lastAt ?? 0, progress !== null);
-	// Analyse en échec : son texte dans la pastille et dans la région annoncée,
-	// sauf panneau ouvert, qui l'affiche et l'annonce déjà (`role="alert"`).
-	const announced = useThrottled(
-		line || (open ? null : badgeError(scan.ai, locale)) || "",
-	);
+	const toggle = useCallback(() => setOpen((value) => !value), []);
 
 	// Police en px et reset explicite : le site hôte ne doit ni agrandir ni styler la pastille.
 	return (
@@ -211,52 +159,13 @@ export function RiskBadge({
 			ref={rootRef}
 			className="radarnaque-root relative ml-2 inline-block align-middle text-[13px] leading-[1.4] font-normal"
 		>
-			<span className="inline-flex flex-wrap items-center gap-1.5">
-				<button
-					type="button"
-					aria-expanded={open}
-					aria-label={contentText(
-						locale,
-						shown ? "badge.ariaAi" : "badge.aria",
-					)}
-					aria-describedby={`${levelId} ${scoreId}`}
-					onClick={() => setOpen((value) => !value)}
-					className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[13px] leading-[1.4] font-semibold shadow-sm hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700"
-				>
-					<span
-						aria-hidden="true"
-						className={`inline-block size-2.5 rounded-full ${style.dot}`}
-					/>
-					<span id={levelId} className={style.text}>
-						{contentText(locale, LEVEL_KEY[level])}
-					</span>
-					<span id={scoreId} className="text-slate-600">
-						{score}/100
-					</span>
-					{shown && (
-						<span className="rounded-[4px] bg-slate-100 px-1 py-px text-[11px] font-bold text-slate-700">
-							{contentText(locale, "ai.badgeTag")}
-						</span>
-					)}
-					{progress && (
-						<>
-							<Spinner />
-							<LiveLine text={line} waiting={waiting} />
-						</>
-					)}
-				</button>
-				<BadgeActions
-					scan={scan}
-					locale={locale}
-					busy={shown !== null || progress !== null}
-					panelOpen={open}
-					onLaunch={launch}
-				/>
-			</span>
-			{/* Annonces de la ligne d'état : au plus une toutes les 2 s. */}
-			<span role="status" aria-live="polite" className="sr-only">
-				{announced}
-			</span>
+			<BadgePill
+				scan={scan}
+				locale={locale}
+				open={open}
+				onToggle={toggle}
+				onLaunch={launch}
+			/>
 			{open && (
 				<div
 					role="dialog"
@@ -265,8 +174,6 @@ export function RiskBadge({
 				>
 					{professional && <ProNotice locale={locale} />}
 					<h2 className="m-0 mb-2 text-[14px] font-bold">{title}</h2>
-					{/* Résultat IA présent : la liste des signaux locaux disparaît. */}
-					{!shown && <LocalSignals locale={locale} signals={report.signals} />}
 					<AiErrorBoundary
 						key={`${listing.site}|${listing.externalId}`}
 						locale={locale}
@@ -297,11 +204,6 @@ export function RiskBadge({
 							</DebugBoundary>
 						)}
 					</AiErrorBoundary>
-					{!shown && (
-						<p className="m-0 mt-3 border-t border-slate-200 pt-2 text-[12px] text-slate-600">
-							{contentText(locale, "panel.footer")}
-						</p>
-					)}
 				</div>
 			)}
 		</div>

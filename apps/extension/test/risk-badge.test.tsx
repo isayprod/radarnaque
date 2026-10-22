@@ -87,74 +87,179 @@ const low: RiskReport = {
 	rulesVersion: 1,
 };
 const high: RiskReport = {
-	score: 80,
+	score: 90,
 	level: "high",
 	rulesVersion: 1,
-	// Volontairement dans le désordre : le composant doit trier par gravité.
 	signals: [
 		{ id: "short_description", weight: 10, severity: "info" },
 		{ id: "no_reviews", weight: 10, severity: "warning" },
 		{ id: "new_account", weight: 25, severity: "danger" },
 	],
 };
+const medium: RiskReport = {
+	score: 40,
+	level: "medium",
+	rulesVersion: 1,
+	signals: [
+		{ id: "new_account", weight: 25, severity: "danger" },
+		{ id: "no_reviews", weight: 15, severity: "warning" },
+	],
+};
+/** Textes de l'ancienne analyse locale : plus jamais affichés. */
+const LOCAL_TEXTS = [
+	"Compte vendeur très récent",
+	"Aucun avis sur le vendeur",
+	"Description très courte",
+	"Analyse locale, sans IA",
+	"Aucun signal d'alerte détecté.",
+];
+const aiHigh: AnalysisResult = {
+	...sampleAnalysis,
+	level: "high",
+	score: 82,
+	summary: { fr: "Arnaque probable.", nl: "Waarschijnlijk oplichting." },
+};
 
+const LAUNCH = contentText("fr", "ai.launch");
+/** Pilule au repos : « Analyser », nommée « Analyser avec l'IA ». */
+const launch = () => screen.getByRole("button", { name: LAUNCH });
+const queryLaunch = () => screen.queryByRole("button", { name: LAUNCH });
+/** Tous les contrôles de lancement de la pastille (bouton ou lien). */
+const launchControls = (locale: "fr" | "nl" = "fr") => [
+	...screen.queryAllByRole("button", {
+		name: contentText(locale, "ai.launch"),
+	}),
+	...screen.queryAllByRole("link", { name: contentText(locale, "ai.launch") }),
+];
+/** Pilule d'une analyse en cours ou de son résultat : elle ouvre le panneau. */
 const toggle = () => screen.getByRole("button", { name: /Radarnaque/ });
+const findToggle = () => screen.findByRole("button", { name: /Radarnaque/ });
+const described = () =>
+	(toggle().getAttribute("aria-describedby") ?? "")
+		.split(" ")
+		.map((id) => document.getElementById(id)?.textContent);
+
+/** Accès déjà en cache (lu par une icône de carte, ou plus tôt). */
+const cached = (access: ContentAccess) => {
+	const cache = createAccessCache();
+	cache.settle(cache.begin(), access);
+	return cache;
+};
+
+/** Magasin simulé : une entrée par `site|externalId`. */
+const storeWith = (entries: Record<string, StoredAiResult>): AiResultStore => ({
+	get: async (site, id) => entries[`${site}|${id}`] ?? null,
+	put: async () => {},
+	prune: async () => {},
+});
+
+/** Lance l'analyse depuis la pilule et attend son résultat (`score`/100). */
+async function launchToResult(
+	user: ReturnType<typeof userEvent.setup>,
+	score = sampleAnalysis.score,
+) {
+	await user.click(launch());
+	await vi.waitFor(() =>
+		expect(toggle().textContent).toContain(`${score}/100`),
+	);
+}
 
 describe("RiskBadge", () => {
-	test("niveau faible : texte, score, panneau fermé", () => {
-		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
-		expect(toggle().textContent).toContain("Risque faible");
-		expect(toggle().textContent).toContain("0/100");
+	test("au repos : une seule pilule « Analyser », aucun niveau ni score local", () => {
+		const { container } = render(
+			<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />,
+		);
+		expect(container.textContent).not.toContain("Risque");
+		expect(container.textContent).not.toContain("90/100");
+		// Ni couleur de niveau, ni nom accessible qui l'évoquerait.
+		expect(container.querySelector("[class*='bg-red-']")).toBeNull();
+		expect(screen.queryByRole("button", { name: /Radarnaque/ })).toBeNull();
+		expect(launchControls()).toHaveLength(1);
+		expect(launch().textContent).toBe(contentText("fr", "ai.launchShort"));
+		expect(launch().getAttribute("type")).toBe("button");
+		expect(launch().hasAttribute("aria-expanded")).toBe(false);
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
+	test("au repos, le clic lance l'analyse (accès actif en cache) sans ouvrir de panneau", () => {
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		fireEvent.click(launch());
+		expect(ai.scan).toHaveBeenCalledTimes(1);
+		expect(ai.access).not.toHaveBeenCalled();
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
+	test("résultat IA : pilule niveau et score de l'IA, décrite par eux ; un clic ouvre le panneau, un second le ferme", async () => {
+		const user = userEvent.setup();
+		scanReply.mockResolvedValue({ ok: true, data: aiHigh });
+		render(
+			<RiskBadge
+				report={medium}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		await launchToResult(user, 82);
+		expect(toggle().textContent).toContain("Risque élevé");
+		expect(toggle().textContent).not.toContain("40/100");
 		expect(toggle().getAttribute("type")).toBe("button");
 		expect(toggle().getAttribute("aria-label")).toBe(
 			contentText("fr", "badge.aria"),
 		);
+		expect(described()).toEqual(["Risque élevé", "82/100"]);
 		expect(toggle().getAttribute("aria-expanded")).toBe("false");
+		expect(queryLaunch()).toBeNull();
+
+		await user.click(toggle());
+		expect(
+			screen.getByRole("dialog", { name: contentText("fr", "panel.title") }),
+		).toBeTruthy();
+		expect(toggle().getAttribute("aria-expanded")).toBe("true");
+		await user.click(toggle());
 		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(toggle().getAttribute("aria-expanded")).toBe("false");
 	});
 
-	test("un clic ouvre le panneau avec panel.none, un second le ferme", async () => {
+	test("panneau : titre « Analyse Radarnaque », ni signaux locaux ni pied de page local", async () => {
 		const user = userEvent.setup();
-		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
+		scanReply.mockResolvedValue({ ok: true, data: aiHigh });
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		await launchToResult(user, 82);
 		await user.click(toggle());
 		const dialog = screen.getByRole("dialog", {
-			name: contentText("fr", "panel.title"),
+			name: "Analyse Radarnaque",
 		});
-		expect(toggle().getAttribute("aria-expanded")).toBe("true");
-		expect(dialog.textContent).toContain(contentText("fr", "panel.none"));
-		expect(dialog.textContent).toContain(contentText("fr", "panel.footer"));
-		await user.click(toggle());
-		expect(screen.queryByRole("dialog")).toBeNull();
-	});
-
-	test("liste les signaux par gravité : danger, warning, info", async () => {
-		const user = userEvent.setup();
-		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		expect(toggle().textContent).toContain("Risque élevé");
-		expect(toggle().textContent).toContain("80/100");
-		await user.click(toggle());
-		const items = within(screen.getByRole("dialog"))
-			.getAllByRole("listitem")
-			.map((li) => li.textContent);
-		expect(items).toEqual([
-			expect.stringContaining("Compte vendeur très récent"),
-			expect.stringContaining("Aucun avis sur le vendeur"),
-			expect.stringContaining("Description très courte"),
-		]);
-		expect(screen.queryByText(contentText("fr", "panel.none"))).toBeNull();
-	});
-
-	test("la gravité est aussi indiquée en texte, pas seulement en couleur", async () => {
-		const user = userEvent.setup();
-		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		const [first] = within(screen.getByRole("dialog")).getAllByRole("listitem");
-		expect(first?.textContent).toContain(contentText("fr", "severity.danger"));
+		expect(within(dialog).getByRole("heading", { level: 2 }).textContent).toBe(
+			"Analyse Radarnaque",
+		);
+		expect(dialog.textContent).toContain(aiHigh.summary.fr);
+		for (const text of LOCAL_TEXTS)
+			expect(dialog.textContent).not.toContain(text);
+		expect(dialog.textContent).not.toContain("90/100");
 	});
 
 	test("Escape ferme le panneau", async () => {
 		const user = userEvent.setup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await launchToResult(user);
 		await user.click(toggle());
 		await user.keyboard("{Escape}");
 		expect(screen.queryByRole("dialog")).toBeNull();
@@ -169,6 +274,7 @@ describe("RiskBadge", () => {
 				<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />
 			</div>,
 		);
+		await launchToResult(user);
 		await user.click(toggle());
 		await user.click(screen.getByRole("dialog"));
 		expect(screen.getByRole("dialog")).toBeTruthy();
@@ -190,8 +296,9 @@ describe("RiskBadge", () => {
 			<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />,
 			{ container },
 		);
+		await user.click(within(container).getByRole("button", { name: LAUNCH }));
 		await user.click(
-			within(container).getByRole("button", { name: /Radarnaque/ }),
+			await within(container).findByRole("button", { name: /Radarnaque/ }),
 		);
 		await user.click(within(container).getByRole("dialog"));
 		expect(within(container).queryByRole("dialog")).not.toBeNull();
@@ -204,7 +311,14 @@ describe("RiskBadge", () => {
 
 	test("locale nl : libellés en néerlandais", async () => {
 		const user = userEvent.setup();
+		scanReply.mockResolvedValue({ ok: true, data: aiHigh });
 		render(<RiskBadge report={high} listing={listing} locale="nl" ai={ai} />);
+		const button = screen.getByRole("button", {
+			name: contentText("nl", "ai.launch"),
+		});
+		expect(button.textContent).toBe("Analyseren");
+		await user.click(button);
+		await vi.waitFor(() => expect(toggle().textContent).toContain("82/100"));
 		expect(toggle().textContent).toContain("Hoog risico");
 		expect(toggle().getAttribute("aria-label")).toBe(
 			contentText("nl", "badge.aria"),
@@ -213,27 +327,29 @@ describe("RiskBadge", () => {
 		const dialog = screen.getByRole("dialog", {
 			name: contentText("nl", "panel.title"),
 		});
-		expect(dialog.textContent).toContain("Zeer recent verkopersaccount");
-		expect(dialog.textContent).toContain(contentText("nl", "panel.footer"));
+		expect(dialog.textContent).toContain(aiHigh.summary.nl);
+		expect(dialog.textContent).not.toContain("Zeer recent verkopersaccount");
 	});
 
-	test("ouvrir le panneau ne passe que par le client IA injecté : ni fetch, ni sendMessage direct", async () => {
+	test("lancer l'analyse ne passe que par le client IA injecté : ni fetch, ni sendMessage direct", async () => {
 		const user = userEvent.setup();
 		const fetchSpy = vi.fn();
 		vi.stubGlobal("fetch", fetchSpy);
 		const sendMessage = vi.spyOn(browser.runtime, "sendMessage");
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await launchToResult(user);
 		await user.click(toggle());
 		expect(screen.getByRole("dialog")).toBeTruthy();
 		expect(fetchSpy).not.toHaveBeenCalled();
 		expect(sendMessage).not.toHaveBeenCalled();
-		// Analyse au clic uniquement : ouvrir le panneau ne lance aucun scan.
-		expect(ai.scan).not.toHaveBeenCalled();
+		// Ouvrir le panneau ne relance rien.
+		expect(ai.scan).toHaveBeenCalledTimes(1);
 	});
 
 	test("Escape ouvert est consommé : un écouteur document ultérieur ne le reçoit pas", async () => {
 		const user = userEvent.setup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await launchToResult(user);
 		await user.click(toggle());
 		const bubble = vi.fn();
 		const capture = vi.fn();
@@ -249,47 +365,30 @@ describe("RiskBadge", () => {
 		document.removeEventListener("keydown", bubble);
 		document.removeEventListener("keydown", capture, true);
 	});
-
-	test("le bouton est décrit par le niveau et le score visibles", () => {
-		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
-		const ids = (toggle().getAttribute("aria-describedby") ?? "").split(" ");
-		const described = ids.map((id) => document.getElementById(id)?.textContent);
-		expect(described).toEqual(["Risque faible", "0/100"]);
-	});
 });
 
 describe("RiskBadge : analyse IA", () => {
-	/** Bouton « Lancer une analyse IA », affiché une fois l'accès chargé. */
+	/** Bouton « Lancer une analyse IA » du panneau, affiché une fois l'accès chargé. */
 	const findRun = () =>
 		screen.findByRole("button", { name: contentText("fr", "ai.run") });
-
-	test("le pied de panneau renvoie vers le bouton d'analyse IA", async () => {
-		const user = userEvent.setup();
-		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		expect(screen.getByRole("dialog").textContent).toContain(
-			"Analyse locale, sans IA. Pour une analyse IA, utilisez le bouton ci-dessus.",
-		);
-	});
-
-	test("l'accès est chargé à la première ouverture, une seule fois", async () => {
-		const user = userEvent.setup();
-		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		expect(ai.access).not.toHaveBeenCalled();
-		await user.click(toggle());
-		await findRun();
-		await user.click(toggle());
-		await user.click(toggle());
-		await findRun();
-		expect(ai.access).toHaveBeenCalledTimes(1);
-	});
+	/** Déconnecté, popup de connexion impossible : le clic ouvre le panneau. */
+	const signedOutWithoutPopup = () => {
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { status: "signedOut" },
+		}));
+		ai.openLogin.mockResolvedValue({
+			ok: false,
+			error: { code: "popup_unavailable" },
+		});
+	};
 
 	test("analyse lancée, panneau fermé puis rouvert : le résultat reste, un seul scan", async () => {
 		const user = userEvent.setup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await launchToResult(user);
 		await user.click(toggle());
-		await user.click(await findRun());
-		await screen.findByText(sampleAnalysis.summary.fr);
+		expect(screen.getByText(sampleAnalysis.summary.fr)).toBeTruthy();
 
 		await user.click(toggle());
 		expect(screen.queryByRole("dialog")).toBeNull();
@@ -300,11 +399,11 @@ describe("RiskBadge : analyse IA", () => {
 		expect(toggle().getAttribute("aria-expanded")).toBe("true");
 	});
 
-	test("la requête envoyée : annonce complète, signals et rulesVersion du rapport", async () => {
+	test("la demande d'analyse contient toujours signals et rulesVersion du rapport local", async () => {
 		const user = userEvent.setup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		await user.click(await findRun());
+		await user.click(launch());
+		await vi.waitFor(() => expect(ai.scan).toHaveBeenCalledTimes(1));
 		expect(ai.scan).toHaveBeenCalledWith(
 			{
 				listing,
@@ -317,12 +416,12 @@ describe("RiskBadge : analyse IA", () => {
 		);
 	});
 
-	test("double clic sur le bouton : une seule requête", async () => {
+	test("double clic sur « Analyser » : une seule requête", async () => {
 		const user = userEvent.setup();
 		scanReply.mockImplementation(() => new Promise(() => {}));
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		await user.dblClick(await findRun());
+		await user.dblClick(launch());
+		await findToggle();
 		expect(ai.scan).toHaveBeenCalledTimes(1);
 	});
 
@@ -331,15 +430,22 @@ describe("RiskBadge : analyse IA", () => {
 		ai.access
 			.mockResolvedValueOnce({ ok: true, data: active })
 			.mockResolvedValueOnce({ ok: true, data: { status: "signedOut" } });
-		scanReply.mockResolvedValueOnce({
-			ok: false,
-			error: { code: "session_expired" },
-		});
+		let answer!: (value: BgResponse<AnalysisResult>) => void;
+		scanReply.mockReturnValueOnce(
+			new Promise((resolve) => {
+				answer = resolve;
+			}),
+		);
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		await user.click(await findRun());
+		await user.click(launch());
+		// Analyse en cours : le panneau est ouvert sur son déroulé.
+		await user.click(await findToggle());
+		await act(async () =>
+			answer({ ok: false, error: { code: "session_expired" } }),
+		);
 
-		await screen.findByText(contentText("fr", "ai.loginHint"));
+		const dialog = screen.getByRole("dialog");
+		await within(dialog).findByText(contentText("fr", "ai.loginHint"));
 		expect(ai.access).toHaveBeenCalledTimes(2);
 		expect(
 			screen.queryByRole("button", { name: contentText("fr", "ai.run") }),
@@ -349,18 +455,7 @@ describe("RiskBadge : analyse IA", () => {
 		).toHaveLength(1);
 	});
 
-	test("signedOut, panneau rouvert : l'accès est relu", async () => {
-		const user = userEvent.setup();
-		ai.access.mockResolvedValue({ ok: true, data: { status: "signedOut" } });
-		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		await screen.findByText(contentText("fr", "ai.loginHint"));
-		await user.click(toggle());
-		await user.click(toggle());
-		await vi.waitFor(() => expect(ai.access).toHaveBeenCalledTimes(2));
-	});
-
-	test("R8 : accès en erreur, panneau rouvert : nouvel essai après 30 s seulement, puis le bouton d'analyse", async () => {
+	test("R8 : accès en erreur, le clic ouvre le panneau ; nouvel essai après 30 s seulement, puis le bouton d'analyse", async () => {
 		const user = userEvent.setup();
 		let clock = 0;
 		const accessCache = createAccessCache(() => clock);
@@ -377,84 +472,88 @@ describe("RiskBadge : analyse IA", () => {
 				accessCache={accessCache}
 			/>,
 		);
-		await user.click(toggle());
+		await user.click(launch());
 		await screen.findByText(aiErrorText("fr", "background_unavailable"));
-		await user.click(toggle());
-		await user.click(toggle());
+		expect(screen.getByRole("dialog")).toBeTruthy();
+		await user.keyboard("{Escape}");
+		await user.click(launch());
+		expect(screen.getByRole("dialog")).toBeTruthy();
 		expect(ai.access).toHaveBeenCalledTimes(1);
+		await user.keyboard("{Escape}");
 		clock += RECHECK_MS;
-		await user.click(toggle());
-		await user.click(toggle());
+		await user.click(launch());
 		await findRun();
 		expect(ai.access).toHaveBeenCalledTimes(2);
+		expect(ai.scan).not.toHaveBeenCalled();
 	});
 
 	test("signedOut, panneau ouvert, retour sur l'onglet (focus) : accès relu, le panneau passe à active", async () => {
 		const user = userEvent.setup();
-		ai.access.mockResolvedValueOnce({
-			ok: true,
-			data: { status: "signedOut" },
-		});
+		signedOutWithoutPopup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
+		await user.click(launch());
 		await screen.findByText(contentText("fr", "ai.loginHint"));
+		const reads = ai.access.mock.calls.length;
 
 		// Connexion faite dans la popup ; la page reprend le focus.
+		ai.access.mockImplementation(async () => ({ ok: true, data: active }));
 		act(() => {
 			window.dispatchEvent(new Event("focus"));
 		});
 		await findRun();
-		expect(ai.access).toHaveBeenCalledTimes(2);
+		expect(ai.access).toHaveBeenCalledTimes(reads + 1);
 		expect(screen.queryByText(contentText("fr", "ai.loginHint"))).toBeNull();
 	});
 
 	test("signedOut, panneau ouvert, onglet de nouveau visible : accès relu", async () => {
 		const user = userEvent.setup();
-		ai.access.mockResolvedValueOnce({
-			ok: true,
-			data: { status: "signedOut" },
-		});
+		signedOutWithoutPopup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
+		await user.click(launch());
 		await screen.findByText(contentText("fr", "ai.loginHint"));
+		const reads = ai.access.mock.calls.length;
+		ai.access.mockImplementation(async () => ({ ok: true, data: active }));
 		const state = vi
 			.spyOn(document, "visibilityState", "get")
 			.mockReturnValue("visible");
 		fireEvent(document, new Event("visibilitychange"));
 		await findRun();
-		expect(ai.access).toHaveBeenCalledTimes(2);
+		expect(ai.access).toHaveBeenCalledTimes(reads + 1);
 		state.mockRestore();
 	});
 
 	test("accès actif : focus ou panneau rouvert ne relisent pas l'accès", async () => {
 		const user = userEvent.setup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await launchToResult(user);
+		// Lu au clic, puis relu après le scan.
+		await vi.waitFor(() => expect(ai.access).toHaveBeenCalledTimes(2));
 		await user.click(toggle());
-		await findRun();
 		act(() => {
 			window.dispatchEvent(new Event("focus"));
 		});
 		await user.click(toggle());
 		await user.click(toggle());
-		await findRun();
-		expect(ai.access).toHaveBeenCalledTimes(1);
+		expect(ai.access).toHaveBeenCalledTimes(2);
 	});
 
 	test("panneau fermé : focus ne relit pas l'accès", async () => {
 		const user = userEvent.setup();
-		ai.access.mockResolvedValue({ ok: true, data: { status: "signedOut" } });
+		signedOutWithoutPopup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
+		await user.click(launch());
 		await screen.findByText(contentText("fr", "ai.loginHint"));
-		await user.click(toggle());
+		await user.keyboard("{Escape}");
+		const reads = ai.access.mock.calls.length;
 		act(() => {
 			window.dispatchEvent(new Event("focus"));
 		});
-		expect(ai.access).toHaveBeenCalledTimes(1);
+		expect(ai.access).toHaveBeenCalledTimes(reads);
 	});
 
 	test("no photo-scan button : une seule action dans le panneau, avec ou sans photos", async () => {
 		const user = userEvent.setup();
+		signedOutWithoutPopup();
 		render(
 			<RiskBadge
 				report={high}
@@ -463,7 +562,12 @@ describe("RiskBadge : analyse IA", () => {
 				ai={ai}
 			/>,
 		);
-		await user.click(toggle());
+		await user.click(launch());
+		await screen.findByText(contentText("fr", "ai.loginHint"));
+		ai.access.mockImplementation(async () => ({ ok: true, data: active }));
+		act(() => {
+			window.dispatchEvent(new Event("focus"));
+		});
 		await findRun();
 		expect(
 			within(screen.getByRole("dialog")).getAllByRole("button"),
@@ -471,69 +575,72 @@ describe("RiskBadge : analyse IA", () => {
 		expect(screen.queryByText(/photos/)).toBeNull();
 	});
 
-	test("description modifiée puis clic : la requête porte la nouvelle description", async () => {
-		const user = userEvent.setup();
+	test("description modifiée puis clic : la requête porte la nouvelle description", () => {
+		const accessCache = cached(active);
 		const view = render(
-			<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />,
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={accessCache}
+			/>,
 		);
-		await user.click(toggle());
-		await findRun();
 		view.rerender(
 			<RiskBadge
 				report={high}
 				listing={{ ...listing, description: "Description complétée." }}
 				locale="fr"
 				ai={ai}
+				accessCache={accessCache}
 			/>,
 		);
-		await user.click(await findRun());
+		fireEvent.click(launch());
 		expect(ai.scan.mock.calls[0]?.[0].listing.description).toBe(
 			"Description complétée.",
 		);
 	});
 
-	test("lien vers les formules dans la langue active", async () => {
+	test("sans abonnement, accès inconnu : le clic ouvre le panneau, lien vers les formules dans la langue active", async () => {
 		const user = userEvent.setup();
 		ai.access.mockResolvedValue({
 			ok: true,
 			data: { status: "noSubscription" },
 		});
 		render(<RiskBadge report={high} listing={listing} locale="nl" ai={ai} />);
-		await user.click(toggle());
+		await user.click(
+			screen.getByRole("button", { name: contentText("nl", "ai.launch") }),
+		);
 		const link = await screen.findByRole("link", {
 			name: contentText("nl", "ai.pricing"),
 		});
 		expect(link.getAttribute("href")).toBe(
 			"http://localhost:8080/pricing/?lang=nl",
 		);
+		expect(screen.getByRole("dialog")).toBeTruthy();
+		expect(ai.scan).not.toHaveBeenCalled();
 	});
 
-	test("Se connecter sans popup disponible : texte de repli", async () => {
+	test("Se connecter sans popup disponible : texte de repli, le clic dans le panneau ne le ferme pas", async () => {
 		const user = userEvent.setup();
-		ai.access.mockResolvedValue({ ok: true, data: { status: "signedOut" } });
-		ai.openLogin.mockResolvedValue({
-			ok: false,
-			error: { code: "popup_unavailable" },
-		});
+		signedOutWithoutPopup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		await user.click(
-			await screen.findByRole("button", {
-				name: contentText("fr", "ai.login"),
-			}),
-		);
+		await user.click(launch());
 		await screen.findByText(contentText("fr", "ai.loginFallback"));
-		// Le clic dans le panneau ne l'a pas fermé.
+		await user.click(
+			screen.getByRole("button", { name: contentText("fr", "ai.login") }),
+		);
+		expect(ai.openLogin).toHaveBeenCalledTimes(2);
+		expect(
+			screen.getByText(contentText("fr", "ai.loginFallback")),
+		).toBeTruthy();
 		expect(screen.getByRole("dialog")).toBeTruthy();
 	});
 });
 
-describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
+describe("RiskBadge : pilule et ligne en direct", () => {
 	afterEach(() => vi.useRealTimers());
 
-	const LAUNCH = "Analyser avec l'IA";
-	const launch = () => screen.getByRole("button", { name: LAUNCH });
-	const queryLaunch = () => screen.queryByRole("button", { name: LAUNCH });
 	const searchEvent: ScanProgressEvent = {
 		type: "search",
 		id: 1,
@@ -542,12 +649,6 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 	};
 	const SEARCH_LINE = "Recherche web (prix du marché) : “iPhone 18 Pro prix”";
 
-	/** Accès déjà en cache (lu par une icône de carte, ou plus tôt). */
-	const cached = (access: ContentAccess) => {
-		const cache = createAccessCache();
-		cache.settle(cache.begin(), access);
-		return cache;
-	};
 	/** Envoie un événement du flux à l'analyse lancée en dernier. */
 	const emit = (e: ScanProgressEvent) => {
 		const onEvent = ai.scan.mock.calls.at(-1)?.[1];
@@ -576,11 +677,15 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 		expect(ai.access).toHaveBeenCalledTimes(1);
 		expect(screen.queryByRole("dialog")).toBeNull();
 		expect(toggle().getAttribute("aria-expanded")).toBe("false");
-		// Pendant l'analyse, la ligne en direct remplace le bouton.
+		expect(toggle().getAttribute("aria-busy")).toBe("true");
+		// Pendant l'analyse, la ligne en direct remplace « Analyser ».
 		expect(queryLaunch()).toBeNull();
+		expect(toggle().textContent).not.toContain("90/100");
 	});
 
-	test("accès déjà en cache : l'analyse part au clic, sans lecture", () => {
+	test("analyse en cours : le clic ouvre le panneau avec le déroulé", async () => {
+		const user = userEvent.setup();
+		scanReply.mockImplementation(() => new Promise(() => {}));
 		render(
 			<RiskBadge
 				report={high}
@@ -590,17 +695,26 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 				accessCache={cached(active)}
 			/>,
 		);
-		fireEvent.click(launch());
-		expect(ai.scan).toHaveBeenCalledTimes(1);
-		expect(ai.access).not.toHaveBeenCalled();
+		await user.click(launch());
+		emit(searchEvent);
+		await user.click(toggle());
+		expect(toggle().getAttribute("aria-expanded")).toBe("true");
+		expect(toggle().getAttribute("aria-busy")).toBe("true");
+		const dialog = screen.getByRole("dialog", {
+			name: contentText("fr", "panel.title"),
+		});
+		expect(dialog.textContent).toContain(contentText("fr", "ai.loading"));
+		expect(within(dialog).getByText(SEARCH_LINE)).toBeTruthy();
+		for (const text of LOCAL_TEXTS)
+			expect(dialog.textContent).not.toContain(text);
+		await user.click(toggle());
 		expect(screen.queryByRole("dialog")).toBeNull();
 	});
 
 	test("absent dès qu'un résultat IA est affiché", async () => {
 		const user = userEvent.setup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(launch());
-		await vi.waitFor(() => expect(toggle().textContent).toContain("55/100"));
+		await launchToResult(user);
 		expect(queryLaunch()).toBeNull();
 	});
 
@@ -660,6 +774,79 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 		expect(ai.scan).not.toHaveBeenCalled();
 	});
 
+	test("accès relu pendant que le panneau est ouvert (signedOut → sans abonnement) : la pilule devient le lien vers les formules, un seul contrôle de lancement", async () => {
+		const user = userEvent.setup();
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { status: "signedOut" },
+		}));
+		ai.openLogin.mockResolvedValue({
+			ok: false,
+			error: { code: "popup_unavailable" },
+		});
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await user.click(launch());
+		await screen.findByText(contentText("fr", "ai.loginFallback"));
+		expect(launchControls()).toHaveLength(1);
+
+		// Connexion faite dans la popup, sans abonnement ; la page reprend le focus.
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { status: "noSubscription" },
+		}));
+		act(() => {
+			window.dispatchEvent(new Event("focus"));
+		});
+		const link = await screen.findByRole("link", { name: LAUNCH });
+		expect(link.getAttribute("href")).toMatch(/\/pricing\/\?lang=fr$/);
+		expect(link.textContent).toBe(contentText("fr", "ai.launchShort"));
+		expect(launchControls()).toHaveLength(1);
+		expect(queryLaunch()).toBeNull();
+		// Le panneau, toujours ouvert, dit pourquoi.
+		expect(screen.getByRole("dialog").textContent).toContain(
+			aiErrorText("fr", "no_active_subscription"),
+		);
+	});
+
+	test("accès relu à 0 analyse : la pilule reste focusable, aria-disabled, décrite par ai.noScansLeft", async () => {
+		const user = userEvent.setup();
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { status: "signedOut" },
+		}));
+		ai.openLogin.mockResolvedValue({
+			ok: false,
+			error: { code: "popup_unavailable" },
+		});
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await user.click(launch());
+		await screen.findByText(contentText("fr", "ai.loginFallback"));
+
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { ...active, remaining: { scans: 0 } },
+		}));
+		act(() => {
+			window.dispatchEvent(new Event("focus"));
+		});
+		await vi.waitFor(() =>
+			expect(launch().getAttribute("aria-disabled")).toBe("true"),
+		);
+		const button = launch();
+		expect(button.hasAttribute("disabled")).toBe(false);
+		const reason = contentText("fr", "ai.noScansLeft");
+		expect(button.getAttribute("title")).toBe(reason);
+		expect(
+			document.getElementById(button.getAttribute("aria-describedby") ?? "")
+				?.textContent,
+		).toBe(reason);
+		button.focus();
+		expect(document.activeElement).toBe(button);
+		expect(launchControls()).toHaveLength(1);
+		await user.click(button);
+		expect(ai.scan).not.toHaveBeenCalled();
+	});
+
 	test("analysis_failed lancée depuis la pastille : son texte, annoncé, et le bouton de lancement", async () => {
 		const user = userEvent.setup();
 		scanReply.mockResolvedValueOnce({
@@ -682,6 +869,7 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 		await vi.waitFor(() => expect(announced()).toBe(text), { timeout: 3_000 });
 		// Pas « Relancer » : le bouton de lancement, qui relance l'analyse.
 		expect(screen.queryByRole("button", { name: "Relancer" })).toBeNull();
+		expect(launchControls()).toHaveLength(1);
 		await user.click(launch());
 		expect(ai.scan).toHaveBeenCalledTimes(2);
 	});
@@ -744,12 +932,14 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 		expect(queryLaunch()).toBeNull();
 	});
 
-	test("échec d'une analyse lancée depuis le panneau ouvert : son texte dans le panneau seulement", async () => {
+	test("échec d'une analyse suivie dans le panneau ouvert : son texte dans le panneau seulement", async () => {
 		const user = userEvent.setup();
-		scanReply.mockResolvedValueOnce({
-			ok: false,
-			error: { code: "analysis_failed" },
-		});
+		let answer!: (value: BgResponse<AnalysisResult>) => void;
+		scanReply.mockReturnValueOnce(
+			new Promise((resolve) => {
+				answer = resolve;
+			}),
+		);
 		render(
 			<RiskBadge
 				report={high}
@@ -759,10 +949,11 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 				accessCache={cached(active)}
 			/>,
 		);
+		await user.click(launch());
 		await user.click(toggle());
 		const dialog = screen.getByRole("dialog");
-		await user.click(
-			within(dialog).getByRole("button", { name: contentText("fr", "ai.run") }),
+		await act(async () =>
+			answer({ ok: false, error: { code: "analysis_failed" } }),
 		);
 		const text = aiErrorText("fr", "analysis_failed");
 		expect(await within(dialog).findByText(text)).toBeTruthy();
@@ -772,7 +963,7 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 		await vi.waitFor(() => expect(announced()).toBe(""), { timeout: 3_000 });
 
 		// Panneau fermé : l'erreur revient dans la pastille.
-		await user.click(toggle());
+		await user.keyboard("{Escape}");
 		expect(screen.queryByRole("dialog")).toBeNull();
 		expect(await screen.findAllByText(text)).not.toHaveLength(0);
 	});
@@ -794,7 +985,7 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 		expect(screen.getByRole("dialog")).toBeTruthy();
 
 		// Déjà su impossible : le panneau rouvre dès le clic.
-		await user.click(toggle());
+		await user.keyboard("{Escape}");
 		expect(screen.queryByRole("dialog")).toBeNull();
 		await user.click(launch());
 		expect(await screen.findByText(fallback)).toBeTruthy();
@@ -814,6 +1005,7 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 		expect(link.getAttribute("href")).toMatch(/\/pricing\/\?lang=nl$/);
 		expect(link.getAttribute("target")).toBe("_blank");
 		expect(link.getAttribute("rel")).toBe("noopener");
+		expect(launchControls("nl")).toHaveLength(1);
 	});
 
 	test("live line follows last event", () => {
@@ -917,7 +1109,7 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 			await user.click(launch());
 			expect(await screen.findByText(aiErrorText("fr", code))).toBeTruthy();
 			// Jamais une icône qui tourne sans fin.
-			expect(toggle().querySelector(".radarnaque-spin")).toBeNull();
+			expect(document.querySelector(".radarnaque-spin")).toBeNull();
 			expect(queryLaunch()).toBeNull();
 			expect(screen.queryByRole("dialog")).toBeNull();
 			await user.click(screen.getByRole("button", { name: "Relancer" }));
@@ -951,113 +1143,8 @@ describe("RiskBadge : bouton de la pastille et ligne en direct", () => {
 	});
 });
 
-describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
-	const medium: RiskReport = {
-		score: 40,
-		level: "medium",
-		rulesVersion: 1,
-		signals: [
-			{ id: "new_account", weight: 25, severity: "danger" },
-			{ id: "no_reviews", weight: 15, severity: "warning" },
-		],
-	};
-	const LOCAL_TEXTS = [
-		"Compte vendeur très récent",
-		"Aucun avis sur le vendeur",
-		contentText("fr", "panel.footer"),
-		contentText("fr", "panel.none"),
-	];
-	const aiHigh: AnalysisResult = {
-		...sampleAnalysis,
-		level: "high",
-		score: 82,
-		summary: { fr: "Arnaque probable.", nl: "Waarschijnlijk oplichting." },
-	};
-	const findRun = () =>
-		screen.findByRole("button", { name: contentText("fr", "ai.run") });
-	const described = () =>
-		(toggle().getAttribute("aria-describedby") ?? "")
-			.split(" ")
-			.map((id) => document.getElementById(id)?.textContent);
-
-	/** Magasin simulé : une entrée par `site|externalId`. */
-	const storeWith = (
-		entries: Record<string, StoredAiResult>,
-	): AiResultStore => ({
-		get: async (site, id) => entries[`${site}|${id}`] ?? null,
-		put: async () => {},
-		prune: async () => {},
-	});
-
-	test("avant le scan : pastille « Risque moyen 40/100 », panneau avec les signaux locaux", async () => {
-		const user = userEvent.setup();
-		render(<RiskBadge report={medium} listing={listing} locale="fr" ai={ai} />);
-		expect(toggle().textContent).toContain("Risque moyen");
-		expect(toggle().textContent).toContain("40/100");
-		expect(toggle().textContent).not.toContain(
-			contentText("fr", "ai.badgeTag"),
-		);
-		await user.click(toggle());
-		const dialog = screen.getByRole("dialog", {
-			name: contentText("fr", "panel.title"),
-		});
-		expect(dialog.textContent).toContain("Compte vendeur très récent");
-		expect(dialog.textContent).toContain(contentText("fr", "panel.footer"));
-		expect(screen.queryByRole("note")).toBeNull();
-	});
-
-	test("après un scan texte done (82, high) : pastille IA, panneau sans analyse locale", async () => {
-		const user = userEvent.setup();
-		scanReply.mockResolvedValue({ ok: true, data: aiHigh });
-		render(<RiskBadge report={medium} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		await user.click(await findRun());
-		await screen.findByText(aiHigh.summary.fr);
-
-		expect(toggle().textContent).toContain("Risque élevé");
-		expect(toggle().textContent).toContain("82/100");
-		expect(toggle().textContent).toContain("IA");
-		expect(toggle().textContent).not.toContain("40/100");
-		expect(toggle().getAttribute("aria-label")).toBe(
-			contentText("fr", "badge.ariaAi"),
-		);
-		expect(described()).toEqual(["Risque élevé", "82/100"]);
-
-		const dialog = screen.getByRole("dialog", {
-			name: "Analyse IA Radarnaque",
-		});
-		expect(within(dialog).getByRole("heading", { level: 2 }).textContent).toBe(
-			"Analyse IA Radarnaque",
-		);
-		for (const text of LOCAL_TEXTS)
-			expect(dialog.textContent).not.toContain(text);
-		expect(dialog.textContent).not.toContain("Analyse locale, sans IA");
-		expect(dialog.textContent).toContain("82/100");
-	});
-
-	test("en NL : mention « AI », libellé et titre NL", async () => {
-		const user = userEvent.setup();
-		scanReply.mockResolvedValue({ ok: true, data: aiHigh });
-		render(<RiskBadge report={medium} listing={listing} locale="nl" ai={ai} />);
-		await user.click(toggle());
-		await user.click(
-			await screen.findByRole("button", { name: contentText("nl", "ai.run") }),
-		);
-		await screen.findByText(aiHigh.summary.nl);
-		expect(toggle().textContent).toContain("Hoog risico");
-		expect(toggle().textContent).toContain("AI");
-		expect(toggle().getAttribute("aria-label")).toBe(
-			"Radarnaque-AI-analyse openen",
-		);
-		expect(
-			screen.getByRole("dialog", { name: "Radarnaque-AI-analyse" }),
-		).toBeTruthy();
-		expect(screen.getByRole("dialog").textContent).not.toContain(
-			"Zeer recent verkopersaccount",
-		);
-	});
-
-	test("résultat repris du magasin : même rendu, sans clic ni scan", async () => {
+describe("RiskBadge : seule l'IA donne un résultat", () => {
+	test("résultat repris du magasin : niveau et score affichés tout de suite, aucun scan, aucun « Analyser »", async () => {
 		const user = userEvent.setup();
 		const aiResults = storeWith({
 			"2ememain.be|m123": {
@@ -1077,10 +1164,11 @@ describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
 		);
 		await vi.waitFor(() => expect(toggle().textContent).toContain("82/100"));
 		expect(toggle().textContent).toContain("Risque élevé");
-		expect(toggle().textContent).toContain("IA");
+		expect(described()).toEqual(["Risque élevé", "82/100"]);
+		expect(launchControls()).toHaveLength(0);
 		await user.click(toggle());
 		const dialog = screen.getByRole("dialog", {
-			name: "Analyse IA Radarnaque",
+			name: contentText("fr", "panel.title"),
 		});
 		expect(dialog.textContent).toContain(aiHigh.summary.fr);
 		for (const text of LOCAL_TEXTS)
@@ -1088,7 +1176,7 @@ describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
 		expect(ai.scan).not.toHaveBeenCalled();
 	});
 
-	test("I2 : résultat repris, puis prix changé sous la même clé : pastille locale, sans « IA »", async () => {
+	test("I2 : résultat repris, puis prix changé sous la même clé : retour à « Analyser », sans score", async () => {
 		const aiResults = storeWith({
 			"2ememain.be|m123": {
 				result: aiHigh,
@@ -1118,39 +1206,26 @@ describe("RiskBadge : l'analyse IA remplace l'analyse locale", () => {
 				aiResults={aiResults}
 			/>,
 		);
-		expect(toggle().textContent).toContain("40/100");
-		expect(toggle().textContent).not.toContain("IA");
+		expect(launchControls()).toHaveLength(1);
+		expect(view.container.textContent).not.toContain("/100");
 		expect(ai.scan).not.toHaveBeenCalled();
-	});
-
-	test("scan en cours sans résultat précédent : l'analyse locale reste affichée", async () => {
-		const user = userEvent.setup();
-		scanReply.mockImplementation(() => new Promise(() => {}));
-		render(<RiskBadge report={medium} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		await user.click(await findRun());
-		expect(toggle().textContent).toContain("40/100");
-		expect(toggle().textContent).not.toContain("IA");
-		const dialog = screen.getByRole("dialog", {
-			name: contentText("fr", "panel.title"),
-		});
-		expect(dialog.textContent).toContain("Compte vendeur très récent");
-		expect(dialog.textContent).toContain(contentText("fr", "ai.loading"));
 	});
 });
 
 describe("RiskBadge : section Debug (superuser)", () => {
 	const superuser: ContentAccess = { ...active, unlimited: true, debug: true };
 	const debugTitle = contentText("fr", "debug.title");
-	const findRun = () =>
-		screen.findByRole("button", { name: contentText("fr", "ai.run") });
+	/** Analyse lancée depuis la pilule, puis panneau ouvert sur son résultat. */
+	const openResult = async (user: ReturnType<typeof userEvent.setup>) => {
+		await launchToResult(user);
+		await user.click(toggle());
+	};
 
 	test("résultat sans debug : aucune section Debug", async () => {
 		const user = userEvent.setup();
 		ai.access.mockResolvedValue({ ok: true, data: superuser });
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		await user.click(await findRun());
+		await openResult(user);
 		await screen.findByText(sampleAnalysis.summary.fr);
 		expect(screen.queryByText(debugTitle)).toBeNull();
 	});
@@ -1159,8 +1234,7 @@ describe("RiskBadge : section Debug (superuser)", () => {
 		const user = userEvent.setup();
 		scanReply.mockResolvedValue({ ok: true, data: debugAnalysis });
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		await user.click(await findRun());
+		await openResult(user);
 		await screen.findByText(debugAnalysis.summary.fr);
 		expect(screen.queryByText(debugTitle)).toBeNull();
 	});
@@ -1170,8 +1244,7 @@ describe("RiskBadge : section Debug (superuser)", () => {
 		ai.access.mockResolvedValue({ ok: true, data: superuser });
 		scanReply.mockResolvedValue({ ok: true, data: debugAnalysis });
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		await user.click(await findRun());
+		await openResult(user);
 		const summary = await screen.findByText(debugTitle);
 		const dialog = screen.getByRole("dialog");
 		expect(dialog.textContent).toContain("fournisseur-test / modele-test");
@@ -1186,8 +1259,7 @@ describe("RiskBadge : section Debug (superuser)", () => {
 		ai.access.mockResolvedValue({ ok: true, data: superuser });
 		scanReply.mockResolvedValueOnce({ ok: true, data: debugAnalysis });
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		await user.click(await findRun());
+		await openResult(user);
 		await screen.findByText(debugTitle);
 
 		let answer!: (value: BgResponse<AnalysisResult>) => void;
@@ -1209,7 +1281,7 @@ describe("RiskBadge : section Debug (superuser)", () => {
 		expect(
 			screen.getByRole("button", { name: contentText("fr", "ai.loading") }),
 		).toBeTruthy();
-		expect(toggle().textContent).toContain(contentText("fr", "ai.badgeTag"));
+		expect(toggle().textContent).toContain(`${debugAnalysis.score}/100`);
 
 		const fresh: AnalysisResult = {
 			...debugAnalysis,
@@ -1233,8 +1305,7 @@ describe("RiskBadge : section Debug (superuser)", () => {
 			.mockResolvedValueOnce({ ok: true, data: debugAnalysis })
 			.mockResolvedValueOnce({ ok: false, error: { code: "rate_limited" } });
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		await user.click(await findRun());
+		await openResult(user);
 		await screen.findByText(debugTitle);
 		await user.click(
 			screen.getByRole("button", { name: contentText("fr", "debug.rescan") }),
@@ -1256,13 +1327,12 @@ describe("RiskBadge : section Debug (superuser)", () => {
 		} as unknown as AnalysisResult;
 		scanReply.mockResolvedValue({ ok: true, data: broken });
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		await user.click(await findRun());
+		await openResult(user);
 		await screen.findByText(debugAnalysis.summary.fr);
 		expect(screen.queryByText(debugTitle)).toBeNull();
 		// Pas l'erreur générique de la section IA : seul le debug est masqué.
 		expect(screen.queryByText(aiErrorText("fr", "default"))).toBeNull();
-		expect(toggle().textContent).toContain(contentText("fr", "ai.badgeTag"));
+		expect(toggle().textContent).toContain(`${debugAnalysis.score}/100`);
 	});
 
 	test("« Copier » écrit le JSON du debug dans le presse-papiers", async () => {
@@ -1270,8 +1340,7 @@ describe("RiskBadge : section Debug (superuser)", () => {
 		ai.access.mockResolvedValue({ ok: true, data: superuser });
 		scanReply.mockResolvedValue({ ok: true, data: debugAnalysis });
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
-		await user.click(toggle());
-		await user.click(await findRun());
+		await openResult(user);
 		await screen.findByText(debugTitle);
 		const writeText = vi.spyOn(navigator.clipboard, "writeText");
 		await user.click(
@@ -1289,35 +1358,46 @@ describe("RiskBadge : section Debug (superuser)", () => {
 });
 
 describe("RiskBadge : bandeau des annonces professionnelles", () => {
-	const medium: RiskReport = {
-		score: 40,
-		level: "medium",
-		rulesVersion: 1,
-		signals: [{ id: "new_account", weight: 25, severity: "danger" }],
-	};
 	const pro: Listing = {
 		...listing,
 		seller: { ...listing.seller, sellerKind: "professional" },
 	};
+	/** Sans abonnement, accès inconnu : le clic sur « Analyser » ouvre le panneau. */
+	const openAtRest = async (
+		user: ReturnType<typeof userEvent.setup>,
+		locale: "fr" | "nl" = "fr",
+	) => {
+		ai.access.mockResolvedValue({
+			ok: true,
+			data: { status: "noSubscription" },
+		});
+		await user.click(
+			screen.getByRole("button", { name: contentText(locale, "ai.launch") }),
+		);
+		return screen.findByRole("dialog");
+	};
 
-	test("sellerKind professional sans IA : bandeau en tête du panneau, score local conservé", async () => {
+	test("vendeur professionnel au repos : le bandeau est en tête du panneau ouvert, sans score local", async () => {
 		const user = userEvent.setup();
-		render(<RiskBadge report={medium} listing={pro} locale="fr" ai={ai} />);
-		expect(toggle().textContent).toContain("40/100");
-		await user.click(toggle());
-		const dialog = screen.getByRole("dialog");
+		const { container } = render(
+			<RiskBadge report={medium} listing={pro} locale="fr" ai={ai} />,
+		);
+		const dialog = await openAtRest(user);
 		const note = within(dialog).getByRole("note");
 		expect(note.textContent).toBe(contentText("fr", "pro.notice"));
 		// Au-dessus de tout le reste du panneau.
 		expect(dialog.firstElementChild).toBe(note);
-		expect(dialog.textContent).toContain("Compte vendeur très récent");
+		expect(container.textContent).not.toContain("40/100");
+		expect(container.textContent).not.toContain("Risque moyen");
+		for (const text of LOCAL_TEXTS)
+			expect(dialog.textContent).not.toContain(text);
 	});
 
 	test("en NL : texte NL du bandeau", async () => {
 		const user = userEvent.setup();
 		render(<RiskBadge report={medium} listing={pro} locale="nl" ai={ai} />);
-		await user.click(toggle());
-		expect(screen.getByRole("note").textContent).toBe(
+		const dialog = await openAtRest(user, "nl");
+		expect(within(dialog).getByRole("note").textContent).toBe(
 			contentText("nl", "pro.notice"),
 		);
 	});
@@ -1329,7 +1409,7 @@ describe("RiskBadge : bandeau des annonces professionnelles", () => {
 			seller: { ...listing.seller, sellerKind: "private" },
 		};
 		render(<RiskBadge report={medium} listing={priv} locale="fr" ai={ai} />);
-		await user.click(toggle());
+		await openAtRest(user);
 		expect(screen.queryByRole("note")).toBeNull();
 	});
 
@@ -1340,14 +1420,10 @@ describe("RiskBadge : bandeau des annonces professionnelles", () => {
 			data: { ...sampleAnalysis, professional: true, level: "high", score: 75 },
 		});
 		render(<RiskBadge report={medium} listing={listing} locale="fr" ai={ai} />);
+		await launchToResult(user, 75);
 		await user.click(toggle());
-		expect(screen.queryByRole("note")).toBeNull();
-		await user.click(
-			await screen.findByRole("button", { name: contentText("fr", "ai.run") }),
-		);
-		const note = await screen.findByRole("note");
+		const note = within(screen.getByRole("dialog")).getByRole("note");
 		expect(note.textContent).toBe(contentText("fr", "pro.notice"));
-		expect(toggle().textContent).toContain("75/100");
 		expect(toggle().textContent).toContain("Risque élevé");
 		expect(screen.getByRole("dialog").textContent).toContain("75/100");
 	});

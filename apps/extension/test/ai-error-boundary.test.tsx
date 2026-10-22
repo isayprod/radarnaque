@@ -86,20 +86,31 @@ describe("AiErrorBoundary", () => {
 });
 
 describe("RiskBadge : section IA en échec", () => {
-	test("le score local reste lisible et le panneau se ferme et se rouvre", async () => {
+	test("la pilule reste utilisable et le panneau se ferme et se rouvre", async () => {
 		const user = userEvent.setup();
-		render(<RiskBadge report={report} listing={listing} locale="fr" ai={ai} />);
-		const toggle = screen.getByRole("button", { name: /Radarnaque/ });
-		await user.click(toggle);
+		// Accès en erreur : le clic sur « Analyser » ouvre le panneau, qui dit pourquoi.
+		const failing: AiClient = {
+			...ai,
+			access: async () => ({
+				ok: false,
+				error: { code: "background_unavailable" },
+			}),
+		};
+		render(
+			<RiskBadge report={report} listing={listing} locale="fr" ai={failing} />,
+		);
+		const launch = () =>
+			screen.getByRole("button", { name: contentText("fr", "ai.launch") });
+		await user.click(launch());
 
-		const dialog = screen.getByRole("dialog");
-		expect(dialog.textContent).toContain(contentText("fr", "panel.footer"));
+		const dialog = await screen.findByRole("dialog");
 		expect(dialog.textContent).toContain(aiErrorText("fr", "default"));
-		expect(toggle.textContent).toContain("25/100");
+		// Aucun score local, ni dans la pastille ni dans le panneau.
+		expect(document.body.textContent).not.toContain("25/100");
 
-		await user.click(toggle);
+		await user.keyboard("{Escape}");
 		expect(screen.queryByRole("dialog")).toBeNull();
-		await user.click(toggle);
-		expect(screen.getByRole("dialog")).toBeTruthy();
+		await user.click(launch());
+		expect(await screen.findByRole("dialog")).toBeTruthy();
 	});
 });

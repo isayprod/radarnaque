@@ -2,8 +2,8 @@ import type { ContentKey } from "../lib/content-i18n";
 import type { Severity } from "../lib/rules/rules";
 import type { RiskLevel } from "../lib/rules/score";
 
-// Styles communs à la pastille locale et à la section IA : un même niveau, une même
-// gravité ont toujours le même rendu, quelle que soit l'origine de l'analyse.
+// Styles communs à la pastille, aux icônes de cartes et à la section IA : un même
+// niveau, une même gravité (raisons de l'IA) ont toujours le même rendu.
 
 export const LEVEL_KEY: Record<RiskLevel, ContentKey> = {
 	low: "level.low",

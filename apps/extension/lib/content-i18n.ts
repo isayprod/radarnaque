@@ -1,20 +1,16 @@
 import type { Locale, SearchAspect } from "@radarnaque/shared";
 import type { Site } from "./listing/types";
-import type { RuleId, Signal } from "./rules/rules";
 
-// Textes de l'interface injectée (pastille, panneau) et des signaux de règles.
-// Séparés du dictionnaire de la popup (lib/i18n.ts) : le content script n'a pas
-// besoin du reste. Les signaux utilisent `{count}` / `{country}`.
-type TextKey =
+// Textes de l'interface injectée (pastille, panneau, icônes de cartes). Séparés
+// du dictionnaire de la popup (lib/i18n.ts) : le content script n'a pas besoin
+// du reste. Les règles locales n'ont plus de texte : elles ne sont jamais
+// affichées, seulement envoyées avec la demande comme contexte pour l'IA.
+export type ContentKey =
 	| "level.low"
 	| "level.medium"
 	| "level.high"
 	| "panel.title"
-	| "panel.none"
-	| "panel.footer"
-	| "panel.titleAi"
 	| "badge.aria"
-	| "badge.ariaAi"
 	| "pro.notice"
 	| "card.aria"
 	| "card.loading"
@@ -23,8 +19,7 @@ type TextKey =
 	| "severity.info"
 	| AiKey
 	| ProgressKey
-	| DebugKey
-	| Exclude<RuleId, "price_anomaly">;
+	| DebugKey;
 
 // Codes d'erreur de la section IA : ceux de l'API (§7.5) et ceux du service worker.
 const AI_ERROR_CODES = [
@@ -48,7 +43,6 @@ type AiErrorKey = `ai.error.${(typeof AI_ERROR_CODES)[number]}`;
 // Textes de la section IA du panneau. `ai.remaining` utilise `{count}`.
 type AiKey =
 	| "ai.title"
-	| "ai.badgeTag"
 	| "ai.run"
 	| "ai.launch"
 	| "ai.launchShort"
@@ -99,20 +93,13 @@ type DebugKey =
 	| "debug.searches"
 	| "debug.reasoning";
 
-export type ContentKey = Exclude<TextKey, RuleId>;
-
-export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
+export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 	fr: {
 		"level.low": "Risque faible",
 		"level.medium": "Risque moyen",
 		"level.high": "Risque élevé",
 		"panel.title": "Analyse Radarnaque",
-		"panel.none": "Aucun signal d'alerte détecté.",
-		"panel.footer":
-			"Analyse locale, sans IA. Pour une analyse IA, utilisez le bouton ci-dessus.",
-		"panel.titleAi": "Analyse IA Radarnaque",
 		"badge.aria": "Ouvrir l'analyse Radarnaque",
-		"badge.ariaAi": "Ouvrir l'analyse IA Radarnaque",
 		"pro.notice":
 			"Annonce d'un professionnel : elle sert souvent de vitrine (prix sur demande, voir le site du vendeur). Ce n'est pas un signal d'arnaque.",
 		"card.aria": "Analyser cette annonce avec Radarnaque",
@@ -120,20 +107,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"severity.danger": "Grave",
 		"severity.warning": "Attention",
 		"severity.info": "Info",
-		few_photos: "Peu de photos ({count})",
-		new_account: "Compte vendeur très récent",
-		no_reviews: "Aucun avis sur le vendeur",
-		foreign_location: "Vendeur situé hors de Belgique ({country})",
-		abroad_seller: "Vendeur ou objet à l'étranger, envoi par transporteur",
-		short_description: "Description très courte",
-		contact_outside:
-			"Invite à continuer hors de la plateforme (téléphone, email ou messagerie)",
-		shipping_only: "Envoi uniquement, sans remise en main propre",
-		offsite_payment:
-			"Mode de paiement à risque (paiement à l'avance ou hors plateforme)",
-		symbolic_price: "Prix symbolique, anormalement bas",
 		"ai.title": "Analyse IA",
-		"ai.badgeTag": "IA",
 		"ai.run": "Lancer une analyse IA",
 		"ai.launch": "Analyser avec l'IA",
 		"ai.launchShort": "Analyser",
@@ -206,12 +180,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"level.medium": "Gemiddeld risico",
 		"level.high": "Hoog risico",
 		"panel.title": "Radarnaque-analyse",
-		"panel.none": "Geen waarschuwingssignalen gevonden.",
-		"panel.footer":
-			"Lokale analyse, zonder AI. Gebruik de knop hierboven voor een AI-analyse.",
-		"panel.titleAi": "Radarnaque-AI-analyse",
 		"badge.aria": "Radarnaque-analyse openen",
-		"badge.ariaAi": "Radarnaque-AI-analyse openen",
 		"pro.notice":
 			"Advertentie van een professional: ze dient vaak als etalage (prijs op aanvraag, zie de website van de verkoper). Dat is geen teken van oplichting.",
 		"card.aria": "Deze advertentie analyseren met Radarnaque",
@@ -219,21 +188,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<TextKey, string>> = {
 		"severity.danger": "Ernstig",
 		"severity.warning": "Let op",
 		"severity.info": "Info",
-		few_photos: "Weinig foto's ({count})",
-		new_account: "Zeer recent verkopersaccount",
-		no_reviews: "Geen beoordelingen voor de verkoper",
-		foreign_location: "Verkoper buiten België ({country})",
-		abroad_seller:
-			"Verkoper of voorwerp in het buitenland, verzending via koerier",
-		short_description: "Zeer korte beschrijving",
-		contact_outside:
-			"Vraagt om buiten het platform verder te gaan (telefoon, e-mail of chat)",
-		shipping_only: "Alleen verzending, niet ophalen",
-		offsite_payment:
-			"Risicovolle betaalmethode (vooraf of buiten het platform)",
-		symbolic_price: "Symbolische, abnormaal lage prijs",
 		"ai.title": "AI-analyse",
-		"ai.badgeTag": "AI",
 		"ai.run": "AI-analyse starten",
 		"ai.launch": "Analyseren met AI",
 		"ai.launchShort": "Analyseren",
@@ -317,26 +272,6 @@ export function aiErrorText(locale: Locale, code: string): string {
 		locale,
 		known ? (`ai.error.${code}` as AiErrorKey) : "ai.error.default",
 	);
-}
-
-// Remplace `{nom}` par la valeur du paramètre. Sans valeur, le placeholder est
-// retiré avec la parenthèse qui l'entoure et l'espace qui le précède.
-function interpolate(template: string, params: Signal["params"]): string {
-	return template
-		.replace(/\s*\(\{(\w+)\}\)/g, (whole, name: string) =>
-			params?.[name] === undefined
-				? ""
-				: whole.replace(`{${name}}`, String(params[name])),
-		)
-		.replace(/\{(\w+)\}/g, (_, name: string) => String(params?.[name] ?? ""))
-		.trim();
-}
-
-export function signalText(locale: Locale, signal: Signal): string {
-	const template = (CONTENT_TEXTS[locale] as Partial<Record<RuleId, string>>)[
-		signal.id
-	];
-	return template === undefined ? "" : interpolate(template, signal.params);
 }
 
 export function resolveContentLocale(
