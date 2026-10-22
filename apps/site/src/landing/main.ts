@@ -63,9 +63,12 @@ export function fillOffer(
 
 /**
  * Démarre la landing : `html.js` en premier (déjà posée en ligne dans `<head>`,
- * sans effet si elle y est), puis le calque du dégradé et les apparitions, chacun
- * protégé. Les deux lancés : `html.js-ready` (la page devient transparente sur le
- * calque, et le script en ligne ne retire plus `js`). L'un des deux en échec :
+ * sans effet si elle y est). Script arrivé après l'abandon du script en ligne
+ * (`data-js-late`, au bout de 3 s) : le lecteur voit déjà tous les blocs, ils
+ * reçoivent `is-visible` avant que `js` revienne, aucun n'est recaché. Puis le
+ * calque du dégradé et les apparitions, chacun protégé. Les deux lancés :
+ * `html.js-ready` (la page devient transparente sur le calque, et le script en
+ * ligne ne retire plus `js`). L'un des deux en échec :
  * `js` est retirée tout de suite, la page reste celle sans JavaScript, lisible.
  * Enfin la lecture de l'offre (résolue quand les formules sont à jour).
  */
@@ -75,6 +78,9 @@ export async function startLanding(
 ): Promise<void> {
 	const doc = win.document;
 	const root = doc.documentElement;
+	if (root.hasAttribute("data-js-late"))
+		for (const block of doc.querySelectorAll("[data-reveal]"))
+			block.classList.add("is-visible");
 	root.classList.add("js");
 	const armed = [
 		() => {

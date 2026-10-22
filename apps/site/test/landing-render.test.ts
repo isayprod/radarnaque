@@ -407,6 +407,7 @@ describe("script en ligne du <head> (classe js)", () => {
 	afterEach(() => {
 		vi.useRealTimers();
 		document.documentElement.className = "";
+		document.documentElement.removeAttribute("data-js-late");
 	});
 
 	it("est le même dans les deux gabarits", () => {
@@ -422,6 +423,8 @@ describe("script en ligne du <head> (classe js)", () => {
 		expect(html.classList.contains("js")).toBe(true);
 		vi.advanceTimersByTime(1);
 		expect(html.classList.contains("js")).toBe(false);
+		// Marque l'abandon : main.ts, s'il arrive plus tard, ne recache rien.
+		expect(html.hasAttribute("data-js-late")).toBe(true);
 	});
 
 	it("garde js si main.ts a posé js-ready", () => {
@@ -430,6 +433,7 @@ describe("script en ligne du <head> (classe js)", () => {
 		html.classList.add("js-ready");
 		vi.advanceTimersByTime(5000);
 		expect(html.classList.contains("js")).toBe(true);
+		expect(html.hasAttribute("data-js-late")).toBe(false);
 	});
 
 	it("navigateur sans modules : ne pose pas js (main.ts ne tournerait pas)", () => {

@@ -3,7 +3,8 @@
  * Sans JavaScript, le hero peint son dégradé et les sections sont sur --bg-0. Avec
  * JavaScript, html.js (posée en ligne dans <head>, retirée au bout de 3 s si le
  * script n'a pas démarré) cache les blocs data-reveal, qui apparaissent en entrant
- * dans la fenêtre ; html.js-ready (posée par main.ts) rend la page transparente
+ * dans la fenêtre (script arrivé après ces 3 s : tous les blocs sont déjà
+ * visibles, rien n'est recaché) ; html.js-ready (posée par main.ts) rend la page transparente
  * au-dessus du calque fixe (.sky) qui porte le dégradé suivant le scroll.
  * Aucune valeur brute : couleurs, rayons et ombres viennent des tokens ; tailles
  * de police de DESIGN.md §2.3 en rem (display-xl 48-104 px, display-l 36-64,
