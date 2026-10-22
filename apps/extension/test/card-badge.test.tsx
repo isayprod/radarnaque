@@ -222,7 +222,7 @@ describe("CardBadge", () => {
 		expect(tooltip.classList.contains("z-[2147483000]")).toBe(true);
 		expect(tooltip.classList.contains("bg-glass-host")).toBe(true);
 		expect(tooltip.classList.contains("w-[260px]")).toBe(true);
-		expect(tooltip.classList.contains("rounded-[var(--r-s)]")).toBe(true);
+		expect(tooltip.classList.contains("rounded-sm")).toBe(true);
 		expect(document.body.innerHTML).not.toContain("2147483647");
 	});
 

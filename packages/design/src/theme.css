@@ -31,9 +31,11 @@
 	--color-glass-host: var(--glass-bg-host);
 
 	--radius-xs: var(--r-xs);
-	--radius-s: var(--r-s);
-	--radius-m: var(--r-m);
-	--radius-l: var(--r-l);
+	/* sm, md, lg et non s, m, l : `rounded-s` et `rounded-l` sont aussi des
+	   utilités logiques de Tailwind (coins de début, coins gauches). */
+	--radius-sm: var(--r-s);
+	--radius-md: var(--r-m);
+	--radius-lg: var(--r-l);
 	--radius-pill: var(--r-pill);
 
 	--font-sans: var(--font-sans);

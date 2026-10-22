@@ -30,6 +30,14 @@ describe("theme.css", () => {
 		expect(theme).not.toContain("@import");
 	});
 
+	it("rayons en sm, md, lg : jamais --radius-s, -m, -l (rounded-s et rounded-l sont des utilités logiques de Tailwind)", () => {
+		for (const name of ["--radius-s:", "--radius-m:", "--radius-l:"])
+			expect(theme, name).not.toContain(name);
+		expect(theme).toContain("--radius-sm: var(--r-s);");
+		expect(theme).toContain("--radius-md: var(--r-m);");
+		expect(theme).toContain("--radius-lg: var(--r-l);");
+	});
+
 	it("ne référence que des variables définies dans tokens.css", () => {
 		const used = [...theme.matchAll(/var\((--[\w-]+)\)/g)].map(
 			(m) => m[1] as string,

@@ -20,7 +20,7 @@ const HASH_CHARS = 12;
 
 // Bouton secondaire (DESIGN.md) : transparent, bordure forte, texte blanc.
 const BUTTON_CLASS =
-	"inline-flex cursor-pointer items-center justify-center rounded-s border border-border-strong bg-transparent px-2 py-1 font-sans text-[12px] leading-[1.4] font-medium text-text-1 hover:bg-white/8 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-40";
+	"inline-flex cursor-pointer items-center justify-center rounded-sm border border-border-strong bg-transparent px-2 py-1 font-sans text-[12px] leading-[1.4] font-medium text-text-1 hover:bg-white/8 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-40";
 
 const ms = (value: number | null) => (value === null ? "—" : `${value} ms`);
 
