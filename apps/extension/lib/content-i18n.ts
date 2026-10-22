@@ -15,6 +15,9 @@ export type ContentKey =
 	| "pro.notice"
 	| "card.aria"
 	| "card.loading"
+	| "card.level.low"
+	| "card.level.medium"
+	| "card.level.high"
 	| "severity.danger"
 	| "severity.warning"
 	| "severity.info"
@@ -106,6 +109,9 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 			"Annonce d'un professionnel : elle sert souvent de vitrine (prix sur demande, voir le site du vendeur). Ce n'est pas un signal d'arnaque.",
 		"card.aria": "Analyser cette annonce avec Radarnaque",
 		"card.loading": "Analyse…",
+		"card.level.low": "Faible",
+		"card.level.medium": "Moyen",
+		"card.level.high": "Élevé",
 		"severity.danger": "Grave",
 		"severity.warning": "Attention",
 		"severity.info": "Info",
@@ -188,6 +194,9 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 			"Advertentie van een professional: ze dient vaak als etalage (prijs op aanvraag, zie de website van de verkoper). Dat is geen teken van oplichting.",
 		"card.aria": "Deze advertentie analyseren met Radarnaque",
 		"card.loading": "Analyseren…",
+		"card.level.low": "Laag",
+		"card.level.medium": "Gemiddeld",
+		"card.level.high": "Hoog",
 		"severity.danger": "Ernstig",
 		"severity.warning": "Let op",
 		"severity.info": "Info",

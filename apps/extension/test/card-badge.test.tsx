@@ -2,7 +2,13 @@ import type { Locale } from "@radarnaque/shared";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { PILL_CLASS } from "../components/BadgePill";
 import { CardBadge } from "../components/CardBadge";
+import {
+	CARD_LEVEL_KEY,
+	LEVEL_KEY,
+	LEVEL_STYLE,
+} from "../components/risk-styles";
 import type { ScanState } from "../lib/content/ai-client";
 import { addEvent, startProgress } from "../lib/content/scan-progress";
 import { aiErrorText, contentText } from "../lib/content-i18n";
@@ -45,13 +51,17 @@ function renderInLink(
 }
 
 describe("CardBadge", () => {
-	test("inactif : bouton « R » avec l'aria-label FR et NL", () => {
+	test("repos : le logo seul, pas de « R », nom card.aria (FR et NL)", () => {
 		renderInLink({ status: "idle" });
 		const button = screen.getByRole("button", {
 			name: "Analyser cette annonce avec Radarnaque",
 		});
 		expect(button.getAttribute("type")).toBe("button");
-		expect(button.textContent).toBe("R");
+		expect(button.textContent).toBe("");
+		const logo = button.querySelector("svg");
+		expect(logo).not.toBeNull();
+		expect(logo?.getAttribute("width")).toBe("13");
+		expect(logo?.classList.contains("rq-logo--loading")).toBe(false);
 		cleanup();
 		renderInLink({ status: "idle" }, "nl");
 		expect(
@@ -59,6 +69,20 @@ describe("CardBadge", () => {
 				name: "Deze advertentie analyseren met Radarnaque",
 			}),
 		).toBeTruthy();
+	});
+
+	test("mini-pilule : surface de la pilule de la fiche, 22 px de haut, carrée au repos, Inter 11 px", () => {
+		renderInLink({ status: "idle" });
+		const classes = screen.getByRole("button").classList;
+		for (const name of [
+			...PILL_CLASS.split(" "),
+			"h-[22px]",
+			"min-w-[22px]",
+			"text-[11px]",
+			"font-medium",
+		])
+			expect(classes.contains(name), name).toBe(true);
+		expect(classes.contains("bg-white")).toBe(false);
 	});
 
 	test("clic dans un lien : defaultPrevented, ne remonte pas au lien", () => {
@@ -129,14 +153,76 @@ describe("CardBadge", () => {
 		expect(reached).not.toHaveBeenCalled();
 	});
 
-	test("loading : aria-busy, icône qui tourne et texte d'attente", () => {
+	test("en cours : logo animé, nom card.loading", () => {
 		renderInLink({ status: "loading", progress: startProgress(0) });
-		const button = screen.getByRole("button");
+		const button = screen.getByRole("button", {
+			name: contentText("fr", "card.loading"),
+		});
 		expect(button.getAttribute("aria-busy")).toBe("true");
-		expect(button.querySelector(".radarnaque-spin")).not.toBeNull();
+		const logo = button.querySelector("svg");
+		expect(logo?.classList.contains("rq-logo--loading")).toBe(true);
+		expect(logo?.querySelector(".rq-logo-spin .rq-logo-arc")).not.toBeNull();
 		expect(button.textContent).toBe(contentText("fr", "card.loading"));
 		expect(contentText("fr", "card.loading")).toBe("Analyse…");
 		expect(contentText("nl", "card.loading")).toBe("Analyseren…");
+	});
+
+	test("résultat high : point et « Élevé » visibles ; nom accessible « Risque élevé »", () => {
+		renderInLink({
+			status: "done",
+			result: { ...sampleAnalysis, level: "high" },
+			progress: null,
+		});
+		const button = screen.getByRole("button", { name: "Risque élevé" });
+		expect(button.textContent).toBe("Élevé");
+		expect(button.querySelector(".bg-danger")).not.toBeNull();
+		expect(button.querySelector("svg")).toBeNull();
+	});
+
+	test("résultat high en NL : « Hoog » visible ; nom accessible « Hoog risico »", () => {
+		renderInLink(
+			{
+				status: "done",
+				result: { ...sampleAnalysis, level: "high" },
+				progress: null,
+			},
+			"nl",
+		);
+		const button = screen.getByRole("button", { name: "Hoog risico" });
+		expect(button.textContent).toBe("Hoog");
+		expect(button.querySelector(".bg-danger")).not.toBeNull();
+	});
+
+	test("CARD_LEVEL_KEY : chaque niveau a son texte court, le nom garde LEVEL_KEY", () => {
+		expect(CARD_LEVEL_KEY).toEqual({
+			low: "card.level.low",
+			medium: "card.level.medium",
+			high: "card.level.high",
+		});
+		for (const level of ["low", "medium", "high"] as const) {
+			renderInLink({
+				status: "done",
+				result: { ...sampleAnalysis, level },
+				progress: null,
+			});
+			const button = screen.getByRole("button", {
+				name: contentText("fr", LEVEL_KEY[level]),
+			});
+			expect(button.textContent).toBe(contentText("fr", CARD_LEVEL_KEY[level]));
+			expect(button.querySelector(`.${LEVEL_STYLE[level].dot}`)).not.toBeNull();
+			cleanup();
+		}
+	});
+
+	test("infobulle : verre sombre, --r-s, 260 px, aucune classe z-[2147483647]", () => {
+		renderInLink({ status: "done", result: sampleAnalysis, progress: null });
+		const tooltip = screen.getByRole("tooltip", { hidden: true });
+		expect(tooltip.className).not.toContain("2147483647");
+		expect(tooltip.classList.contains("z-[2147483000]")).toBe(true);
+		expect(tooltip.classList.contains("bg-glass-strong")).toBe(true);
+		expect(tooltip.classList.contains("w-[260px]")).toBe(true);
+		expect(tooltip.classList.contains("rounded-[var(--r-s)]")).toBe(true);
+		expect(document.body.innerHTML).not.toContain("2147483647");
 	});
 
 	test("done medium : « Risque moyen », infobulle avec summary.fr au survol et au focus", async () => {
@@ -256,7 +342,7 @@ describe("CardBadge", () => {
 		);
 	});
 
-	test("error : message dans l'infobulle, un nouveau clic relance", async () => {
+	test("erreur : « ! » en text-danger, nom card.aria, message dans l'infobulle, un nouveau clic relance", async () => {
 		const user = userEvent.setup();
 		const { onActivate } = renderInLink({
 			status: "error",
@@ -268,6 +354,16 @@ describe("CardBadge", () => {
 			name: contentText("fr", "card.aria"),
 		});
 		expect(button.getAttribute("aria-describedby")).toBe(tooltip.id);
+		// Le logo atténué et « ! » en --danger, plus de « R ».
+		expect(button.textContent).toBe("!");
+		expect(button.querySelector("svg")?.classList.contains("opacity-60")).toBe(
+			true,
+		);
+		expect(
+			[...button.querySelectorAll("span")]
+				.find((el) => el.textContent === "!")
+				?.classList.contains("text-danger"),
+		).toBe(true);
 		await user.click(button);
 		expect(onActivate).toHaveBeenCalledTimes(1);
 	});
