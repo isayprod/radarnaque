@@ -122,10 +122,23 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	vi.useRealTimers();
 	vi.unstubAllGlobals();
 	document.body.replaceChildren();
 	document.documentElement.className = "";
+	document.documentElement.removeAttribute("data-js-late");
 });
+
+/** Script en ligne du <head> de index.html (classe js, abandon au bout de 3 s). */
+const SCRIPT_EN_LIGNE = (() => {
+	const html = readFileSync(
+		resolve(import.meta.dirname, "../index.html"),
+		"utf8",
+	);
+	const m = /<script>([^<]*)<\/script>/.exec(html);
+	if (!m?.[1]) throw new Error("script en ligne absent de index.html");
+	return m[1];
+})();
 
 describe("startReveal", () => {
 	it("observe chaque bloc data-reveal au seuil 0,15 et ajoute is-visible une seule fois à l'entrée", () => {
@@ -337,6 +350,10 @@ describe("startLanding", () => {
 		await startLanding(window, fetchImpl as unknown as typeof fetch);
 		expect(doc.documentElement.classList.contains("js")).toBe(true);
 		expect(classeAuDepart).toHaveReturnedWith(true);
+		// Démarrage à l'heure : les blocs restent cachés jusqu'à leur entrée.
+		expect(doc.documentElement.hasAttribute("data-js-late")).toBe(false);
+		for (const el of doc.querySelectorAll("[data-reveal]"))
+			expect(el.classList.contains("is-visible")).toBe(false);
 		expect(fetchImpl).toHaveBeenCalledWith("/api/offer");
 		expect(champ(doc, "standard", "price")).toBe(formatCents(349, "fr"));
 		const sky = doc.querySelector<HTMLElement>(".sky");
@@ -382,6 +399,38 @@ describe("startLanding", () => {
 		expect(doc.documentElement.classList.contains("js")).toBe(false);
 		expect(doc.documentElement.classList.contains("js-ready")).toBe(false);
 		expect(erreur).toHaveBeenCalled();
+	});
+
+	it("script arrivé après l'abandon du script en ligne (3 s) : les blocs déjà lus ne sont jamais recachés", async () => {
+		const doc = monter();
+		vi.useFakeTimers();
+		new Function(SCRIPT_EN_LIGNE)();
+		vi.advanceTimersByTime(3000);
+		vi.useRealTimers();
+		const root = doc.documentElement;
+		// Le script en ligne a abandonné : page sans JavaScript, marquée en retard.
+		expect(root.classList.contains("js")).toBe(false);
+		expect(root.hasAttribute("data-js-late")).toBe(true);
+		const blocs = [...doc.querySelectorAll("[data-reveal]")];
+		expect(blocs.length).toBeGreaterThan(5);
+		// Au moment où js revient, chaque bloc est déjà visible : aucun état caché.
+		const cachesAuRetour: number[] = [];
+		const ajout = root.classList.add.bind(root.classList);
+		vi.spyOn(root.classList, "add").mockImplementation((...noms) => {
+			if (noms.includes("js"))
+				cachesAuRetour.push(
+					blocs.filter((b) => !b.classList.contains("is-visible")).length,
+				);
+			ajout(...noms);
+		});
+		await startLanding(
+			window,
+			vi.fn(async () => new Response("", { status: 503 })),
+		);
+		expect(cachesAuRetour.every((n) => n === 0)).toBe(true);
+		for (const el of blocs)
+			expect(el.classList.contains("is-visible")).toBe(true);
+		expect(root.classList.contains("js-ready")).toBe(true);
 	});
 
 	it("API en panne : valeurs de secours gardées", async () => {

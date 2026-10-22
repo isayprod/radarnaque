@@ -10,6 +10,7 @@
  */
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { iconTileSvg } from "@radarnaque/design/logo";
 import type { Locale } from "@radarnaque/shared";
 import { Resvg } from "@resvg/resvg-js";
@@ -122,8 +123,20 @@ export function ogSvg(locale: Locale): string {
 	);
 }
 
+/**
+ * Vrai quand ce module est le script lancé (`node scripts/og.ts`), faux quand il
+ * est importé (tests). Remplace `import.meta.main`, absent avant Node 24.2 alors
+ * que `engines` accepte Node 24.0.
+ */
+export function isEntryPoint(
+	argv1: string | undefined,
+	moduleUrl: string,
+): boolean {
+	return argv1 !== undefined && resolve(argv1) === fileURLToPath(moduleUrl);
+}
+
 const publicDir = resolve(import.meta.dirname, "../public");
-if (import.meta.main)
+if (isEntryPoint(process.argv[1], import.meta.url))
 	for (const locale of ["fr", "nl"] as const) {
 		const png = new Resvg(ogSvg(locale), {
 			fitTo: { mode: "width", value: WIDTH },

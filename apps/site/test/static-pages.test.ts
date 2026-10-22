@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MESSAGES } from "../src/i18n";
+import { renderPricing, renderPrivacy } from "../src/pages-render";
 
 const SITE = resolve(import.meta.dirname, "..");
 const lire = (chemin: string) => readFileSync(resolve(SITE, chemin), "utf8");
@@ -114,6 +115,37 @@ describe("/auth/callback", () => {
 			},
 		});
 	});
+});
+
+describe("/pricing et /privacy : landmark <main>", () => {
+	afterEach(() => document.body.replaceChildren());
+
+	it.each([
+		["pricing/index.html", renderPricing],
+		["privacy/index.html", renderPrivacy],
+	] as const)(
+		"%s : sans JavaScript, le message est dans un <main> ; avec, un seul <main> (celui du rendu)",
+		(page, rendre) => {
+			const html = lire(page);
+			const corps = html.match(/<body[^>]*>([\s\S]*)<\/body>/)?.[1] ?? "";
+			// Sans JavaScript : le contenu de <noscript> est rendu, dans un <main>.
+			const bruit = /<noscript>([\s\S]*?)<\/noscript>/.exec(corps)?.[1] ?? "";
+			const sansJs = document.createElement("div");
+			sansJs.innerHTML = bruit;
+			const main = sansJs.querySelector(":scope > main");
+			expect(main?.textContent).toContain(
+				"Activez JavaScript pour afficher cette page.",
+			);
+			expect(main?.querySelector('[lang="nl"]')).not.toBeNull();
+			// Avec JavaScript : le rendu remplace tout le contenu de #app.
+			document.body.innerHTML = corps.replace(/<script[\s\S]*?<\/script>/g, "");
+			const app = document.getElementById("app");
+			if (!app) throw new Error("#app absent");
+			rendre(document, app, "fr");
+			expect(document.querySelectorAll("main")).toHaveLength(1);
+			expect(app.querySelector("noscript")).toBeNull();
+		},
+	);
 });
 
 describe("/privacy : largeur de lecture", () => {
