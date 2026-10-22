@@ -10,12 +10,16 @@
 @import "@radarnaque/design/tokens.css";
 @import "@radarnaque/design/fonts.css";
 @import "../layout.css";
+@import "./mockup.css";
 
 .landing {
 	/* Gouttière latérale de toutes les sections. */
 	--gutter: 24px;
 	/* Contenu des sections : 1040 px au plus. */
 	--content: 1040px;
+	/* Bas du hero : la maquette en recouvre tout sauf --mockup-gap. */
+	--hero-pad-bottom: clamp(200px, 24vw, 300px);
+	--mockup-gap: 56px;
 }
 
 /* --- Hero (spec landing §3.2) --- */
@@ -28,7 +32,6 @@
  * la place de la maquette (--hero-tail = marge du bas + pilule et son écart).
  */
 .landing-hero {
-	--hero-pad-bottom: clamp(200px, 24vw, 300px);
 	--hero-tail: calc(var(--hero-pad-bottom) + 84px);
 	position: relative;
 	padding: 0 var(--gutter);
@@ -66,7 +69,7 @@
 .landing-hero__inner {
 	max-width: 880px;
 	margin: 0 auto;
-	/* Place en bas pour la maquette, qui chevauche le hero (tâche 5). */
+	/* Place en bas pour la maquette, qui chevauche le hero. */
 	padding: clamp(112px, 16vh, 168px) 0 var(--hero-pad-bottom);
 }
 
@@ -136,13 +139,13 @@ a.landing-pill:hover {
 	cursor: default;
 }
 
-/* --- Emplacement de la maquette (tâche 5) --- */
+/* --- Maquette du produit (mockup.css), à cheval sur le bas du hero --- */
 
 .landing-mockup {
 	position: relative;
 	z-index: 1;
 	width: min(980px, calc(100% - 2 * var(--gutter)));
-	margin: 0 auto;
+	margin: calc(var(--mockup-gap) - var(--hero-pad-bottom)) auto 0;
 }
 
 /* --- Sections sur --bg-0 --- */
@@ -285,10 +288,16 @@ a.landing-pill:hover {
 	background-color: var(--success);
 }
 
+/* Filet de 1 px : le « · » qu'il contient reste dans le texte (sans CSS, lecteurs
+   d'écran) mais n'est pas peint. */
 .landing-chip__sep {
+	flex: none;
 	width: 1px;
 	height: 14px;
+	overflow: hidden;
 	background-color: var(--border-strong);
+	color: transparent;
+	white-space: pre;
 }
 
 .landing-chip__score {
@@ -467,8 +476,9 @@ a.landing-pill:hover {
 		--gutter: 16px;
 	}
 
-	.landing-hero {
+	.landing {
 		--hero-pad-bottom: 120px;
+		--mockup-gap: 40px;
 	}
 
 	.landing-hero__inner {

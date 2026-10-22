@@ -13,6 +13,7 @@ import type { Offer, OfferPlan } from "../offer.ts";
 import { formatCents, type PlanText, PRICING } from "../pages-i18n.ts";
 import { featureLines } from "../plan-lines.ts";
 import { LANDING_TEXT } from "./i18n.ts";
+import { mockupNode } from "./mockup.ts";
 
 export interface LandingOptions {
 	/** Offre affichée dans les formules (au build : `PLANS`, l'offre de secours). */
@@ -112,7 +113,8 @@ function stepVisual(locale: Locale, step: number): Child {
 				{ class: "landing-chip" },
 				h("span", { class: "landing-chip__dot", "aria-hidden": "true" }),
 				h("span", {}, t.stepLevel),
-				h("span", { class: "landing-chip__sep", "aria-hidden": "true" }),
+				// Filet de 1 px à l'écran ; « · » lu sans CSS et par les lecteurs d'écran.
+				h("span", { class: "landing-chip__sep" }, " · "),
 				h("span", { class: "landing-chip__score" }, t.stepScore),
 			),
 		);
@@ -265,8 +267,12 @@ export function landingNodes(locale: Locale, options: LandingOptions): VNode[] {
 	const { offer, storeUrl } = options;
 	return [
 		hero(locale, storeUrl),
-		// Emplacement de la maquette du produit (tâche 5), à cheval sur le bas du hero.
-		h("div", { class: "landing-mockup", "data-mockup": true }),
+		// Maquette du produit (spec landing §4), à cheval sur le bas du hero.
+		h(
+			"div",
+			{ class: "landing-mockup", "data-mockup": true },
+			mockupNode(locale),
+		),
 		h(
 			"main",
 			{ class: "landing-main" },

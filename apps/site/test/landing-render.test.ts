@@ -148,6 +148,27 @@ describe("renderLanding : textes", () => {
 		expect(comment?.textContent).toContain("Risque faible");
 		expect(comment?.textContent).toContain("12/100");
 	});
+
+	it("pilule de l'étape 3 : le séparateur « · » se lit, sans CSS comme au lecteur d'écran", () => {
+		for (const locale of LOCALES) {
+			const root = monter(rendu(locale));
+			const t = LANDING_TEXT[locale];
+			const pilules = [...root.querySelectorAll("#comment .landing-chip")];
+			const niveau = pilules.find((p) => p.textContent?.includes(t.stepScore));
+			expect(niveau?.textContent).toBe(`${t.stepLevel} · ${t.stepScore}`);
+			const separateur = niveau?.querySelector(".landing-chip__sep");
+			expect(separateur?.textContent).toBe(" · ");
+			expect(separateur?.hasAttribute("aria-hidden")).toBe(false);
+		}
+	});
+
+	it("NL : « Betalen kan binnenkort. » et « Formules in detail »", () => {
+		expect(LANDING_TEXT.nl.paymentSoon).toBe("Betalen kan binnenkort.");
+		expect(LANDING_TEXT.nl.plansDetail).toBe("Formules in detail");
+		const html = rendu("nl");
+		expect(contient(html, "Betalen kan binnenkort.")).toBe(true);
+		expect(contient(html, "Formules in detail")).toBe(true);
+	});
 });
 
 describe("renderLanding : formules de secours", () => {
@@ -428,5 +449,35 @@ describe("landingPlugin", () => {
 			filename: resolve(SITE, "pricing/index.html"),
 		});
 		expect(sortie).toBe(html);
+	});
+
+	/** Applique le hook à un gabarit donné en texte, au chemin donné. */
+	async function appliquer(html: string, path: string): Promise<unknown> {
+		const plugin = landingPlugin({ storeUrl: STORE, publicUrl: PUBLIC });
+		const hook = plugin.transformIndexHtml;
+		const handler = typeof hook === "function" ? hook : hook?.handler;
+		if (!handler) throw new Error("transformIndexHtml absent");
+		return handler.call({} as never, html, {
+			path,
+			filename: resolve(SITE, path.slice(1)),
+		});
+	}
+
+	it("échoue si un seul des deux marqueurs est présent", async () => {
+		const tete = "<html><head><!--landing:head--></head><body></body></html>";
+		const corps = "<html><head></head><body><!--landing:body--></body></html>";
+		for (const path of ["/index.html", "/nl/index.html", "/autre/index.html"]) {
+			await expect(appliquer(tete, path)).rejects.toThrow(/landing:body/);
+			await expect(appliquer(corps, path)).rejects.toThrow(/landing:head/);
+		}
+	});
+
+	it("échoue si /index.html ou /nl/index.html n'ont pas leurs marqueurs", async () => {
+		const nu = "<html><head></head><body></body></html>";
+		for (const path of ["/index.html", "/nl/index.html", "/nl/", "/"]) {
+			await expect(appliquer(nu, path), path).rejects.toThrow(/marqueur/);
+		}
+		// Une autre page sans marqueur passe inchangée.
+		expect(await appliquer(nu, "/pricing/index.html")).toBe(nu);
 	});
 });

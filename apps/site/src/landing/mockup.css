@@ -1,0 +1,839 @@
+/*
+ * Maquette du produit (spec landing §4) : fenêtre de navigateur, fiche d'annonce
+ * refaite à la main dans la mise en page d'une fiche 2ememain, pastille et panneau
+ * de Radarnaque recopiés en statique (BadgePill, RiskBadge et AiSection de
+ * l'extension, mêmes tokens). Sous 768 px : titre, pastille et panneau, à plat.
+ *
+ * Tailles de police en rem (16 px = 1rem) : 11 px = 0.6875rem, 12 = 0.75,
+ * 13 = 0.8125, 14 = 0.875, 15 = 0.9375, 20 = 1.25, 26 = 1.625, 44 = 2.75.
+ */
+
+.mk {
+	/*
+	 * couleurs du site tiers : début
+	 * Seules valeurs brutes du site hors de tokens.css (spec landing §4) : elles
+	 * imitent la fiche d'un site tiers (fond, filets, encre, liens, bouton jaune)
+	 * et colorent la photo dessinée du produit. Rien de Radarnaque ici.
+	 */
+	--mk-page: #fbfbfa;
+	--mk-surface: #ffffff;
+	--mk-muted: #f1f1f0;
+	--mk-line: #e5e5e4;
+	--mk-line-strong: #d9d9d8;
+	--mk-ink: #001836;
+	--mk-ink-2: #56657a;
+	--mk-link: #0064da;
+	--mk-brand: #00285a;
+	--mk-thumb: #083871;
+	--mk-back-border: #8199b5;
+	--mk-cta: #ffbb00;
+	--mk-counter: rgba(28, 28, 28, 0.72);
+	--mk-counter-ink: #ffffff;
+	/* Photo dessinée : table en bois, boîte blanche, iPhone violet. */
+	--mk-ph-wood: #b27b4b;
+	--mk-ph-grain: #8d5a33;
+	--mk-ph-box: #f5f5f2;
+	--mk-ph-box-side: #d6d5d0;
+	--mk-ph-shadow: rgba(48, 26, 8, 0.3);
+	--mk-ph-frame: #4b4060;
+	--mk-ph-phone: #6f6191;
+	--mk-ph-sheen: rgba(255, 255, 255, 0.13);
+	--mk-ph-bump: #5c5079;
+	--mk-ph-lens: #1c1a23;
+	--mk-ph-glass: #2b3452;
+	--mk-ph-glint: rgba(255, 255, 255, 0.6);
+	--mk-ph-flash: #e9e3d2;
+	--mk-ph-screen: #131318;
+	--mk-ph-island: #050507;
+	--mk-ph-print: #e0dfda;
+	/* couleurs du site tiers : fin */
+
+	--mk-font: "Helvetica Neue", Helvetica, Arial, sans-serif;
+	/* Marge intérieure de la fiche ; le panneau déborde de la fenêtre de --mk-out. */
+	--mk-pad: 24px;
+	--mk-out: 28px;
+	position: relative;
+	border-radius: var(--r-l);
+	background-color: var(--bg-1);
+	box-shadow: var(--shadow-mockup);
+	text-align: left;
+	animation: mk-float 6s ease-in-out infinite;
+}
+
+/* Flottement lent : 4 px en 6 s (spec landing §4). */
+@keyframes mk-float {
+	0%,
+	100% {
+		transform: translateY(0);
+	}
+
+	50% {
+		transform: translateY(-4px);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.mk {
+		animation: none;
+	}
+}
+
+/* --- Barre de la fenêtre (sombre, trois points, adresse, icône de l'extension) --- */
+
+.mk-chrome {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	height: 42px;
+	padding: 0 14px 0 16px;
+	border-radius: var(--r-l) var(--r-l) 0 0;
+	border-bottom: 1px solid var(--border-subtle);
+}
+
+.mk-dots {
+	display: flex;
+	gap: 7px;
+}
+
+.mk-dots span {
+	width: 11px;
+	height: 11px;
+	border-radius: 50%;
+	background-color: var(--border-strong);
+}
+
+.mk-url {
+	flex: 1;
+	min-width: 0;
+	max-width: 520px;
+	height: 26px;
+	margin: 0 auto;
+	padding: 0 12px;
+	overflow: hidden;
+	border-radius: var(--r-xs);
+	background-color: color-mix(in srgb, var(--text-1) 7%, transparent);
+	color: var(--text-2);
+	font-size: 0.75rem;
+	line-height: 26px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mk-ext {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 24px;
+	height: 24px;
+	border-radius: var(--r-xs);
+	background-image: var(--gradient-compact);
+	color: var(--text-1);
+}
+
+/* --- Fiche du site imité --- */
+
+.mk-page {
+	border-top: 3px solid var(--mk-brand);
+	border-radius: 0 0 var(--r-l) var(--r-l);
+	background-color: var(--mk-page);
+	color: var(--mk-ink);
+	font-family: var(--mk-font);
+	font-size: 0.8125rem;
+	line-height: 1.4;
+}
+
+.mk-page svg {
+	flex: none;
+}
+
+.mk-link {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--mk-link);
+	white-space: nowrap;
+}
+
+/* Barre du haut : forme neutre à la place du logo, recherche, liens, bouton jaune. */
+.mk-header {
+	display: flex;
+	align-items: center;
+	gap: 20px;
+	height: 52px;
+	padding: 0 var(--mk-pad);
+	border-bottom: 1px solid var(--mk-line-strong);
+}
+
+.mk-logo {
+	flex: none;
+	width: 88px;
+	height: 22px;
+	border-radius: var(--r-pill);
+	background-color: var(--mk-line);
+}
+
+.mk-search {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+	max-width: 340px;
+	height: 32px;
+}
+
+.mk-search__field {
+	flex: 1;
+	min-width: 0;
+	padding: 0 12px;
+	overflow: hidden;
+	border: 1px solid var(--mk-line-strong);
+	border-right: 0;
+	border-radius: 4px 0 0 4px;
+	background-color: var(--mk-surface);
+	color: var(--mk-ink-2);
+	font-size: 0.75rem;
+	line-height: 30px;
+	white-space: nowrap;
+}
+
+.mk-search__button {
+	display: grid;
+	place-items: center;
+	width: 36px;
+	border-radius: 0 4px 4px 0;
+	background-color: var(--mk-brand);
+	color: var(--mk-surface);
+}
+
+.mk-header__links {
+	display: flex;
+	align-items: center;
+	gap: 18px;
+	margin-left: auto;
+	font-size: 0.75rem;
+}
+
+.mk-cta {
+	display: inline-flex;
+	align-items: center;
+	height: 32px;
+	padding: 0 14px;
+	border-radius: 6px;
+	background-color: var(--mk-cta);
+	color: var(--mk-brand);
+	font-weight: 700;
+	white-space: nowrap;
+}
+
+.mk-body {
+	padding: 0 var(--mk-pad) 28px;
+}
+
+/* Retour et fil d'Ariane. */
+.mk-nav {
+	display: flex;
+	align-items: center;
+	gap: 20px;
+	padding: 14px 0;
+}
+
+.mk-back {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	height: 28px;
+	padding: 0 12px 0 8px;
+	border: 1.5px solid var(--mk-back-border);
+	border-radius: 4px;
+	color: var(--mk-brand);
+	font-weight: 700;
+}
+
+.mk-crumbs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	color: var(--mk-link);
+}
+
+.mk-crumbs li + li::before {
+	content: "›";
+	margin-right: 6px;
+	color: var(--mk-ink-2);
+}
+
+/* Deux colonnes : galerie et description à gauche, fiche à droite. */
+.mk-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 296px;
+	gap: 20px;
+	align-items: start;
+}
+
+.mk-gallery {
+	position: relative;
+	padding: 14px 0;
+	background-color: var(--mk-muted);
+}
+
+.mk-photo svg {
+	display: block;
+	width: 100%;
+	height: auto;
+	aspect-ratio: 16 / 10;
+}
+
+.mk-counter {
+	position: absolute;
+	bottom: 22px;
+	left: 10px;
+	padding: 3px 8px;
+	border-radius: 8px;
+	background-color: var(--mk-counter);
+	color: var(--mk-counter-ink);
+	font-size: 0.6875rem;
+	font-weight: 700;
+}
+
+.mk-thumbs {
+	display: flex;
+	gap: 10px;
+	margin-top: 10px;
+}
+
+.mk-thumb {
+	width: 84px;
+	height: 58px;
+	overflow: hidden;
+	border: 2px solid transparent;
+	border-radius: 4px;
+}
+
+.mk-thumb--current {
+	border-color: var(--mk-thumb);
+}
+
+.mk-thumb svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+
+.mk-desc-title {
+	margin: 18px 0 0;
+	font-size: 0.9375rem;
+	font-weight: 700;
+}
+
+.mk-desc {
+	max-width: 36rem;
+	margin: 6px 0 0;
+	line-height: 1.5;
+}
+
+/* Colonne de droite. */
+.mk-actions {
+	display: flex;
+	justify-content: space-around;
+	padding: 4px 0 14px;
+	border-bottom: 1px solid var(--mk-line);
+}
+
+.mk-heading {
+	position: relative;
+	padding: 0 16px;
+	margin-top: 18px;
+}
+
+.mk-title {
+	margin: 0;
+	font-size: 1.25rem;
+	font-weight: 700;
+	line-height: 1.35;
+}
+
+.mk-price {
+	margin: 10px 0 0;
+	padding: 0 16px;
+	font-size: 1.625rem;
+	font-weight: 700;
+}
+
+.mk-tag {
+	display: inline-block;
+	margin: 12px 16px 0;
+	padding: 4px 8px;
+	border-radius: 4px;
+	background-color: var(--mk-muted);
+	font-size: 0.75rem;
+}
+
+.mk-seller {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-top: 18px;
+	padding: 16px;
+	border-top: 1px solid var(--mk-line);
+	border-bottom: 1px solid var(--mk-line);
+}
+
+.mk-avatar {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 40px;
+	height: 40px;
+	border-radius: 50%;
+	background-color: var(--mk-muted);
+	color: var(--mk-ink-2);
+	font-weight: 700;
+}
+
+.mk-seller__text {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.mk-seller__name {
+	color: var(--mk-link);
+}
+
+.mk-contact {
+	display: grid;
+	place-items: center;
+	height: 38px;
+	margin: 16px 16px 0;
+	border-radius: 6px;
+	background-color: var(--mk-cta);
+	color: var(--mk-brand);
+	font-weight: 700;
+}
+
+/* --- Photo dessinée --- */
+
+.mk-ph-wood {
+	fill: var(--mk-ph-wood);
+}
+
+.mk-ph-grain {
+	fill: none;
+	stroke: var(--mk-ph-grain);
+	stroke-width: 4;
+	opacity: 0.45;
+}
+
+.mk-ph-box {
+	fill: var(--mk-ph-box);
+}
+
+.mk-ph-box-side {
+	fill: var(--mk-ph-box-side);
+}
+
+.mk-ph-shadow {
+	fill: var(--mk-ph-shadow);
+}
+
+.mk-ph-frame {
+	fill: var(--mk-ph-frame);
+}
+
+.mk-ph-phone {
+	fill: var(--mk-ph-phone);
+}
+
+.mk-ph-sheen {
+	fill: var(--mk-ph-sheen);
+}
+
+.mk-ph-bump {
+	fill: var(--mk-ph-bump);
+}
+
+.mk-ph-lens {
+	fill: var(--mk-ph-lens);
+}
+
+.mk-ph-glass {
+	fill: var(--mk-ph-glass);
+}
+
+.mk-ph-glint {
+	fill: var(--mk-ph-glint);
+}
+
+.mk-ph-flash {
+	fill: var(--mk-ph-flash);
+}
+
+.mk-ph-screen {
+	fill: var(--mk-ph-screen);
+}
+
+.mk-ph-island {
+	fill: var(--mk-ph-island);
+}
+
+.mk-ph-print {
+	fill: none;
+	stroke: var(--mk-ph-print);
+	stroke-width: 3;
+}
+
+/* --- Pastille Radarnaque (BadgePill : 28 px, verre des pages tierces) --- */
+
+.mk-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	height: 28px;
+	margin-left: 8px;
+	padding: 0 12px;
+	border: 1px solid color-mix(in srgb, var(--text-1) 12%, transparent);
+	border-radius: var(--r-pill);
+	background-color: var(--glass-bg-host);
+	box-shadow: var(--shadow-pill);
+	color: var(--text-1);
+	font-family: var(--font-sans);
+	font-size: 0.8125rem;
+	font-weight: 500;
+	line-height: 1;
+	vertical-align: middle;
+	white-space: nowrap;
+}
+
+.mk-dot {
+	flex: none;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+}
+
+.mk-dot--high {
+	background-color: var(--danger);
+}
+
+/* Filet de 1 px : le « · » qu'il contient reste dans le texte, sans être peint. */
+.mk-sep {
+	flex: none;
+	width: 1px;
+	height: 14px;
+	overflow: hidden;
+	background-color: color-mix(in srgb, var(--text-1) 12%, transparent);
+	color: transparent;
+	white-space: pre;
+}
+
+.mk-pill__score {
+	color: var(--text-2);
+	font-variant-numeric: tabular-nums;
+}
+
+/* --- Panneau ouvert (RiskBadge et AiSection) --- */
+
+/*
+ * Verre sombre, bordure sans haut : le filet --gradient-hairline de 2 px forme le
+ * bord supérieur. 340 px, sous la pastille, débordant de la fenêtre à droite.
+ */
+.mk-panel {
+	position: absolute;
+	top: calc(100% + 6px);
+	right: calc(-1 * var(--mk-pad) - var(--mk-out));
+	z-index: 2;
+	width: 340px;
+	padding: 16px;
+	overflow: hidden;
+	border: 1px solid var(--border-default);
+	border-top: 0;
+	border-radius: var(--r-m);
+	background-color: var(--glass-bg-host);
+	box-shadow: var(--shadow-float);
+	color: var(--text-2);
+	font-family: var(--font-sans);
+	font-size: 0.8125rem;
+	font-weight: 400;
+	line-height: 1.45;
+}
+
+@supports (backdrop-filter: blur(1px)) {
+	.mk-panel,
+	.mk-pill {
+		backdrop-filter: blur(var(--glass-blur));
+	}
+}
+
+.mk-panel::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	right: 0;
+	left: 0;
+	height: 2px;
+	background-image: var(--gradient-hairline);
+}
+
+.mk-panel p {
+	margin: 0;
+}
+
+.mk-panel__head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 16px;
+	color: var(--text-1);
+}
+
+.mk-panel__head svg {
+	flex: none;
+}
+
+.mk-label,
+.mk-panel__title {
+	color: var(--text-2);
+	font-size: 0.6875rem;
+	font-weight: 500;
+	line-height: 1.3;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+
+.mk-panel__title {
+	flex: 1;
+	min-width: 0;
+}
+
+.mk-panel__close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	margin: -4px -6px -4px 0;
+	color: var(--text-2);
+}
+
+.mk-panel__body {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.mk-score-block {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.mk-score-row {
+	display: flex;
+	flex-direction: row-reverse;
+	align-items: flex-end;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.mk-verdict {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	gap: 6px;
+	height: 22px;
+	margin-bottom: 6px;
+	padding: 0 10px;
+	border-radius: var(--r-pill);
+	background-color: var(--danger-soft);
+	color: var(--danger);
+	font-size: 0.75rem;
+	font-weight: 500;
+	line-height: 1;
+}
+
+.mk-verdict .mk-dot {
+	width: 6px;
+	height: 6px;
+}
+
+.mk-panel .mk-score {
+	display: flex;
+	align-items: baseline;
+	gap: 4px;
+}
+
+.mk-score__value {
+	color: var(--text-1);
+	font-family: var(--font-serif);
+	font-size: 2.75rem;
+	font-weight: 400;
+	line-height: 1;
+	letter-spacing: -0.02em;
+	font-variant-numeric: tabular-nums;
+}
+
+.mk-score__max {
+	color: var(--text-2);
+	font-size: 0.8125rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.mk-bar {
+	height: 4px;
+	overflow: hidden;
+	border-radius: var(--r-pill);
+	background-color: color-mix(in srgb, var(--text-1) 10%, transparent);
+}
+
+.mk-bar__fill {
+	height: 100%;
+	border-radius: var(--r-pill);
+	background-color: var(--danger);
+}
+
+.mk-panel .mk-summary {
+	color: var(--text-1);
+	font-size: 0.875rem;
+	line-height: 1.5;
+}
+
+.mk-why {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.mk-reasons {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.mk-reasons li {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+}
+
+/* Badges de gravité (SEVERITY_STYLE) ; « Info » en texte clair pour le contraste. */
+.mk-sev {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	height: 20px;
+	padding: 0 8px;
+	border-radius: var(--r-pill);
+	font-size: 0.6875rem;
+	font-weight: 500;
+	line-height: 1;
+}
+
+.mk-sev--danger {
+	background-color: var(--danger-soft);
+	color: var(--danger);
+}
+
+.mk-sev--warning {
+	background-color: var(--warning-soft);
+	color: var(--warning);
+}
+
+.mk-sev--info {
+	background-color: var(--info-soft);
+	color: var(--text-1);
+}
+
+/* --- Largeurs intermédiaires --- */
+
+/* Tant que la fenêtre n'a pas 28 px de marge de chaque côté, le panneau reste dedans. */
+@media (max-width: 1059px) {
+	.mk {
+		--mk-out: -8px;
+	}
+}
+
+@media (max-width: 1023px) {
+	.mk {
+		--mk-pad: 20px;
+	}
+
+	.mk-header .mk-link {
+		display: none;
+	}
+
+	.mk-grid {
+		grid-template-columns: minmax(0, 1fr) 272px;
+	}
+
+	.mk-thumb:nth-child(n + 4) {
+		display: none;
+	}
+}
+
+/* --- Mobile (sous 768 px) : titre, pastille et panneau, à plat --- */
+
+@media (max-width: 767px) {
+	.mk {
+		border-radius: 0;
+		background-color: transparent;
+		box-shadow: none;
+		animation: none;
+	}
+
+	.mk-chrome,
+	.mk-header,
+	.mk-nav,
+	.mk-main,
+	.mk-actions,
+	.mk-price,
+	.mk-tag,
+	.mk-seller,
+	.mk-contact {
+		display: none;
+	}
+
+	.mk-page {
+		border: 0;
+		background-color: transparent;
+	}
+
+	.mk-body {
+		padding: 0;
+	}
+
+	.mk-grid {
+		display: block;
+	}
+
+	.mk-heading {
+		margin: 0;
+		padding: 0;
+	}
+
+	/* Le titre garde l'allure de la fiche : carte claire, encre du site. */
+	.mk-title {
+		padding: 16px;
+		border-radius: var(--r-m);
+		background-color: var(--mk-page);
+		box-shadow: var(--shadow-pill);
+		font-size: 1.125rem;
+	}
+
+	/* La pastille passe sous le titre, alignée sur lui. */
+	.mk-pill {
+		display: flex;
+		width: fit-content;
+		margin: 10px 0 0;
+	}
+
+	.mk-panel {
+		position: static;
+		width: auto;
+		margin-top: 8px;
+	}
+}
