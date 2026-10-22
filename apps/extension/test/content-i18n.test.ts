@@ -69,6 +69,25 @@ describe("contentText", () => {
 		expect(CONTENT_TEXTS.fr).toHaveProperty(["panel.close"]);
 	});
 
+	test("niveaux courts des cartes : FR et NL imposés, parité des clés card.level.*", () => {
+		expect(contentText("fr", "card.level.low")).toBe("Faible");
+		expect(contentText("fr", "card.level.medium")).toBe("Moyen");
+		expect(contentText("fr", "card.level.high")).toBe("Élevé");
+		expect(contentText("nl", "card.level.low")).toBe("Laag");
+		expect(contentText("nl", "card.level.medium")).toBe("Gemiddeld");
+		expect(contentText("nl", "card.level.high")).toBe("Hoog");
+		const levelKeys = (locale: "fr" | "nl") =>
+			Object.keys(CONTENT_TEXTS[locale])
+				.filter((key) => key.startsWith("card.level."))
+				.sort();
+		expect(levelKeys("fr")).toEqual([
+			"card.level.high",
+			"card.level.low",
+			"card.level.medium",
+		]);
+		expect(levelKeys("nl")).toEqual(levelKeys("fr"));
+	});
+
 	test("texte du bandeau professionnel", () => {
 		expect(contentText("fr", "pro.notice")).toBe(
 			"Annonce d'un professionnel : elle sert souvent de vitrine (prix sur demande, voir le site du vendeur). Ce n'est pas un signal d'arnaque.",

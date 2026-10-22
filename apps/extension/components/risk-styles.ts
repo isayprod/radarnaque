@@ -11,6 +11,14 @@ export const LEVEL_KEY: Record<RiskLevel, ContentKey> = {
 	high: "level.high",
 };
 
+// Niveau court des icônes de cartes (« Élevé ») ; leur nom accessible garde le
+// niveau complet (`LEVEL_KEY`).
+export const CARD_LEVEL_KEY: Record<RiskLevel, ContentKey> = {
+	low: "card.level.low",
+	medium: "card.level.medium",
+	high: "card.level.high",
+};
+
 // Couleurs sémantiques des tokens (DESIGN.md §2.2) : point, texte, fond doux (badge
 // de verdict) et barre du score. Le niveau est toujours aussi écrit en toutes
 // lettres : la couleur ne porte jamais seule l'information.

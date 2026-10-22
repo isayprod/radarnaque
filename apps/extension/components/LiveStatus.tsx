@@ -1,20 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Logo } from "./Logo";
 
 /** Sans nouvel événement pendant ce délai, la ligne d'état montre des points animés. */
 export const WAITING_MS = 4_000;
 
 /** La région `aria-live` est mise à jour au plus une fois par intervalle. */
 export const ANNOUNCE_MS = 2_000;
-
-/**
- * Indicateur d'attente des icônes de cartes : le logo animé. Gardé pour
- * `CardBadge` jusqu'à son restyle, qui utilisera `<Logo animated>` directement ;
- * `radarnaque-spin` n'y est plus qu'un repère pour ses tests.
- */
-export function Spinner({ size = 12 }: { size?: number }) {
-	return <Logo size={size} animated className="radarnaque-spin shrink-0" />;
-}
 
 /**
  * Vrai quand aucun événement n'est arrivé depuis `WAITING_MS` (`lastAt` : heure du

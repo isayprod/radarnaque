@@ -4,11 +4,26 @@ import type { ScanState } from "../lib/content/ai-client";
 import type { CardView } from "../lib/content/card-controller";
 import { statusLine } from "../lib/content/scan-progress";
 import { aiErrorText, contentText } from "../lib/content-i18n";
-import { Spinner } from "./LiveStatus";
-import { LEVEL_KEY, LEVEL_STYLE } from "./risk-styles";
+import { PILL_CLASS } from "./BadgePill";
+import { Logo } from "./Logo";
+import { CARD_LEVEL_KEY, LEVEL_KEY, LEVEL_STYLE } from "./risk-styles";
 
-const BUTTON_CLASS =
-	"inline-flex h-6 min-w-6 cursor-pointer items-center justify-center gap-1 rounded-full border border-slate-300 bg-white px-1.5 text-[12px] leading-none font-bold text-slate-900 shadow-sm hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700";
+/**
+ * Mini-pilule (spec §4) : la surface de la pilule de la fiche, 22 px de haut,
+ * Inter 11 px poids 500. Au repos et pendant l'analyse, le logo seul dans un
+ * carré de 22 × 22 ; avec un niveau ou une erreur, elle s'élargit.
+ */
+const BUTTON_CLASS = `${PILL_CLASS} h-[22px] min-w-[22px] cursor-pointer justify-center gap-1 text-[11px] leading-none hover:border-border-strong`;
+const SQUARE_CLASS = "w-[22px] px-0";
+const WIDE_CLASS = "px-2";
+
+/**
+ * Infobulle : verre sombre, `--r-s`, 260 px, texte 12 px, au-dessus de la page.
+ * `rounded-[var(--r-s)]` et non `rounded-s`, que Tailwind sert aussi pour les
+ * coins du côté de début (logique) avec son propre rayon.
+ */
+const TOOLTIP_CLASS =
+	"absolute top-full left-0 z-[2147483000] mt-1 w-[260px] max-w-[80vw] rounded-[var(--r-s)] border border-border-default bg-glass-strong p-2 font-sans text-[12px] leading-[1.4] whitespace-normal text-text-1 shadow-[var(--shadow-float)] supports-[backdrop-filter]:backdrop-blur-[18px]";
 
 /**
  * Le site ne doit ni naviguer (carte-lien, clic du milieu compris) ni démarrer
@@ -42,38 +57,37 @@ function tooltipOf(
 }
 
 function ButtonContent({ state, locale }: Omit<CardView, "onActivate">) {
-	// L'icône tourne ; le texte d'attente reste le nom du bouton.
+	// Le logo tourne ; le texte d'attente reste le nom du bouton.
 	if (state.status === "loading") {
 		return (
 			<>
-				<Spinner />
+				<Logo size={13} animated className="shrink-0" />
 				<span className="sr-only">{contentText(locale, "card.loading")}</span>
 			</>
 		);
 	}
+	// Le niveau court est visible ; le nom du bouton garde le niveau complet.
 	if (state.status === "done") {
-		const style = LEVEL_STYLE[state.result.level];
+		const { level } = state.result;
 		return (
 			<>
 				<span
 					aria-hidden="true"
-					className={`inline-block size-2 rounded-full ${style.dot}`}
+					className={`size-1.5 shrink-0 rounded-full ${LEVEL_STYLE[level].dot}`}
 				/>
-				<span className={style.text}>
-					{contentText(locale, LEVEL_KEY[state.result.level])}
-				</span>
+				<span>{contentText(locale, CARD_LEVEL_KEY[level])}</span>
 			</>
 		);
 	}
 	if (state.status === "error") {
 		return (
 			<>
-				<span>R</span>
-				<span className="text-red-700">!</span>
+				<Logo size={13} className="shrink-0 opacity-60" />
+				<span className="font-semibold text-danger">!</span>
 			</>
 		);
 	}
-	return "R";
+	return <Logo size={13} className="shrink-0" />;
 }
 
 /**
@@ -95,12 +109,15 @@ export function CardBadge({ state, locale, onActivate }: CardView) {
 	};
 	const tip = tooltipOf(state, locale);
 	// Inactif ou en erreur, le clic lance l'analyse : le nom du bouton le dit.
-	// Terminé, son nom est le niveau affiché ; en cours, le texte d'attente, et
-	// l'infobulle suit la ligne d'état.
+	// Terminé, son nom est le niveau complet (le texte visible est le niveau
+	// court) ; en cours, le texte d'attente, et l'infobulle suit la ligne d'état.
 	const label =
-		state.status === "idle" || state.status === "error"
-			? contentText(locale, "card.aria")
-			: undefined;
+		state.status === "done"
+			? contentText(locale, LEVEL_KEY[state.result.level])
+			: state.status === "loading"
+				? undefined
+				: contentText(locale, "card.aria");
+	const square = state.status === "idle" || state.status === "loading";
 
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: le conteneur ne fait qu'arrêter les événements vers la carte-lien, il n'a pas de rôle propre
@@ -135,7 +152,7 @@ export function CardBadge({ state, locale, onActivate }: CardView) {
 				}}
 				onFocus={() => setOpen(true)}
 				onBlur={() => setOpen(false)}
-				className={BUTTON_CLASS}
+				className={`${BUTTON_CLASS} ${square ? SQUARE_CLASS : WIDE_CLASS}`}
 			>
 				<ButtonContent state={state} locale={locale} />
 			</button>
@@ -144,11 +161,11 @@ export function CardBadge({ state, locale, onActivate }: CardView) {
 					role="tooltip"
 					id={tipId}
 					hidden={!open}
-					className="absolute top-full left-0 z-[2147483647] mt-1 w-[260px] max-w-[80vw] rounded-[6px] border border-slate-300 bg-white p-2 text-[12px] leading-[1.4] text-slate-900 shadow-lg"
+					className={TOOLTIP_CLASS}
 				>
 					<span className="block">{tip.text}</span>
 					{tip.professional && (
-						<span className="mt-1 block border-t border-slate-200 pt-1 text-slate-700">
+						<span className="mt-1 block border-t border-border-subtle pt-1 text-text-2">
 							{contentText(locale, "pro.notice")}
 						</span>
 					)}
