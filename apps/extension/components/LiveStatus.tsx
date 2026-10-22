@@ -35,23 +35,6 @@ export function Spinner({ size = 12 }: { size?: number }) {
 	);
 }
 
-/** Icône étincelle du bouton « Analyser avec l'IA ». */
-export function Sparkle() {
-	return (
-		<svg
-			aria-hidden="true"
-			width="12"
-			height="12"
-			viewBox="0 0 16 16"
-			fill="currentColor"
-			className="shrink-0"
-		>
-			<path d="M8 0.5c.4 3.6 1.9 5.1 5.5 5.5-3.6.4-5.1 1.9-5.5 5.5C7.6 7.9 6.1 6.4 2.5 6 6.1 5.6 7.6 4.1 8 .5Z" />
-			<path d="M13 10c.2 1.7.9 2.4 2.5 2.5-1.6.2-2.3.9-2.5 2.5-.2-1.6-.9-2.3-2.5-2.5 1.6-.1 2.3-.8 2.5-2.5Z" />
-		</svg>
-	);
-}
-
 /**
  * Vrai quand aucun événement n'est arrivé depuis `WAITING_MS` (`lastAt` : heure du
  * dernier événement, ou du départ). Un nouvel événement le remet à faux aussitôt.

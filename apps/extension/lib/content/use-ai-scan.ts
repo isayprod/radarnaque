@@ -40,7 +40,7 @@ interface Slots {
 	/**
 	 * Empreinte de l'annonce analysée (ou restaurée) pour l'état `done`.
 	 * L'annonce affichée change sous la même clé (prix, description) : l'état
-	 * revient à `idle` et la pastille à l'analyse locale (I2).
+	 * revient à `idle` et la pastille à « Analyser » (I2).
 	 */
 	doneFingerprint: string | null;
 	/**
@@ -146,7 +146,7 @@ export interface AiScan {
  * `aiResults` garde les résultats 24 h : à l'arrivée sur une annonce, un
  * résultat complet dont l'empreinte est celle de l'annonce affichée est repris
  * sans nouveau scan. Une annonce modifiée, ou un résultat partiel venu d'une
- * carte, laisse la pastille sur l'analyse locale.
+ * carte, laisse la pastille sur « Analyser ».
  *
  * `debugLog` (superuser) reçoit chaque requête envoyée et chaque réponse.
  */
@@ -259,7 +259,7 @@ export function useAiScan(
 		const { site, externalId } = viewRef.current.listing;
 		const adopt = (entry: StoredAiResult | null) => {
 			const current = listingFingerprint(viewRef.current.listing);
-			// Résultat partiel (carte) ou annonce changée depuis l'analyse : pastille locale.
+			// Résultat partiel (carte) ou annonce changée depuis l'analyse : pastille au repos.
 			if (!entry || entry.result.partial || entry.fingerprint !== current)
 				return;
 			// I1 : jamais le quota restant de l'époque. Un scan en cours ou fini
@@ -336,7 +336,7 @@ export function useAiScan(
 			let progress = startProgress(Date.now());
 			if (noCache) {
 				// Relance : le résultat affiché reste en place (pas de retour à
-				// l'analyse locale), seul le bouton de la section Debug change.
+				// « Analyser »), seul le bouton de la section Debug change.
 				patch(scope, (prev) => ({
 					...prev,
 					rescanning: true,

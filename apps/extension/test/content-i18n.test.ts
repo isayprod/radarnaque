@@ -5,9 +5,7 @@ import {
 	type ContentKey,
 	contentText,
 	resolveContentLocale,
-	signalText,
 } from "../lib/content-i18n";
-import { RULES } from "../lib/rules/rules";
 
 describe("parité FR/NL", () => {
 	test("les clés FR et NL sont identiques", () => {
@@ -24,28 +22,28 @@ describe("parité FR/NL", () => {
 		}
 	});
 
-	test("chaque règle activée a un texte dans les deux langues", () => {
-		for (const rule of RULES.filter((r) => r.enabled)) {
-			expect(CONTENT_TEXTS.fr).toHaveProperty(rule.id);
-			expect(CONTENT_TEXTS.nl).toHaveProperty(rule.id);
-		}
-	});
-});
-
-describe("abroad_seller", () => {
-	const signal = {
-		id: "abroad_seller",
-		weight: 20,
-		severity: "warning",
-	} as const;
-
-	test("texte FR et NL", () => {
-		expect(signalText("fr", signal)).toBe(
-			"Vendeur ou objet à l'étranger, envoi par transporteur",
-		);
-		expect(signalText("nl", signal)).toBe(
-			"Verkoper of voorwerp in het buitenland, verzending via koerier",
-		);
+	test("plus aucun texte de l'analyse locale (règles, pied de panneau, mention IA)", () => {
+		for (const locale of ["fr", "nl"] as const)
+			for (const key of [
+				"panel.none",
+				"panel.footer",
+				"panel.titleAi",
+				"badge.ariaAi",
+				"ai.badgeTag",
+				"few_photos",
+				"new_account",
+				"no_reviews",
+				"foreign_location",
+				"abroad_seller",
+				"short_description",
+				"contact_outside",
+				"shipping_only",
+				"offsite_payment",
+				"symbolic_price",
+			])
+				expect(CONTENT_TEXTS[locale], `${locale} ${key}`).not.toHaveProperty([
+					key,
+				]);
 	});
 });
 
@@ -61,94 +59,16 @@ describe("contentText", () => {
 		expect(contentText("nl", "card.aria")).toBe(
 			"Deze advertentie analyseren met Radarnaque",
 		);
-		expect(contentText("fr", "panel.footer")).toBe(
-			"Analyse locale, sans IA. Pour une analyse IA, utilisez le bouton ci-dessus.",
-		);
-		expect(contentText("nl", "panel.footer")).toBe(
-			"Lokale analyse, zonder AI. Gebruik de knop hierboven voor een AI-analyse.",
-		);
+		expect(contentText("fr", "panel.title")).toBe("Analyse Radarnaque");
 	});
 
-	test("textes de l'analyse IA prioritaire et du bandeau professionnel", () => {
-		expect(contentText("fr", "ai.badgeTag")).toBe("IA");
-		expect(contentText("nl", "ai.badgeTag")).toBe("AI");
-		expect(contentText("fr", "badge.ariaAi")).toBe(
-			"Ouvrir l'analyse IA Radarnaque",
-		);
-		expect(contentText("nl", "badge.ariaAi")).toBe(
-			"Radarnaque-AI-analyse openen",
-		);
-		expect(contentText("fr", "panel.titleAi")).toBe("Analyse IA Radarnaque");
-		expect(contentText("nl", "panel.titleAi")).toBe("Radarnaque-AI-analyse");
+	test("texte du bandeau professionnel", () => {
 		expect(contentText("fr", "pro.notice")).toBe(
 			"Annonce d'un professionnel : elle sert souvent de vitrine (prix sur demande, voir le site du vendeur). Ce n'est pas un signal d'arnaque.",
 		);
 		expect(contentText("nl", "pro.notice")).toBe(
 			"Advertentie van een professional: ze dient vaak als etalage (prijs op aanvraag, zie de website van de verkoper). Dat is geen teken van oplichting.",
 		);
-	});
-
-	test("les nouvelles clés existent en FR et en NL", () => {
-		for (const key of [
-			"ai.badgeTag",
-			"badge.ariaAi",
-			"panel.titleAi",
-			"pro.notice",
-		]) {
-			expect(CONTENT_TEXTS.fr).toHaveProperty([key]);
-			expect(CONTENT_TEXTS.nl).toHaveProperty([key]);
-		}
-	});
-});
-
-describe("signalText", () => {
-	test("interpole {count}", () => {
-		const signal = {
-			id: "few_photos",
-			weight: 15,
-			severity: "warning",
-			params: { count: 1 },
-		} as const;
-		expect(signalText("fr", signal)).toBe("Peu de photos (1)");
-		expect(signalText("nl", signal)).toBe("Weinig foto's (1)");
-	});
-
-	test("interpole {country}", () => {
-		const signal = {
-			id: "foreign_location",
-			weight: 20,
-			severity: "warning",
-			params: { country: "FR" },
-		} as const;
-		expect(signalText("fr", signal)).toBe(
-			"Vendeur situé hors de Belgique (FR)",
-		);
-		expect(signalText("nl", signal)).toBe("Verkoper buiten België (FR)");
-	});
-
-	test("un paramètre manquant retire le placeholder proprement", () => {
-		expect(
-			signalText("fr", { id: "few_photos", weight: 15, severity: "warning" }),
-		).toBe("Peu de photos");
-		expect(
-			signalText("nl", {
-				id: "foreign_location",
-				weight: 20,
-				severity: "warning",
-			}),
-		).toBe("Verkoper buiten België");
-	});
-
-	test("un signal sans placeholder est renvoyé tel quel", () => {
-		expect(
-			signalText("fr", { id: "new_account", weight: 25, severity: "danger" }),
-		).toBe("Compte vendeur très récent");
-	});
-
-	test("price_anomaly (désactivée) renvoie une chaîne vide sans lever", () => {
-		expect(
-			signalText("fr", { id: "price_anomaly", weight: 0, severity: "info" }),
-		).toBe("");
 	});
 });
 
@@ -186,7 +106,6 @@ describe("textes de la section IA", () => {
 	test("les textes FR imposés", () => {
 		const expected: Record<string, string> = {
 			"ai.title": "Analyse IA",
-			"ai.badgeTag": "IA",
 			"ai.run": "Lancer une analyse IA",
 			"ai.launch": "Analyser avec l'IA",
 			"ai.launchShort": "Analyser",

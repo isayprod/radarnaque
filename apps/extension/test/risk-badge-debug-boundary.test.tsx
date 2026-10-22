@@ -93,10 +93,16 @@ describe("RiskBadge : section Debug après une erreur de rendu", () => {
 		};
 		const debugTitle = contentText("fr", "debug.title");
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
-		await user.click(screen.getByRole("button", { name: /Radarnaque/ }));
 		await user.click(
-			await screen.findByRole("button", { name: contentText("fr", "ai.run") }),
+			screen.getByRole("button", { name: contentText("fr", "ai.launch") }),
 		);
+		// Résultat affiché dans la pilule, puis panneau ouvert.
+		await vi.waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: /Radarnaque/ }).textContent,
+			).toContain(`${debugAnalysis.score}/100`),
+		);
+		await user.click(screen.getByRole("button", { name: /Radarnaque/ }));
 		await screen.findByText(debugTitle);
 
 		// La relance fait échouer le rendu de la section : elle disparaît seule.
