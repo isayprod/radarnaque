@@ -59,15 +59,26 @@ const listing: Listing = {
 };
 
 describe("listingFingerprint", () => {
-	test("JSON de titre, description, prix et type de prix, dans cet ordre", () => {
+	test("JSON de titre, description, prix, type de prix et caractéristiques, dans cet ordre", () => {
 		expect(listingFingerprint(listing)).toBe(
 			JSON.stringify({
 				title: "Vélo",
 				description: "Bon état.",
 				price: { amountCents: 15000, currency: "EUR" },
 				priceType: "fixed",
+				attributes: [],
 			}),
 		);
+	});
+
+	test("une caractéristique modifiée (kilométrage) change l'empreinte", () => {
+		const km = (value: string) =>
+			listingFingerprint({
+				...listing,
+				attributes: [{ label: "Kilométrage", value }],
+			});
+		expect(km("155.562 km")).not.toBe(km("55.562 km"));
+		expect(km("155.562 km")).not.toBe(listingFingerprint(listing));
 	});
 
 	test("prix absent : null ; vendeur et photos ignorés", () => {

@@ -315,11 +315,12 @@ async def test_trial_text_scan_succeeds_and_consumes_one_scan(engine, http, cloc
     analysis = await _scalar(engine, select(Analysis).where(Analysis.id == result.analysis_id))
     assert (analysis.tokens_in, analysis.tokens_out, analysis.cost_usd_micros) == (100, 10, 42)
     assert analysis.rules_version == 1 and analysis.created_at == T0
-    # L'analyse est enregistrée avec le prompt full v1 (prompt actif du type unique « full »).
+    # L'analyse est enregistrée avec le prompt full v2 (prompt actif du type unique « full »,
+    # qui cite les caractéristiques depuis la migration 0009).
     prompt = await _scalar(
         engine, select(PromptVersion).where(PromptVersion.id == analysis.prompt_version_id)
     )
-    assert (prompt.scan_kind, prompt.version) == ("full", 1)
+    assert (prompt.scan_kind, prompt.version) == ("full", 2)
     assert prompt.system_prompt == llm.calls[0]["system_prompt"]
     event = await _scalar(engine, select(ScanEvent).where(ScanEvent.user_id == user.id))
     assert (event.scan_kind, event.trigger, event.created_at) == ("full", "button", T0)
@@ -1187,7 +1188,7 @@ async def test_superuser_scan_has_a_debug_block(engine, http, clock, llm):
     debug = result.debug
     assert debug is not None
     assert (debug.provider, debug.model) == ("openrouter", "google/gemini-3.1-flash-lite")
-    assert (debug.prompt_version.scan_kind, debug.prompt_version.version) == ("full", 1)
+    assert (debug.prompt_version.scan_kind, debug.prompt_version.version) == ("full", 2)
     assert debug.system_prompt == llm.calls[0]["system_prompt"]
     sent = llm.calls[0]["messages"]
     assert debug.messages[0].model_dump() == {
@@ -1212,7 +1213,7 @@ async def test_superuser_scan_has_a_debug_block(engine, http, clock, llm):
     # Sérialisé en camelCase, comme le reste de la réponse.
     dumped = result.model_dump(mode="json", by_alias=True)["debug"]
     assert {"promptVersion", "systemPrompt", "rawResponse", "llmCalled", "timingsMs"} <= set(dumped)
-    assert dumped["promptVersion"] == {"scanKind": "full", "version": 1}
+    assert dumped["promptVersion"] == {"scanKind": "full", "version": 2}
 
 
 @pytest.mark.parametrize(("role", "plan"), [("admin", None), ("user", "trial")])

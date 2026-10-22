@@ -22,8 +22,9 @@ export interface StoredAiResult {
 
 /**
  * Empreinte de ce que l'IA a lu et qui peut changer sur une même annonce :
- * titre, description, prix et type de prix. Une annonce modifiée n'a plus la
- * même empreinte, et son ancien verdict n'est pas réutilisé par la pastille.
+ * titre, description, prix, type de prix et caractéristiques (kilométrage…).
+ * Une annonce modifiée n'a plus la même empreinte, et son ancien verdict n'est
+ * pas réutilisé par la pastille.
  */
 export function listingFingerprint(l: Listing): string {
 	return JSON.stringify({
@@ -33,6 +34,7 @@ export function listingFingerprint(l: Listing): string {
 			? { amountCents: l.price.amountCents, currency: l.price.currency }
 			: null,
 		priceType: l.priceType,
+		attributes: l.attributes ?? [],
 	});
 }
 

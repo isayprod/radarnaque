@@ -23,6 +23,7 @@ def _load_migration(filename: str):
 
 _0004 = _load_migration("0004_prompt_v2.py")
 _0005 = _load_migration("0005_full_scans.py")
+_0009 = _load_migration("0009_prompt_attributes.py")
 
 
 async def _rows(db, sql: str, **params) -> list[tuple]:
@@ -70,13 +71,14 @@ async def test_full_kind_uses_image_model(db):
     assert rows == [(True,)]
 
 
-async def test_full_prompt_v1_active(db):
+async def test_full_prompt_v1_is_kept(db):
+    # Active jusqu'à 0009, qui active une version citant les caractéristiques.
     rows = await _rows(
         db,
-        "select p.version, p.scan_kind, p.system_prompt from app.scan_kinds k"
-        " join app.prompt_versions p on p.id = k.active_prompt_version_id where k.code = 'full'",
+        "select version, system_prompt from app.prompt_versions"
+        " where scan_kind = 'full' and version = 1",
     )
-    assert rows == [(1, "full", _0005.FULL_PROMPT_V1)]
+    assert rows == [(1, _0005.FULL_PROMPT_V1)]
 
 
 def test_full_prompt_contains_search_rules():
@@ -241,5 +243,5 @@ async def test_downgrade_keeps_full_when_used(db, make_user, alembic_config):
         db,
         "select p.system_prompt from app.scan_kinds k"
         " join app.prompt_versions p on p.id = k.active_prompt_version_id where k.code = 'full'",
-    ) == [(_0005.FULL_PROMPT_V1,)]
+    ) == [(_0009.FULL_PROMPT_ATTRIBUTES,)]
     assert await _rows(db, "select plan from app.plan_quotas where scan_kind = 'full'") != []

@@ -86,6 +86,11 @@ const CONDITION_LABEL_RE = /^(État|Conditie|Staat)$/i;
 const ATTRIBUTES_TITLES = new Set(["caracteristiques", "kenmerken"]);
 /** Groupe de `carAttributes` qui ne fait que répéter les faits mis en avant. */
 const CAR_MAIN_GROUP = "Main";
+/**
+ * Libellés du bloc principal d'une voiture (sans titre, une icône par ligne),
+ * la valeur juste après : seul ce groupe est dans la page servie.
+ */
+const CAR_DOM_LABELS = '[class*="CarAttributes"] [class*="-module-label"]';
 const VERIFICATION_TITLE_RE = /^(Vérification|Verificatie|Verification)/i;
 // Toute négation l'emporte : « Rien n'a été vérifié », « non vérifié », « niet gecontroleerd ».
 const NEGATION_RE = /\b(rien|pas|non|niet|niets|geen)\b/i;
@@ -304,7 +309,8 @@ function readCondition(doc: Document): string | undefined {
 /**
  * Caractéristiques d'une voiture, lues dans `carAttributes` : chaque clé une
  * seule fois, groupe « Main » en dernier (il répète les autres), valeur suivie
- * de son unité. null si rien n'est lisible.
+ * de son unité. Une entrée sans clé, ou dont la valeur n'est ni un texte ni un
+ * nombre (liste d'options, booléen), est ignorée. null si rien n'est lisible.
  */
 function readCarAttributes(
 	raw: TwhConfigListing["carAttributes"],
@@ -338,17 +344,28 @@ function readCarAttributes(
 }
 
 /**
- * Bloc « Caractéristiques » / « Kenmerken » : repéré par son titre, chaque
- * élément de la liste qui suit porte un libellé puis une valeur.
+ * Caractéristiques lues dans la page, quand `__CONFIG__` manque ou décrit une
+ * autre annonce : bloc « Caractéristiques » / « Kenmerken » (repéré par son
+ * titre, chaque élément de la liste qui suit porte un libellé puis une valeur),
+ * ou bloc principal d'une voiture.
  */
 function readDomAttributes(doc: Document): Listing["attributes"] | null {
 	const scope = doc.querySelector("main") ?? doc.body;
 	const heading = [...scope.querySelectorAll("h2")].find((h) =>
 		ATTRIBUTES_TITLES.has(foldText(h.textContent ?? "")),
 	);
+	const pairs = [
+		...[...(nextPageElement(heading)?.children ?? [])].map((item) => [
+			item.children[0],
+			item.children[1],
+		]),
+		...[...scope.querySelectorAll(CAR_DOM_LABELS)].map((label) => [
+			label,
+			label.nextElementSibling,
+		]),
+	];
 	const out: NonNullable<Listing["attributes"]> = [];
-	for (const item of nextPageElement(heading)?.children ?? []) {
-		const [labelEl, valueEl] = item.children;
+	for (const [labelEl, valueEl] of pairs) {
 		const label = str(normalizeText(labelEl?.textContent ?? ""));
 		const value = str(normalizeText(valueEl?.textContent ?? ""));
 		if (label && value) out.push({ label, value });
