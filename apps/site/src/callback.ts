@@ -1,5 +1,8 @@
+import "./callback.css";
 import { deliverSession } from "./deliver-session";
+import { toDom } from "./h";
 import { MESSAGES, type PageState, pickLocale } from "./i18n";
+import { logoNode } from "./logo-node";
 
 interface ChromeRuntime {
 	sendMessage: (
@@ -14,10 +17,15 @@ declare const chrome: { runtime?: ChromeRuntime } | undefined;
 
 const locale = pickLocale(navigator.language);
 const status = document.getElementById("status");
+const logo = document.querySelector("[data-logo]");
 
 function render(state: PageState): void {
 	document.documentElement.lang = locale;
 	if (status) status.textContent = MESSAGES[state][locale];
+	// Logo animé pendant l'attente (indicateur de chargement), immobile ensuite.
+	logo?.replaceChildren(
+		toDom(document, logoNode({ size: 40, animated: state === "pending" })),
+	);
 }
 
 async function fetchToken(): Promise<string | null> {

@@ -82,8 +82,6 @@ export interface PricingText {
 	vatIncluded: string;
 	free: string;
 	paymentSoon: string;
-	privacyLink: string;
-	switchLang: string;
 	plans: { trial: PlanText; standard: PlanText; premium: PlanText };
 }
 
@@ -97,8 +95,6 @@ export const PRICING: Record<Locale, PricingText> = {
 		vatIncluded: "TVA comprise",
 		free: "Gratuit",
 		paymentSoon: "Paiement bientôt disponible",
-		privacyLink: "Politique de confidentialité",
-		switchLang: "Nederlands",
 		plans: {
 			trial: {
 				name: "Essai",
@@ -147,8 +143,6 @@ export const PRICING: Record<Locale, PricingText> = {
 		vatIncluded: "btw inbegrepen",
 		free: "Gratis",
 		paymentSoon: "Betalen binnenkort beschikbaar",
-		privacyLink: "Privacybeleid",
-		switchLang: "Français",
 		plans: {
 			trial: {
 				name: "Proef",
@@ -199,8 +193,6 @@ export interface PrivacySection {
 export interface PrivacyText {
 	title: string;
 	intro: string;
-	backToPricing: string;
-	switchLang: string;
 	sections: {
 		hosting: PrivacySection;
 		trigger: PrivacySection;
@@ -238,8 +230,6 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 		title: "Politique de confidentialité",
 		intro:
 			"Voici, en clair, ce que Radarnaque fait et ne fait pas avec vos données.",
-		backToPricing: "Tarifs",
-		switchLang: "Nederlands",
 		sections: {
 			local: {
 				heading: "Sans compte : tout reste dans votre navigateur",
@@ -291,8 +281,6 @@ export const PRIVACY: Record<Locale, PrivacyText> = {
 		title: "Privacybeleid",
 		intro:
 			"Hier leest u in gewone taal wat Radarnaque wel en niet doet met uw gegevens.",
-		backToPricing: "Tarieven",
-		switchLang: "Français",
 		sections: {
 			local: {
 				heading: "Zonder account blijft alles in uw browser",

@@ -1,0 +1,64 @@
+/*
+ * /auth/callback (spec landing §6) : panneau centré sur --gradient-compact, logo et
+ * message en serif. Aucune valeur brute : tokens seulement, tailles en rem.
+ */
+@import "@radarnaque/design/tokens.css";
+@import "@radarnaque/design/fonts.css";
+@import "@radarnaque/design/motion.css";
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+.callback {
+	display: grid;
+	place-items: center;
+	min-height: 100vh;
+	margin: 0;
+	padding: 16px;
+	background-color: var(--bg-0);
+	background-image: var(--gradient-compact);
+	color: var(--text-1);
+	font-family: var(--font-sans);
+	-webkit-font-smoothing: antialiased;
+}
+
+/* Verre opaque par défaut ; verre flouté quand le navigateur sait le faire (DESIGN.md §2.5). */
+.callback-panel {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 20px;
+	width: 100%;
+	max-width: 28rem;
+	padding: 40px 32px;
+	border: 1px solid var(--border-default);
+	border-radius: var(--r-l);
+	background-color: var(--glass-bg-strong);
+	text-align: center;
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+	.callback-panel {
+		background-color: var(--glass-bg);
+		-webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+		backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+	}
+}
+
+.callback-logo {
+	display: inline-flex;
+	color: var(--text-1);
+}
+
+.callback-panel p {
+	margin: 0;
+	font-family: var(--font-serif);
+	font-size: 1.5rem;
+	font-weight: 400;
+	line-height: 1.25;
+	letter-spacing: -0.01em;
+	text-wrap: balance;
+}

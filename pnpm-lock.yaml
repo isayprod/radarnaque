@@ -136,6 +136,9 @@ importers:
 
   apps/site:
     dependencies:
+      '@radarnaque/design':
+        specifier: workspace:*
+        version: link:../../packages/design
       '@radarnaque/shared':
         specifier: workspace:*
         version: link:../../packages/shared
