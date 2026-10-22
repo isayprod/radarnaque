@@ -1196,6 +1196,30 @@
         "title": "AnalysisUsageOut",
         "type": "object"
       },
+      "AttributeIn": {
+        "additionalProperties": false,
+        "description": "Caract\u00e9ristique affich\u00e9e par le site (ann\u00e9e, kilom\u00e9trage\u2026), libell\u00e9 dans sa langue.",
+        "properties": {
+          "label": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "title": "AttributeIn",
+        "type": "object"
+      },
       "BillingUrlOut": {
         "description": "Adresse vers laquelle rediriger l'utilisateur (paiement ou portail de gestion).",
         "properties": {
@@ -1595,6 +1619,14 @@
       "ListingIn": {
         "additionalProperties": false,
         "properties": {
+          "attributes": {
+            "items": {
+              "$ref": "#/components/schemas/AttributeIn"
+            },
+            "maxItems": 30,
+            "title": "Attributes",
+            "type": "array"
+          },
           "category": {
             "anyOf": [
               {

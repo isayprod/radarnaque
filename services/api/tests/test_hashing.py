@@ -146,6 +146,7 @@ def test_input_hash_covers_the_listing_facts_sent_to_the_llm():
     changes = [
         ("category", "Fietsen"),
         ("condition", "Gebruikt"),
+        ("attributes", [{"label": "Kilometerstand", "value": "155.562 km"}]),
         ("postedAt", "2026-10-01"),
         ("location", {"city": "Brugge"}),
         ("location", {"city": "Gent", "region": "Oost-Vlaanderen"}),
@@ -187,6 +188,10 @@ FACT_MUTATIONS = {
     "priceType": (CONTENT, lambda b: b["listing"].update(priceType="on_request")),
     "category": (INPUT, lambda b: b["listing"].update(category="Fietsen")),
     "condition": (INPUT, lambda b: b["listing"].update(condition="Gebruikt")),
+    "attributes": (
+        INPUT,
+        lambda b: b["listing"].update(attributes=[{"label": "Bouwjaar", "value": "2004"}]),
+    ),
     "postedAt": (INPUT, lambda b: b["listing"].update(postedAt="2026-10-01")),
     "location": (INPUT, lambda b: b["listing"]["location"].update(city="Brugge")),
     "imageCount": (

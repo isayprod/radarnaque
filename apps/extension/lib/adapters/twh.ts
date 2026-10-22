@@ -82,6 +82,10 @@ const WEBSITE_LINK_LABELS = new Set([
 const SELLER_SCOPES = ["#seller-sidebar-root", "#vendeur"];
 
 const CONDITION_LABEL_RE = /^(État|Conditie|Staat)$/i;
+/** Titre du bloc des caractéristiques, plié par `foldText`. */
+const ATTRIBUTES_TITLES = new Set(["caracteristiques", "kenmerken"]);
+/** Groupe de `carAttributes` qui ne fait que répéter les faits mis en avant. */
+const CAR_MAIN_GROUP = "Main";
 const VERIFICATION_TITLE_RE = /^(Vérification|Verificatie|Verification)/i;
 // Toute négation l'emporte : « Rien n'a été vérifié », « non vérifié », « niet gecontroleerd ».
 const NEGATION_RE = /\b(rien|pas|non|niet|niets|geen)\b/i;
@@ -99,6 +103,8 @@ interface TwhConfigListing {
 	title?: unknown;
 	priceInfo?: { priceCents?: unknown; priceType?: unknown };
 	category?: { fullName?: unknown };
+	/** Annonce voiture : année, kilométrage… par groupes. */
+	carAttributes?: { groupedWithIcons?: unknown };
 	stats?: { since?: unknown };
 	gallery?: { imageUrls?: unknown };
 	seller?: {
@@ -293,6 +299,61 @@ function readCondition(doc: Document): string | undefined {
 		return str(normalizeText(el.nextElementSibling?.textContent ?? ""));
 	}
 	return undefined;
+}
+
+/**
+ * Caractéristiques d'une voiture, lues dans `carAttributes` : chaque clé une
+ * seule fois, groupe « Main » en dernier (il répète les autres), valeur suivie
+ * de son unité. null si rien n'est lisible.
+ */
+function readCarAttributes(
+	raw: TwhConfigListing["carAttributes"],
+): Listing["attributes"] | null {
+	const groups = raw?.groupedWithIcons;
+	if (!Array.isArray(groups)) return null;
+	const ordered = [
+		...groups.filter((g) => g?.key !== CAR_MAIN_GROUP),
+		...groups.filter((g) => g?.key === CAR_MAIN_GROUP),
+	];
+	const seen = new Set<string>();
+	const out: NonNullable<Listing["attributes"]> = [];
+	for (const group of ordered) {
+		const list: unknown = group?.attributes;
+		if (!Array.isArray(list)) continue;
+		for (const attr of list) {
+			const key = str(attr?.key);
+			const label = str(attr?.label);
+			const rawValue: unknown = attr?.value;
+			const value =
+				typeof rawValue === "number" && Number.isFinite(rawValue)
+					? String(rawValue)
+					: str(rawValue);
+			if (!key || !label || !value || seen.has(key)) continue;
+			seen.add(key);
+			const unit = str(attr?.unit);
+			out.push({ label, value: unit ? `${value} ${unit}` : value });
+		}
+	}
+	return out.length ? out : null;
+}
+
+/**
+ * Bloc « Caractéristiques » / « Kenmerken » : repéré par son titre, chaque
+ * élément de la liste qui suit porte un libellé puis une valeur.
+ */
+function readDomAttributes(doc: Document): Listing["attributes"] | null {
+	const scope = doc.querySelector("main") ?? doc.body;
+	const heading = [...scope.querySelectorAll("h2")].find((h) =>
+		ATTRIBUTES_TITLES.has(foldText(h.textContent ?? "")),
+	);
+	const out: NonNullable<Listing["attributes"]> = [];
+	for (const item of nextPageElement(heading)?.children ?? []) {
+		const [labelEl, valueEl] = item.children;
+		const label = str(normalizeText(labelEl?.textContent ?? ""));
+		const value = str(normalizeText(valueEl?.textContent ?? ""));
+		if (label && value) out.push({ label, value });
+	}
+	return out.length ? out : null;
 }
 
 /**
@@ -576,11 +637,15 @@ function extract(doc: Document, url: URL, site: Site): ExtractResult | null {
 	};
 	const category = str(config?.category?.fullName);
 	const condition = readCondition(doc);
+	const attributes =
+		readCarAttributes(config?.carAttributes) ?? readDomAttributes(doc);
 	const postedAt = str(config?.stats?.since);
 	if (category) listing.category = category;
 	else missing.push("category");
 	if (condition) listing.condition = condition;
 	else missing.push("condition");
+	if (attributes) listing.attributes = attributes;
+	else missing.push("attributes");
 	if (postedAt) listing.postedAt = postedAt;
 	else missing.push("postedAt");
 

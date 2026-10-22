@@ -411,6 +411,7 @@ async def test_expired_cache_entry_is_refreshed_in_place(engine, http, clock, ll
     [
         {"category": "Fietsen"},
         {"condition": "Gebruikt"},
+        {"attributes": [{"label": "Kilometerstand", "value": "155.562 km"}]},
         {"postedAt": "2026-10-01"},
         {"location": {"city": "Brugge"}},
         {"seller": {"reviewCount": 0, "sellerKind": "professional"}},

@@ -176,6 +176,7 @@ def test_build_messages_content_is_canonical_json_of_allowed_facts():
         "priceType": "fixed",
         "category": "Vélos",
         "condition": "Très bon état",
+        "attributes": [],
         "postedAt": "2026-10-16",
         "location": {"city": "Liège", "region": "Liège", "country": "BE"},
         "imageCount": 1,
@@ -199,6 +200,20 @@ def test_build_messages_content_is_canonical_json_of_allowed_facts():
     assert canonical in text
     # Ni URL ni identifiant d'annonce : ils ne servent pas à l'analyse.
     assert "m123" not in text and "https://" not in text
+
+
+def test_attributes_are_sent_in_order_with_contacts_masked():
+    listing = _listing(
+        attributes=[
+            {"label": "Kilométrage", "value": "155.562 km"},
+            {"label": "Contact", "value": "0472 12 34 56"},
+        ]
+    )
+    facts = _facts(build_messages(listing, RULES, [], today=TODAY))
+    assert facts["attributes"] == [
+        {"label": "Kilométrage", "value": "155.562 km"},
+        {"label": "Contact", "value": "[téléphone]"},
+    ]
 
 
 def test_payload_has_images_sent_and_today():

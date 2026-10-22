@@ -35,10 +35,10 @@ def content_hash(listing: ListingIn, masked_title: str, masked_description: str)
 
 def input_hash(scan: ScanIn, images_requested: int) -> str:
     """Empreinte de ce qui, hors contenu du snapshot, change l'analyse : faits sur le vendeur (le
-    schéma d'entrée refuse son identité), catégorie, état, date de publication et lieu, version
-    des règles, signaux triés par identifiant (avec leurs paramètres), scan partiel et nombre de
-    photos envoyées (`images_requested` : celui du plan et du fournisseur, borné par les photos de
-    l'annonce ; un Standard à 1 photo et un Premium à 4 n'ont pas la même analyse).
+    schéma d'entrée refuse son identité), catégorie, état, caractéristiques, date de publication et
+    lieu, version des règles, signaux triés par identifiant (avec leurs paramètres), scan partiel
+    et nombre de photos envoyées (`images_requested` : celui du plan et du fournisseur, borné par
+    les photos de l'annonce ; un Standard à 1 photo et un Premium à 4 n'ont pas la même analyse).
 
     Invariant (règle R12) : tout champ envoyé au LLM (`llm.payload.build_messages`) est couvert
     par `content_hash` ou par cette empreinte, sinon une annonce forgée (signaux, catégorie…)
@@ -52,6 +52,7 @@ def input_hash(scan: ScanIn, images_requested: int) -> str:
             "seller": listing.seller.model_dump(mode="json", by_alias=True),
             "category": listing.category,
             "condition": listing.condition,
+            "attributes": [a.model_dump(mode="json") for a in listing.attributes],
             "postedAt": listing.posted_at,
             "location": listing.location.model_dump(mode="json", by_alias=True),
             "rulesVersion": scan.rules.version,
