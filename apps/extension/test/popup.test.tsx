@@ -611,6 +611,24 @@ describe("popup", () => {
 		).toBe("true");
 	});
 
+	test("<html lang> suit la langue : préférence enregistrée au chargement, puis le sélecteur", async () => {
+		document.documentElement.lang = "fr";
+		await localePref.setValue("nl");
+		background({ "auth/state": () => signedOut });
+		const user = userEvent.setup();
+		render(<App />);
+		await screen.findByLabelText("E-mailadres");
+		expect(document.documentElement.lang).toBe("nl");
+
+		await user.click(screen.getByRole("button", { name: "FR" }));
+		await screen.findByLabelText("Adresse email");
+		expect(document.documentElement.lang).toBe("fr");
+
+		await user.click(screen.getByRole("button", { name: "NL" }));
+		await screen.findByLabelText("E-mailadres");
+		expect(document.documentElement.lang).toBe("nl");
+	});
+
 	test("auth/start carries the selected locale", async () => {
 		await localePref.setValue("nl");
 		background({ "auth/state": () => signedOut, "auth/start": () => ok(null) });
