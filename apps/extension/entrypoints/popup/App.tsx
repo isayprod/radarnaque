@@ -107,6 +107,12 @@ export default function App() {
 		}
 	}, []);
 
+	// `<html lang>` suit la langue affichée (lecteurs d'écran, césure) : langue du
+	// navigateur au départ, préférence enregistrée, puis le sélecteur FR / NL.
+	useEffect(() => {
+		document.documentElement.lang = locale;
+	}, [locale]);
+
 	useEffect(() => {
 		let active = true;
 		void (async () => {
