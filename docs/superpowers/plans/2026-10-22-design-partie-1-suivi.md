@@ -19,6 +19,7 @@ Remarques relevées pendant la partie 1 de la passe design : paquet `@radarnaque
 - **Rayons du thème :** `rounded-sm|md|lg` et non `rounded-s|m|l`, qui sont aussi des utilités logiques de Tailwind 4 (coins de début, coins gauches).
 - **Restauration du magasin :** pendant la lecture des résultats gardés (quelques millisecondes), la pastille ne rend rien, pour qu'une fiche déjà analysée n'affiche jamais « Analyser » avant son résultat.
 - **Bandeau professionnel** placé juste sous l'en-tête du panneau, la fermeture restant en haut à droite.
+- **Focus clavier de la pastille :** Échap ou « Fermer » avec le focus dans la pastille le rendent à la pilule ; Échap avec le focus sur la page hôte ferme le panneau sans le prendre. Quand la pilule change d'élément (passage en erreur, action perdue après relecture de l'accès, « Relancer »), le focus suit s'il y était. Une pilule d'erreur sans action reçoit le focus elle-même (`tabindex="-1"`, hors de l'ordre de tabulation). Le panneau est nommé par son titre (`aria-labelledby`).
 - **Contrôles de lancement :** panneau ouvert au repos, la pilule « Analyser » et le bouton de la section IA coexistent ; un seul porte le nom « Analyser avec l'IA ».
 - **Vérification visuelle (galerie) :**
   - le panneau et l'infobulle des cartes sont décalés vers la gauche quand ils dépasseraient le bord droit de la fenêtre (`useKeepInView`, 8 px de marge, recalcul à chaque rendu et au redimensionnement) : une pastille au bout d'un titre près du bord faisait défiler la page hôte horizontalement ;
@@ -38,7 +39,7 @@ Rien de ceci n'a été essayé hors des tests et de la galerie. Extension constr
 - **Facebook Marketplace, une fiche et une liste** :
   - la pastille de la fiche, dans la modale de l'annonce ; Échap ferme le panneau sans fermer la modale ;
   - les icônes des cartes de la liste : repos (logo seul), analyse en cours, niveau court, infobulle au survol ; un clic ne navigue pas vers l'annonce ;
-  - **polices :** Facebook peut bloquer `chrome-extension://` (CSP). Vérifier dans l'onglet Réseau si les WOFF2 se chargent ; sinon, la pastille doit s'afficher proprement avec la pile de repli (system-ui), sans erreur dans la console.
+  - **polices :** Facebook peut bloquer `chrome-extension://` (CSP). Vérifier dans l'onglet Réseau si les WOFF2 se chargent ; sinon, la pastille doit s'afficher proprement avec la pile de repli (system-ui), sans aucune erreur de l'extension dans la console. Des messages CSP du navigateur sont alors attendus (`font-src` qui bloque `chrome-extension://`), et le site reçoit les rapports CSP correspondants : il apprend qu'une extension a tenté de charger une police (faible sensibilité).
 - **Icône de l'extension** lisible dans une barre d'outils claire et dans une sombre (thème Chrome), à 16 px comme dans le menu des extensions.
 - **Pastille en FR et en NL** : préférence de langue de la popup, puis sans préférence (2ememain en FR, 2dehands en NL, Facebook selon la langue du navigateur).
 - **Mouvement réduit** activé dans le système (macOS : Accessibilité, Affichage, Réduire les animations) : aucun élément ne tourne ni ne clignote, la ligne d'état est lisible sans reflet, les points d'attente restent fixes.
@@ -50,10 +51,8 @@ Rien de ceci n'a été essayé hors des tests et de la galerie. Extension constr
 - **Popup et landing** : leur passage au design (plan à écrire).
 - **Socle laissé de côté** : le favicon et l'image Open Graph du site (socle §2.5), la suppression de `icon-with-shadow.svg` (la popup s'en sert encore), et l'entrée de la popup (`entrypoints/popup`) dans le garde-fou des tokens.
 - **Points mineurs reportés pendant la partie 1**, à reprendre à la relecture finale ou en partie 2 :
-  - focus clavier perdu quand la pilule passe en erreur (bouton remplacé par un `span`) et après « Relancer » ; Échap ne rend pas le focus à la pilule ;
-  - panneau nommé par `aria-label` plutôt que par `aria-labelledby` vers son titre ;
   - `loadFonts` : une exception à la création d'une police saute les suivantes ;
-  - tests de `motion.css` par recherche de sous-chaînes ; `icons.ts` sans test ; identifiant de dégradé fixe dans `iconTileSvg` ; `scripts/icons.ts` hors du `typecheck` du paquet design ;
+  - tests de `motion.css` par recherche de sous-chaînes ; `icons.ts` sans test ; identifiant de dégradé fixe dans `iconTileSvg` ;
   - garde-fou des rayons limité à `components/*.tsx`.
 
 ## Limites connues
@@ -61,3 +60,5 @@ Rien de ceci n'a été essayé hors des tests et de la galerie. Extension constr
 - **Galerie :** les polices viennent de `fonts.css` chargé par le document, pas de `loadFonts` ; le chargement réel dans une page hôte reste à vérifier sur les sites. Elle ne couvre ni la section Debug du superuser, ni la popup.
 - **Décalage du panneau et de l'infobulle calculé sur la fenêtre :** `useKeepInView` ne connaît que la largeur de la fenêtre, pas le conteneur qui défile ou rogne le plus proche (la modale d'une annonce Facebook, par exemple) : dans un tel conteneur, la couche peut encore être coupée. Il recalcule à chaque rendu de la pastille et au redimensionnement, pas quand la page hôte se réorganise seule.
 - **Ligne d'état longue :** coupée à 60 caractères (`statusLine`, « … » compris), puis tronquée par la largeur de la pilule (340 px) ; pendant une attente, les points animés s'ajoutent juste après les points de suspension de la troncature, qui restent visibles malgré le reflet.
+- **Polices ajoutées à la page hôte :** les `FontFace` de `loadFonts` vont dans `document.fonts` de l'hôte, dont `document.fonts.status` passe par « loading » le temps de leur chargement ; un script de la page qui attend `document.fonts.ready` attend aussi ces polices.
+- **Double clic sur « Analyser »** avec un accès déjà en cache : le premier clic lance l'analyse et la pilule devient aussitôt le bouton de l'analyse en cours, à la même place ; le second clic ouvre donc le panneau. Admis : le panneau montre l'analyse en cours, rien n'est lancé deux fois.
