@@ -29,8 +29,11 @@ const fr = {
 	"code.resent": "Email renvoyé.",
 	"code.changeEmail": "Changer d'adresse",
 
-	"account.scansLeft": "{count} analyses IA restantes",
-	"account.scansLeftOne": "{count} analyse IA restante",
+	"account.scansLabel": "Analyses IA restantes",
+	// `{badge}` : la pastille « Analyser » en miniature (nœud React, jamais du HTML).
+	"account.how":
+		"Ouvrez une annonce sur 2ememain, 2dehands ou Marketplace, puis cliquez sur {badge} à côté du titre.",
+	"action.pricing": "Voir les formules",
 	"action.signOut": "Se déconnecter",
 
 	"delete.title": "Supprimer mon compte",
@@ -94,8 +97,10 @@ const nl: Record<MessageKey, string> = {
 	"code.resent": "E-mail opnieuw verzonden.",
 	"code.changeEmail": "Ander adres gebruiken",
 
-	"account.scansLeft": "{count} AI-analyses over",
-	"account.scansLeftOne": "{count} AI-analyse over",
+	"account.scansLabel": "Resterende AI-analyses",
+	"account.how":
+		"Open een advertentie op 2dehands, 2ememain of Marketplace en klik op {badge} naast de titel.",
+	"action.pricing": "Formules bekijken",
 	"action.signOut": "Afmelden",
 
 	"delete.title": "Mijn account verwijderen",

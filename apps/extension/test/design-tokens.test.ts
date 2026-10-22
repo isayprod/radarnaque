@@ -8,20 +8,34 @@ import { describe, expect, test } from "vitest";
  * dans les tokens de `@radarnaque/design` (utilités `bg-glass-host`,
  * `text-text-2`…), jamais une valeur en dur ni une couleur de la palette
  * Tailwind, et son `z-index` est 2 147 483 000, plus jamais le maximum.
- * La popup (`entrypoints/popup`) entre dans le parcours en partie 2.
+ * La popup (`entrypoints/popup`) suit la même règle.
  */
 
-const COMPONENTS = resolve(
-	dirname(fileURLToPath(import.meta.url)),
-	"../components",
-);
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Fichiers parcourus : `components/*.tsx`, `components/*.ts` et `badge.css`. */
-const FILES = readdirSync(COMPONENTS)
-	.filter((name) => /\.tsx?$/.test(name) || name === "badge.css")
-	.sort();
+/** Fichiers d'un dossier retenus par `keep`, en chemins relatifs à l'extension. */
+function filesOf(dir: string, keep: (name: string) => boolean): string[] {
+	return readdirSync(join(ROOT, dir))
+		.filter(keep)
+		.map((name) => `${dir}/${name}`);
+}
 
-/** Exceptions admises (`fichier:ligne`) : aucune pour cette partie. */
+/**
+ * Fichiers parcourus : `components/*.tsx`, `components/*.ts` et `badge.css`,
+ * `entrypoints/popup/*.tsx` et `style.css`.
+ */
+const FILES = [
+	...filesOf(
+		"components",
+		(name) => /\.tsx?$/.test(name) || name === "badge.css",
+	),
+	...filesOf(
+		"entrypoints/popup",
+		(name) => name.endsWith(".tsx") || name === "style.css",
+	),
+].sort();
+
+/** Exceptions admises (`fichier:ligne`) : aucune. */
 const ALLOWED: ReadonlySet<string> = new Set();
 
 /** Ce que le garde-fou refuse, avec la raison affichée en cas d'échec. */
@@ -54,10 +68,25 @@ function violations(source: string): string[] {
 
 describe("garde-fou des tokens", () => {
 	test("parcourt les composants et badge.css", () => {
-		expect(FILES).toContain("badge.css");
-		expect(FILES).toContain("RiskBadge.tsx");
-		expect(FILES).toContain("risk-styles.ts");
+		expect(FILES).toContain("components/badge.css");
+		expect(FILES).toContain("components/RiskBadge.tsx");
+		expect(FILES).toContain("components/risk-styles.ts");
 		expect(FILES.length).toBeGreaterThan(10);
+	});
+
+	test("parcourt la popup : entrypoints/popup/*.tsx et style.css", () => {
+		expect(FILES).toEqual(
+			expect.arrayContaining([
+				"entrypoints/popup/App.tsx",
+				"entrypoints/popup/CodeInput.tsx",
+				"entrypoints/popup/main.tsx",
+				"entrypoints/popup/style.css",
+			]),
+		);
+	});
+
+	test("aucune exception admise", () => {
+		expect(ALLOWED.size).toBe(0);
 	});
 
 	test.each([
@@ -89,7 +118,7 @@ describe("garde-fou des tokens", () => {
 	});
 
 	test.each(FILES)("%s n'utilise que des tokens", (name) => {
-		const source = readFileSync(join(COMPONENTS, name), "utf8");
+		const source = readFileSync(join(ROOT, name), "utf8");
 		const found = violations(source).filter(
 			(entry) => !ALLOWED.has(`${name}:${entry.split(":")[0]}`),
 		);

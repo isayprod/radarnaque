@@ -1,4 +1,9 @@
-import { type ChangeEvent, type RefObject, useState } from "react";
+import {
+	type ChangeEvent,
+	type RefObject,
+	type SyntheticEvent,
+	useState,
+} from "react";
 
 const CELLS = 6;
 
@@ -8,6 +13,20 @@ const CELL_CLASS =
 
 /** Case courante quand le champ a le focus : anneau de focus des tokens. */
 const CURRENT_CELL_CLASS = "border-transparent shadow-[var(--focus-ring)]";
+
+/**
+ * Le champ étant invisible, un clic ou une flèche pourrait placer le curseur au
+ * milieu du code : un chiffre tapé s'insérerait alors sans que les cases le
+ * montrent à sa place. Le curseur est ramené en fin de saisie (au focus, au clic,
+ * à chaque changement de sélection).
+ */
+function caretToEnd(event: SyntheticEvent<HTMLInputElement>) {
+	const input = event.currentTarget;
+	const end = input.value.length;
+	// Condition nécessaire : `setSelectionRange` émet lui-même un `select`.
+	if (input.selectionStart !== end || input.selectionEnd !== end)
+		input.setSelectionRange(end, end);
+}
 
 /**
  * Code à 6 chiffres en six cases. C'est un habillage : un seul `<input>` (celui que
@@ -65,8 +84,13 @@ export function CodeInput({
 				className="absolute inset-0 h-full w-full cursor-text appearance-none border-0 p-0 opacity-0 outline-hidden"
 				value={value}
 				onChange={onChange}
-				onFocus={() => setFocused(true)}
+				onFocus={(event) => {
+					setFocused(true);
+					caretToEnd(event);
+				}}
 				onBlur={() => setFocused(false)}
+				onClick={caretToEnd}
+				onSelect={caretToEnd}
 			/>
 		</div>
 	);
