@@ -131,6 +131,16 @@ describe("renderLanding : textes", () => {
 		const root = monter(rendu("fr"));
 		expect(root.querySelector("nav.site-nav")).not.toBeNull();
 		expect(root.querySelector("[data-mockup]")).not.toBeNull();
+		// Tout le contenu dans un repère (règle « region ») : en-tête, maquette en
+		// `aside`, `main`, pied de page ; seul le calque décoratif du dégradé est à part.
+		expect(root.querySelector("[data-mockup]")?.tagName).toBe("ASIDE");
+		for (const enfant of root.children) {
+			if (enfant.getAttribute("aria-hidden") === "true") continue;
+			expect(
+				["HEADER", "ASIDE", "MAIN", "FOOTER"],
+				enfant.outerHTML.slice(0, 60),
+			).toContain(enfant.tagName);
+		}
 		expect(root.querySelector("section#comment")).not.toBeNull();
 		expect(root.querySelector("section#formules")).not.toBeNull();
 		expect(root.querySelector("footer.site-footer")).not.toBeNull();

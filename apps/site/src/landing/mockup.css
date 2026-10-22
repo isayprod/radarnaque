@@ -12,8 +12,9 @@
 	/*
 	 * couleurs du site tiers : début
 	 * Seules valeurs brutes du site hors de tokens.css (spec landing §4) : elles
-	 * imitent la fiche d'un site tiers (fond, filets, encre, liens, bouton jaune)
-	 * et colorent la photo dessinée du produit. Rien de Radarnaque ici.
+	 * imitent la fiche d'un site tiers (fond, filets, encre, liens, bouton jaune,
+	 * rayons et police) et colorent la photo dessinée du produit. Rien de
+	 * Radarnaque ici.
 	 */
 	--mk-page: #fbfbfa;
 	--mk-surface: #ffffff;
@@ -46,9 +47,13 @@
 	--mk-ph-screen: #131318;
 	--mk-ph-island: #050507;
 	--mk-ph-print: #e0dfda;
+	/* Rayons et police de la fiche imitée (pas ceux de Radarnaque). */
+	--mk-r-s: 4px;
+	--mk-r-m: 6px;
+	--mk-r-l: 8px;
+	--mk-font: "Helvetica Neue", Helvetica, Arial, sans-serif;
 	/* couleurs du site tiers : fin */
 
-	--mk-font: "Helvetica Neue", Helvetica, Arial, sans-serif;
 	/* Marge intérieure de la fiche ; le panneau déborde de la fenêtre de --mk-out. */
 	--mk-pad: 24px;
 	--mk-out: 28px;
@@ -187,7 +192,7 @@
 	overflow: hidden;
 	border: 1px solid var(--mk-line-strong);
 	border-right: 0;
-	border-radius: 4px 0 0 4px;
+	border-radius: var(--mk-r-s) 0 0 var(--mk-r-s);
 	background-color: var(--mk-surface);
 	color: var(--mk-ink-2);
 	font-size: 0.75rem;
@@ -199,7 +204,7 @@
 	display: grid;
 	place-items: center;
 	width: 36px;
-	border-radius: 0 4px 4px 0;
+	border-radius: 0 var(--mk-r-s) var(--mk-r-s) 0;
 	background-color: var(--mk-brand);
 	color: var(--mk-surface);
 }
@@ -217,7 +222,7 @@
 	align-items: center;
 	height: 32px;
 	padding: 0 14px;
-	border-radius: 6px;
+	border-radius: var(--mk-r-m);
 	background-color: var(--mk-cta);
 	color: var(--mk-brand);
 	font-weight: 700;
@@ -243,7 +248,7 @@
 	height: 28px;
 	padding: 0 12px 0 8px;
 	border: 1.5px solid var(--mk-back-border);
-	border-radius: 4px;
+	border-radius: var(--mk-r-s);
 	color: var(--mk-brand);
 	font-weight: 700;
 }
@@ -290,7 +295,7 @@
 	bottom: 22px;
 	left: 10px;
 	padding: 3px 8px;
-	border-radius: 8px;
+	border-radius: var(--mk-r-l);
 	background-color: var(--mk-counter);
 	color: var(--mk-counter-ink);
 	font-size: 0.6875rem;
@@ -308,7 +313,7 @@
 	height: 58px;
 	overflow: hidden;
 	border: 2px solid transparent;
-	border-radius: 4px;
+	border-radius: var(--mk-r-s);
 }
 
 .mk-thumb--current {
@@ -365,7 +370,7 @@
 	display: inline-block;
 	margin: 12px 16px 0;
 	padding: 4px 8px;
-	border-radius: 4px;
+	border-radius: var(--mk-r-s);
 	background-color: var(--mk-muted);
 	font-size: 0.75rem;
 }
@@ -407,7 +412,7 @@
 	place-items: center;
 	height: 38px;
 	margin: 16px 16px 0;
-	border-radius: 6px;
+	border-radius: var(--mk-r-m);
 	background-color: var(--mk-cta);
 	color: var(--mk-brand);
 	font-weight: 700;
@@ -768,6 +773,12 @@
 
 	.mk-grid {
 		grid-template-columns: minmax(0, 1fr) 272px;
+	}
+
+	/* Panneau sur la seule colonne de droite : à 340 px, il couvrait la fin de la
+	   description (le lien de paiement que cite sa première raison). */
+	.mk-panel {
+		width: calc(100% + var(--mk-pad) + var(--mk-out));
 	}
 
 	.mk-thumb:nth-child(n + 4) {

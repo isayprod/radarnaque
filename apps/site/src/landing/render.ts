@@ -271,9 +271,11 @@ export function landingNodes(locale: Locale, options: LandingOptions): VNode[] {
 		// Calque fixe du dégradé qui suit le scroll (spec landing §5.1), derrière la page.
 		h("div", { class: "sky", "aria-hidden": "true" }),
 		hero(locale, storeUrl),
-		// Maquette du produit (spec landing §4), à cheval sur le bas du hero.
+		// Maquette du produit (spec landing §4), à cheval sur le bas du hero. Dans un
+		// repère `complementary` (tout le contenu de la page est dans un repère) ; son
+		// nom reste celui de l'illustration (`role="img"` et sa description).
 		h(
-			"div",
+			"aside",
 			{ class: "landing-mockup", "data-mockup": true },
 			mockupNode(locale),
 		),
