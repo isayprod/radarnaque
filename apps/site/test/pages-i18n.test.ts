@@ -9,12 +9,11 @@ import {
 	formatInt,
 	PLANS,
 	PRICING,
-	PRIVACY,
 	PRIVACY_EMAIL,
-	PRIVACY_ORDER,
 	PRIVACY_RETENTION_MONTHS,
 } from "../src/pages-i18n";
 import { renderPricing, renderPrivacy } from "../src/pages-render";
+import { PRIVACY, PRIVACY_ORDER } from "../src/privacy-i18n";
 
 function keyTree(value: unknown): unknown {
 	if (typeof value === "string") return "string";

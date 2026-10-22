@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { contrastRatio } from "../src/landing/gradient";
 import { fillOffer, startLanding, startReveal } from "../src/landing/main";
@@ -450,5 +450,47 @@ describe("startLanding", () => {
 		);
 		await startLanding(window, fetchImpl as unknown as typeof fetch);
 		expect(champ(doc, "trial", "photos")).toBe("Geen foto's geanalyseerd");
+	});
+});
+
+/** Modules (chemins relatifs à src/) importés par `entree`, de proche en proche, types exclus. */
+function grapheDImports(entree: string): Set<string> {
+	const src = resolve(import.meta.dirname, "../src");
+	const vus = new Set<string>();
+	const visiter = (fichier: string) => {
+		const rel = fichier.slice(src.length + 1);
+		if (vus.has(rel)) return;
+		vus.add(rel);
+		const code = readFileSync(fichier, "utf8");
+		for (const m of code.matchAll(
+			/^import\s+(?!type\s)[^;]*?from\s+"(\.{1,2}\/[^"]+)";/gms,
+		)) {
+			const cible = resolve(dirname(fichier), m[1] ?? "");
+			visiter(cible.endsWith(".ts") ? cible : `${cible}.ts`);
+		}
+	};
+	visiter(resolve(src, entree));
+	return vus;
+}
+
+describe("poids du script de la landing", () => {
+	it("main.ts n'importe ni le rendu au build, ni la mise en page, ni les textes de confidentialité", () => {
+		const graphe = grapheDImports("landing/main.ts");
+		expect(graphe).toContain("landing/plan-panel.ts");
+		for (const absent of [
+			"landing/render.ts",
+			"landing/mockup.ts",
+			"layout.ts",
+			"pages-render.ts",
+			"privacy-i18n.ts",
+		])
+			expect(graphe).not.toContain(absent);
+		for (const module of graphe) {
+			const code = readFileSync(
+				resolve(import.meta.dirname, "../src", module),
+				"utf8",
+			);
+			expect(code, module).not.toMatch(/export const PRIVACY\b/);
+		}
 	});
 });
