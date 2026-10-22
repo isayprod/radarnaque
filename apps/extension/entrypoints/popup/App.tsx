@@ -9,12 +9,14 @@ import {
 	useState,
 } from "react";
 import { browser } from "wxt/browser";
+import { Logo } from "../../components/Logo";
 import { accessOf } from "../../lib/access";
 import { PUBLIC_URL } from "../../lib/config";
 import { isValidEmail, normalizeEmail } from "../../lib/email";
 import { detectLocale, errorMessage, type MessageKey, t } from "../../lib/i18n";
 import { type AuthState, sendToBackground } from "../../lib/messages";
 import { localePref, pendingSignIn, sessionToken } from "../../lib/storage";
+import { CodeInput } from "./CodeInput";
 
 type View = "loading" | "unavailable" | "signedOut" | "codeSent" | "signedIn";
 
@@ -31,12 +33,35 @@ function browserLocale(): Locale {
 	}
 }
 
-const primaryButton =
-	"w-full rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:opacity-60";
-const linkButton =
-	"text-sm font-medium text-brand-600 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:opacity-60";
-const inputClass =
-	"w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-brand-600";
+/**
+ * Pilule blanche, action principale de la popup (DESIGN.md, boutons « Primary ») :
+ * 44 px, texte sombre, ombre de la pilule, soulevée de 1 px au survol (sauf mouvement
+ * réduit). Sans largeur : `w-full` à l'usage quand elle occupe toute la ligne.
+ */
+export const WHITE_PILL_CLASS =
+	"inline-flex h-11 cursor-pointer items-center justify-center rounded-pill bg-white px-5 text-sm font-semibold whitespace-nowrap text-text-on-light no-underline shadow-[var(--shadow-pill)] transition-transform duration-[var(--dur-fast)] hover:-translate-y-px focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 motion-reduce:transition-none motion-reduce:hover:translate-y-0";
+
+/** Champ de 36 px sur `--bg-1`, bordure `--border-default`, anneau de focus des tokens. */
+export const INPUT_CLASS =
+	"h-9 w-full rounded-sm border border-border-default bg-bg-1 px-3 text-sm text-text-1 placeholder:text-text-3 focus:shadow-[var(--focus-ring)] focus:outline-hidden read-only:opacity-60";
+
+/** Lien ou bouton d'action secondaire : texte souligné `--text-1`. */
+export const LINK_CLASS =
+	"cursor-pointer rounded-xs text-[13px] font-medium text-text-1 underline underline-offset-2 hover:text-text-2 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-60";
+
+/** Étiquette au-dessus d'un champ. */
+const LABEL_CLASS = "block text-xs font-medium text-text-2";
+
+/** Titre d'écran : Instrument Serif 22 px (`display-s`). */
+const TITLE_CLASS =
+	"font-serif text-[22px] leading-[1.15] font-normal text-text-1";
+
+/** Phrase d'accompagnement du titre. */
+const LEAD_CLASS = "text-[13px] leading-[1.45] text-text-2";
+
+/** Message de la zone `aria-live` : erreur ou confirmation. */
+const MESSAGE_CLASS =
+	"rounded-sm px-3 py-2 text-[13px] leading-[1.45] text-text-1";
 
 export default function App() {
 	const [locale, setLocale] = useState<Locale>(browserLocale);
@@ -248,89 +273,122 @@ export default function App() {
 	let status: ReactNode = null;
 	if (errorCode) {
 		status = (
-			<span className="text-red-700">{errorMessage(locale, errorCode)}</span>
+			<p className={`${MESSAGE_CLASS} bg-danger-soft`}>
+				{errorMessage(locale, errorCode)}
+			</p>
 		);
 	} else if (resent) {
-		status = <span className="text-emerald-700">{tr("code.resent")}</span>;
+		status = (
+			<p className={`${MESSAGE_CLASS} bg-success-soft`}>{tr("code.resent")}</p>
+		);
 	}
 
 	let content: ReactNode;
 	switch (view) {
 		case "loading":
-			content = <p className="text-sm text-slate-500">{tr("app.loading")}</p>;
+			content = (
+				<>
+					{/* Squelette : ligne courte, panneau de 96 px, ligne longue. */}
+					<div aria-hidden="true" className="space-y-3.5">
+						<div className="rq-skeleton h-3 w-2/5 rounded-xs bg-bg-3" />
+						<div className="rq-skeleton h-24 rounded-md bg-bg-3" />
+						<div className="rq-skeleton h-3 w-4/5 rounded-xs bg-bg-3" />
+					</div>
+					<p className="sr-only">{tr("app.loading")}</p>
+				</>
+			);
 			break;
 		case "unavailable":
 			content = (
-				<button
-					type="button"
-					className={linkButton}
-					onClick={() => {
-						setErrorCode(null);
-						setView("loading");
-						void refresh();
-					}}
-				>
-					{tr("app.retry")}
-				</button>
+				<>
+					<div className="space-y-1.5">
+						<h2 className={TITLE_CLASS}>{tr("app.unavailableTitle")}</h2>
+						<p className={LEAD_CLASS}>{tr("app.unavailableText")}</p>
+					</div>
+					<button
+						type="button"
+						className={`${WHITE_PILL_CLASS} w-full`}
+						onClick={() => {
+							setErrorCode(null);
+							setView("loading");
+							void refresh();
+						}}
+					>
+						{tr("app.retry")}
+					</button>
+				</>
 			);
 			break;
 		case "signedOut":
 			content = (
-				<form className="space-y-3" noValidate onSubmit={onSubmitEmail}>
-					<div className="space-y-1">
-						<label className="text-sm font-medium" htmlFor="email">
-							{tr("email.label")}
-						</label>
-						<input
-							ref={emailRef}
-							id="email"
-							type="email"
-							autoComplete="email"
-							inputMode="email"
-							className={inputClass}
-							placeholder={tr("email.placeholder")}
-							value={email}
-							onChange={(event) => setEmail(event.target.value)}
-						/>
+				<>
+					<div className="space-y-1.5">
+						<h2 className={TITLE_CLASS}>{tr("signin.title")}</h2>
+						<p className={LEAD_CLASS}>{tr("signin.lead")}</p>
 					</div>
-					<button type="submit" className={primaryButton} disabled={busy}>
-						{busy ? tr("email.sending") : tr("email.submit")}
-					</button>
-				</form>
+					<form className="space-y-3.5" noValidate onSubmit={onSubmitEmail}>
+						<div className="space-y-1.5">
+							<label className={LABEL_CLASS} htmlFor="email">
+								{tr("email.label")}
+							</label>
+							<input
+								ref={emailRef}
+								id="email"
+								type="email"
+								autoComplete="email"
+								inputMode="email"
+								className={INPUT_CLASS}
+								placeholder={tr("email.placeholder")}
+								value={email}
+								onChange={(event) => setEmail(event.target.value)}
+							/>
+						</div>
+						<button
+							type="submit"
+							className={`${WHITE_PILL_CLASS} w-full`}
+							disabled={busy}
+						>
+							{busy ? tr("email.sending") : tr("email.submit")}
+						</button>
+						<p className="text-xs leading-[1.45] text-text-2">
+							{tr("signin.note")}
+						</p>
+					</form>
+				</>
 			);
 			break;
 		case "codeSent":
 			content = (
-				<div className="space-y-3">
-					<p className="text-sm">{tr("code.instructions")}</p>
-					<p className="text-xs text-slate-500">
+				<>
+					<div className="space-y-1.5">
+						<h2 className={TITLE_CLASS}>{tr("code.title")}</h2>
+						<p className={LEAD_CLASS}>{tr("code.instructions")}</p>
+					</div>
+					<p className="text-xs text-text-2">
 						{tr("code.sentTo")}{" "}
-						<strong className="font-semibold text-slate-700">{sentTo}</strong>
+						<strong className="font-semibold break-all text-text-1">
+							{sentTo}
+						</strong>
 					</p>
-					<div className="space-y-1">
-						<label className="text-sm font-medium" htmlFor="code">
+					<div className="space-y-1.5">
+						<label className={LABEL_CLASS} htmlFor="code">
 							{tr("code.label")}
 						</label>
-						<input
-							ref={codeRef}
+						<CodeInput
 							id="code"
-							type="text"
-							inputMode="numeric"
-							autoComplete="one-time-code"
-							pattern="[0-9]*"
-							readOnly={busy}
-							className={`${inputClass} text-center font-mono text-lg tracking-[0.5em]`}
 							value={code}
+							busy={busy}
 							onChange={onChangeCode}
+							inputRef={codeRef}
 						/>
 					</div>
 					{busy && (
-						<p className="text-xs text-slate-500">{tr("code.verifying")}</p>
+						<p className="text-xs text-text-2">{tr("code.verifying")}</p>
 					)}
 					<div className="flex items-center justify-between">
 						<button
 							type="button"
-							className={linkButton}
+							className={LINK_CLASS}
 							disabled={busy}
 							onClick={onResend}
 						>
@@ -338,14 +396,14 @@ export default function App() {
 						</button>
 						<button
 							type="button"
-							className={linkButton}
+							className={LINK_CLASS}
 							disabled={busy}
 							onClick={onChangeAddress}
 						>
 							{tr("code.changeEmail")}
 						</button>
 					</div>
-				</div>
+				</>
 			);
 			break;
 		case "signedIn":
@@ -362,48 +420,107 @@ export default function App() {
 			break;
 	}
 
+	// Pied : « Formules » partout, sauf sur l'écran du compte (sa barre d'actions y mène).
+	const footerLinks: FooterLink[] = [
+		{
+			href: `${PUBLIC_URL}/privacy/?lang=${locale}`,
+			label: tr("privacy.link"),
+		},
+	];
+	if (view !== "signedIn") {
+		footerLinks.push({
+			href: `${PUBLIC_URL}/pricing/?lang=${locale}`,
+			label: tr("footer.pricing"),
+		});
+	}
+
 	return (
-		<main className="space-y-4 p-4">
-			<header className="flex items-center justify-between">
-				<div className="flex items-center gap-2">
-					<img src="/icon-with-shadow.svg" alt="" width={28} height={28} />
-					<h1 className="text-base font-semibold">Radarnaque</h1>
+		<div className="flex max-h-[600px] flex-col">
+			<PopupHeader locale={locale} onLocale={chooseLocale} />
+			{/* Seule la zone de contenu défile : l'en-tête et le pied restent fixes. */}
+			<main className="min-h-0 flex-1 space-y-3.5 overflow-y-auto p-4">
+				{content}
+				<div aria-live="polite" className="space-y-2">
+					{deleted && (
+						<p className={`${MESSAGE_CLASS} bg-success-soft`}>
+							{tr("delete.success")}
+						</p>
+					)}
+					{status}
 				</div>
-				<fieldset className="m-0 flex overflow-hidden rounded-md border border-slate-300 p-0 text-xs font-semibold">
-					<legend className="sr-only">{tr("locale.label")}</legend>
+			</main>
+			<PopupFooter links={footerLinks} />
+		</div>
+	);
+}
+
+/**
+ * En-tête de 60 px : dégradé compact, logo blanc et « Radarnaque » en serif à gauche,
+ * choix FR/NL en contrôle segmenté pilule à droite (`aria-pressed`), filet de 1 px
+ * en dégradé dessous.
+ */
+export function PopupHeader({
+	locale,
+	onLocale,
+}: {
+	locale: Locale;
+	onLocale: (locale: Locale) => void;
+}) {
+	return (
+		<>
+			<header className="flex h-15 shrink-0 items-center justify-between bg-[image:var(--gradient-compact)] px-4">
+				<div className="flex items-center gap-2 text-white">
+					<Logo size={22} />
+					<h1 className="font-serif text-[22px] leading-none font-normal">
+						Radarnaque
+					</h1>
+				</div>
+				{/* Fond navy translucide : texte blanc lisible jusque sur le lilas du dégradé. */}
+				<fieldset className="m-0 flex gap-0.5 rounded-pill border-0 bg-bg-0/50 p-0.5">
+					<legend className="sr-only">{t(locale, "locale.label")}</legend>
 					{LOCALES.map((option) => (
 						<button
 							key={option}
 							type="button"
 							aria-pressed={locale === option}
-							className={`px-2 py-1 focus-visible:outline-2 focus-visible:outline-brand-600 ${
+							className={`h-7 cursor-pointer rounded-pill px-3 text-xs font-semibold focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden ${
 								locale === option
-									? "bg-brand-600 text-white"
-									: "bg-white text-slate-700 hover:bg-slate-100"
+									? "bg-white text-text-on-light"
+									: "text-white hover:bg-white/10"
 							}`}
-							onClick={() => chooseLocale(option)}
+							onClick={() => onLocale(option)}
 						>
 							{option.toUpperCase()}
 						</button>
 					))}
 				</fieldset>
 			</header>
-			{content}
-			<div aria-live="polite" className="min-h-5 space-y-1 text-sm">
-				{deleted && <p className="text-emerald-700">{tr("delete.success")}</p>}
-				{status}
-			</div>
-			<footer className="border-t border-slate-200 pt-3 text-xs">
+			<div
+				aria-hidden="true"
+				className="h-px shrink-0 bg-[image:var(--gradient-hairline)]"
+			/>
+		</>
+	);
+}
+
+export type FooterLink = { href: string; label: string };
+
+/** Pied : liens soulignés en `text-xs`, ouverts dans un nouvel onglet. */
+export function PopupFooter({ links }: { links: readonly FooterLink[] }) {
+	return (
+		<footer className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 px-4 pb-3 text-xs">
+			{links.map((link) => (
 				<a
-					href={`${PUBLIC_URL}/privacy/?lang=${locale}`}
+					key={link.href}
+					href={link.href}
 					target="_blank"
 					rel="noopener noreferrer"
-					className="text-slate-500 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+					className="rounded-xs text-text-2 underline underline-offset-2 hover:text-text-1 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden"
 				>
-					{tr("privacy.link")}
+					{link.label}
 				</a>
-			</footer>
-		</main>
+			))}
+		</footer>
 	);
 }
 
@@ -573,7 +690,7 @@ function DeleteAccount({
 						autoComplete="off"
 						autoCapitalize="characters"
 						spellCheck={false}
-						className={inputClass}
+						className={INPUT_CLASS}
 						value={typed}
 						readOnly={pending}
 						onChange={(event) => setTyped(event.target.value)}

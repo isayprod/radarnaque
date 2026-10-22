@@ -3,13 +3,23 @@ import type { Locale } from "@radarnaque/shared";
 const fr = {
 	"app.loading": "Chargement…",
 	"app.retry": "Réessayer",
+	"app.unavailableTitle": "Service injoignable",
+	"app.unavailableText":
+		"Impossible de joindre Radarnaque. Vérifiez votre connexion, puis réessayez.",
 	"locale.label": "Langue",
+
+	"signin.title": "Repérez les arnaques avant de payer",
+	"signin.lead":
+		"Connectez-vous pour analyser les annonces de 2ememain, 2dehands et Marketplace.",
+	"signin.note":
+		"Un lien et un code vous sont envoyés par email. Pas de mot de passe.",
 
 	"email.label": "Adresse email",
 	"email.placeholder": "vous@exemple.be",
 	"email.submit": "Recevoir mon lien de connexion",
 	"email.sending": "Envoi en cours…",
 
+	"code.title": "Vérifiez vos emails",
 	"code.instructions":
 		"Vérifiez votre boîte mail : cliquez sur le lien ou saisissez le code",
 	"code.label": "Code à 6 chiffres",
@@ -36,6 +46,7 @@ const fr = {
 	"delete.unreachable":
 		"Impossible de joindre le serveur. Si votre compte a été supprimé, vous serez déconnecté.",
 	"privacy.link": "Confidentialité",
+	"footer.pricing": "Formules",
 
 	"plan.trial": "Essai",
 	"plan.standard": "Standard",
@@ -58,13 +69,22 @@ export type MessageKey = keyof typeof fr;
 const nl: Record<MessageKey, string> = {
 	"app.loading": "Laden…",
 	"app.retry": "Opnieuw proberen",
+	"app.unavailableTitle": "Dienst onbereikbaar",
+	"app.unavailableText":
+		"Radarnaque is niet bereikbaar. Controleer je verbinding en probeer opnieuw.",
 	"locale.label": "Taal",
+
+	"signin.title": "Herken oplichting vóór je betaalt",
+	"signin.lead":
+		"Meld je aan om advertenties op 2dehands, 2ememain en Marketplace te analyseren.",
+	"signin.note": "Je krijgt een link en een code per e-mail. Geen wachtwoord.",
 
 	"email.label": "E-mailadres",
 	"email.placeholder": "jij@voorbeeld.be",
 	"email.submit": "Ontvang mijn aanmeldlink",
 	"email.sending": "Bezig met verzenden…",
 
+	"code.title": "Controleer je e-mail",
 	"code.instructions":
 		"Controleer je mailbox: klik op de link of voer de code in",
 	"code.label": "Code van 6 cijfers",
@@ -91,6 +111,7 @@ const nl: Record<MessageKey, string> = {
 	"delete.unreachable":
 		"De server is niet bereikbaar. Als je account verwijderd is, word je afgemeld.",
 	"privacy.link": "Privacy",
+	"footer.pricing": "Formules",
 
 	"plan.trial": "Proef",
 	"plan.standard": "Standaard",

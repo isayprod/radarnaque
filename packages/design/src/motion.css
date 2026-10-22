@@ -1,5 +1,6 @@
 /*
- * Animations partagées (DESIGN.md §2.6) : logo de chargement et reflet du texte d'état.
+ * Animations partagées (DESIGN.md §2.6 et §3) : logo de chargement, reflet du texte
+ * d'état et squelette de chargement.
  * Le logo animé est le seul élément qui tourne : indicateur d'attente, jamais décoration.
  * Le SVG est en ligne ; le groupe tournant n'a aucun attribut transform.
  */
@@ -42,6 +43,16 @@
 	}
 }
 
+/* Reflet du squelette : il traverse la forme de droite à gauche. */
+@keyframes rq-skeleton {
+	from {
+		background-position: 100% 0;
+	}
+	to {
+		background-position: -150% 0;
+	}
+}
+
 .rq-logo--loading .rq-logo-arc {
 	animation: rq-logo-tail 1.6s infinite;
 }
@@ -66,11 +77,32 @@
 	animation: rq-shimmer 2.2s linear infinite;
 }
 
+/* Squelette de chargement (DESIGN.md §3) : forme en --bg-3, reflet lent (1,6 s) d'un
+   blanc très léger (celui de --border-subtle), jamais un spinner pour une région. */
+.rq-skeleton {
+	background-color: var(--bg-3);
+	background-image: linear-gradient(
+		90deg,
+		transparent 35%,
+		var(--border-subtle) 50%,
+		transparent 65%
+	);
+	background-size: 250% 100%;
+	background-repeat: no-repeat;
+	animation: rq-skeleton 1.6s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
 	.rq-logo--loading .rq-logo-arc,
 	.rq-logo--loading .rq-logo-spin,
-	.rq-shimmer {
+	.rq-shimmer,
+	.rq-skeleton {
 		animation: none;
+	}
+
+	/* Squelette immobile : la forme seule, sans reflet. */
+	.rq-skeleton {
+		background-image: none;
 	}
 
 	.rq-shimmer {
