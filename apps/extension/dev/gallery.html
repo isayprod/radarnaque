@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="fr">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Galerie de la pastille</title>
+		<style>
+			/* Page hôte fictive : fond blanc, police système, comme une fiche d'annonce. */
+			html {
+				background: white;
+				color: black;
+				font: 16px/1.5 system-ui, sans-serif;
+			}
+			body {
+				margin: 0 auto;
+				max-width: 1280px;
+				padding: 24px 16px 160px;
+			}
+			h1.gallery-title {
+				font-size: 20px;
+				margin: 0 0 4px;
+			}
+			p.gallery-note {
+				color: dimgray;
+				font-size: 14px;
+				margin: 0 0 24px;
+			}
+			h2.gallery-locale {
+				border-top: 1px solid gainsboro;
+				font-size: 18px;
+				margin: 32px 0 16px;
+				padding-top: 16px;
+			}
+			h3.gallery-group {
+				color: dimgray;
+				font-size: 13px;
+				letter-spacing: 0.06em;
+				margin: 24px 0 8px;
+				text-transform: uppercase;
+			}
+			.gallery-grid {
+				display: grid;
+				gap: 16px 24px;
+				grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+			}
+			.gallery-stage {
+				margin: 0;
+				min-height: 84px;
+			}
+			.gallery-stage.is-tall {
+				min-height: 640px;
+			}
+			.gallery-stage.is-card {
+				min-height: 380px;
+			}
+			.gallery-stage figcaption {
+				color: dimgray;
+				font: 12px/1.4 ui-monospace, monospace;
+				margin-bottom: 6px;
+			}
+			/* Titre de la fiche : la pastille se monte juste après, comme sur le site. */
+			.listing-title {
+				font-size: 22px;
+				font-weight: 700;
+				line-height: 1.3;
+				margin: 0;
+			}
+			/* Carte de résultats fictive : photo, titre (et son icône), prix. */
+			.listing-card {
+				border: 1px solid gainsboro;
+				border-radius: 8px;
+				overflow: visible;
+				width: 240px;
+			}
+			.listing-card .photo {
+				aspect-ratio: 4 / 3;
+				background: linear-gradient(135deg, whitesmoke, gainsboro);
+				border-radius: 8px 8px 0 0;
+			}
+			.listing-card .body {
+				padding: 8px 10px 10px;
+			}
+			.listing-card .card-title {
+				font-size: 14px;
+				font-weight: 600;
+				line-height: 1.35;
+				margin: 0;
+			}
+			.listing-card .price {
+				font-size: 14px;
+				margin: 4px 0 0;
+			}
+		</style>
+	</head>
+	<body>
+		<h1 class="gallery-title">Galerie de la pastille Radarnaque</h1>
+		<p class="gallery-note">
+			Page de développement : annonces fictives, clients IA et d'accès simulés,
+			aucun appel réseau. <code>?lang=fr</code> ou <code>?lang=nl</code> pour une
+			seule langue.
+		</p>
+		<main id="gallery"></main>
+		<script type="module" src="./gallery.tsx"></script>
+	</body>
+</html>
