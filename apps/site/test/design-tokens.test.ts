@@ -53,7 +53,15 @@ type Exception = {
 	to: string;
 	reason: string;
 };
-const ALLOWED: readonly Exception[] = [];
+const ALLOWED: readonly Exception[] = [
+	{
+		file: "src/landing/mockup.css",
+		from: "couleurs du site tiers : début",
+		to: "couleurs du site tiers : fin",
+		reason:
+			"maquette de la landing : couleurs de la fiche 2ememain imitée et de sa photo dessinée (spec landing §4), regroupées dans un seul bloc de variables commenté",
+	},
+];
 
 /** Ce que le garde-fou refuse, avec la raison affichée en cas d'échec. */
 const FORBIDDEN: ReadonlyArray<{ reason: string; pattern: RegExp }> = [

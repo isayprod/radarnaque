@@ -27,6 +27,11 @@ export function localeOfPath(path: string): Locale {
 	return /(?:^|\/)nl\/(?:index\.html)?$/.test(path) ? "nl" : "fr";
 }
 
+/** Chemins des gabarits de la landing : `/`, `/index.html`, `/nl/`, `/nl/index.html`. */
+export function isLandingPath(path: string): boolean {
+	return /^\/(?:nl\/)?(?:index\.html)?$/.test(path);
+}
+
 export function landingPlugin(options: LandingPluginOptions = {}): Plugin {
 	let env: Record<string, string | undefined> = process.env;
 	return {
@@ -37,7 +42,21 @@ export function landingPlugin(options: LandingPluginOptions = {}): Plugin {
 		transformIndexHtml: {
 			order: "pre",
 			handler(html, ctx) {
-				if (!html.includes(HEAD) && !html.includes(BODY)) return html;
+				const head = html.includes(HEAD);
+				const body = html.includes(BODY);
+				// Un gabarit de la landing sans ses marqueurs, ou un seul des deux : la
+				// page partirait sans en-tête ou sans corps. Le build échoue.
+				if (!head && !body) {
+					if (isLandingPath(ctx.path))
+						throw new Error(
+							`${ctx.path} : marqueurs ${HEAD} et ${BODY} absents du gabarit de la landing`,
+						);
+					return html;
+				}
+				if (!head || !body)
+					throw new Error(
+						`${ctx.path} : ${head ? BODY : HEAD} manque, les deux marqueurs vont ensemble`,
+					);
 				const locale = localeOfPath(ctx.path);
 				const storeUrl =
 					(options.storeUrl ?? env.VITE_CHROME_STORE_URL ?? "").trim() || null;
