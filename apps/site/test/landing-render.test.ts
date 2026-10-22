@@ -425,6 +425,17 @@ describe("landingPlugin", () => {
 		// La feuille de style de la landing est déclarée par les deux gabarits.
 		expect(fr).toContain("/src/landing/landing.css");
 		expect(nl).toContain("/src/landing/landing.css");
+		// Calque du dégradé en tête du corps, script de la page après le contenu.
+		for (const html of [fr, nl]) {
+			const sky = html.indexOf('<div class="sky" aria-hidden="true"></div>');
+			const hero = html.indexOf('class="landing-hero"');
+			const script = html.indexOf(
+				'<script type="module" src="/src/landing/main.ts"></script>',
+			);
+			expect(sky).toBeGreaterThan(-1);
+			expect(sky).toBeLessThan(hero);
+			expect(script).toBeGreaterThan(html.indexOf('class="site-footer'));
+		}
 	});
 
 	it("sans lien du store ni origine : « Bientôt disponible » et origine de repli", async () => {

@@ -61,6 +61,13 @@ const ALLOWED: readonly Exception[] = [
 		reason:
 			"maquette de la landing : couleurs de la fiche 2ememain imitée et de sa photo dessinée (spec landing §4), regroupées dans un seul bloc de variables commenté",
 	},
+	{
+		file: "src/landing/gradient.ts",
+		from: "palettes clés : début",
+		to: "palettes clés : fin",
+		reason:
+			"palettes clés du dégradé au scroll (spec landing §5.1) : interpolées en OKLab par le script, elles ne peuvent pas être des var(--…) ; la première reprend --grad-1 à --grad-5, les suivantes sont vérifiées au contraste par landing-gradient.test.ts",
+	},
 ];
 
 /** Ce que le garde-fou refuse, avec la raison affichée en cas d'échec. */
