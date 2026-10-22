@@ -87,5 +87,7 @@ describe("motion.css", () => {
 		expect(block).toContain("animation: none");
 		expect(block).toContain("color: inherit");
 		expect(block).toContain("background: none");
+		// Squelette immobile : la forme seule, sans le reflet.
+		expect(block).toMatch(/\.rq-skeleton\s*\{\s*background-image: none;/);
 	});
 });

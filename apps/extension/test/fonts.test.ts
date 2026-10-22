@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { FONT_FACES } from "@radarnaque/design/fonts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadFonts } from "../lib/content/fonts";
@@ -86,5 +89,44 @@ describe("manifeste", () => {
 			resources: ["fonts/*.woff2"],
 			matches: CONTENT_MATCHES,
 		});
+	});
+});
+
+describe("popup", () => {
+	// `URL` est celui de happy-dom ici : chemin construit par node:path.
+	const css = readFileSync(
+		resolve(
+			dirname(fileURLToPath(import.meta.url)),
+			"../entrypoints/popup/style.css",
+		),
+		"utf8",
+	);
+	const blocks = (css.match(/@font-face\s*\{[^}]*\}/g) ?? []).map((b) =>
+		b.replace(/\s+/g, " "),
+	);
+	const flat = (v: string) => v.replace(/\s+/g, "");
+
+	it("lit les polices copiées dans /fonts/, sans importer fonts.css (pas de seconde copie)", () => {
+		expect(css).not.toContain("@radarnaque/design/fonts.css");
+		expect(blocks).toHaveLength(FONT_FACES.length);
+		for (const f of FONT_FACES) {
+			const block = blocks.find((b) =>
+				b.includes(`url("/fonts/${f.file}") format("woff2")`),
+			);
+			expect(block, f.file).toBeDefined();
+			expect(block).toContain(`font-family: "${f.family}"`);
+			expect(block).toContain(`font-weight: ${f.weight}`);
+			expect(block).toContain("font-display: swap");
+			expect(block?.replace(/\s+/g, "")).toContain(
+				`unicode-range:${flat(f.unicodeRange)}`,
+			);
+		}
+	});
+
+	it("déclare les deux familles", () => {
+		const families = new Set(
+			blocks.map((b) => /font-family: "([^"]+)"/.exec(b)?.[1]),
+		);
+		expect(families).toEqual(new Set(["Radarnaque Inter", "Radarnaque Serif"]));
 	});
 });

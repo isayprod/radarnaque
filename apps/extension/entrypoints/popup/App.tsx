@@ -294,11 +294,12 @@ export default function App() {
 		case "loading":
 			content = (
 				<>
-					{/* Squelette : ligne courte, panneau de 96 px, ligne longue. */}
+					{/* Squelette : ligne courte, panneau de 96 px, ligne longue ; fond `--bg-3`
+					    et reflet donnés par `.rq-skeleton` (motion.css). */}
 					<div aria-hidden="true" className="space-y-3.5">
-						<div className="rq-skeleton h-3 w-2/5 rounded-xs bg-bg-3" />
-						<div className="rq-skeleton h-24 rounded-md bg-bg-3" />
-						<div className="rq-skeleton h-3 w-4/5 rounded-xs bg-bg-3" />
+						<div className="rq-skeleton h-3 w-2/5 rounded-xs" />
+						<div className="rq-skeleton h-24 rounded-md" />
+						<div className="rq-skeleton h-3 w-4/5 rounded-xs" />
 					</div>
 					<p className="sr-only">{tr("app.loading")}</p>
 				</>
@@ -520,8 +521,10 @@ export function PopupHeader({
 							type="button"
 							aria-pressed={locale === option}
 							className={`h-7 cursor-pointer rounded-pill px-3 text-xs font-semibold focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden ${
+								// Contraste forcé : le fond blanc disparaît, le soulignement
+								// marque la langue choisie.
 								locale === option
-									? "bg-white text-text-on-light"
+									? "bg-white text-text-on-light forced-colors:underline forced-colors:underline-offset-4"
 									: "text-white hover:bg-white/10"
 							}`}
 							onClick={() => onLocale(option)}

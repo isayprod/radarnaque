@@ -1001,6 +1001,13 @@ describe("popup : cadre et écrans d'accès", () => {
 				.getByRole("button", { name: "NL" })
 				.getAttribute("aria-pressed"),
 		).toBe("false");
+		// Contraste forcé : le fond blanc disparaît, seule la langue choisie est soulignée.
+		expect(
+			within(header).getByRole("button", { name: "FR" }).className,
+		).toContain("forced-colors:underline");
+		expect(
+			within(header).getByRole("button", { name: "NL" }).className,
+		).not.toContain("forced-colors:underline");
 		expect(within(header).getByRole("group", { name: "Langue" })).toBeTruthy();
 	});
 
@@ -1014,7 +1021,8 @@ describe("popup : cadre et écrans d'accès", () => {
 		const bones = document.querySelectorAll(".rq-skeleton");
 		expect(bones).toHaveLength(3);
 		for (const bone of bones) {
-			expect(bone.className).toContain("bg-bg-3");
+			// Fond `--bg-3` et reflet : la classe partagée seule (motion.css).
+			expect(bone.className).not.toContain("bg-bg-3");
 			expect(bone.closest("[aria-hidden='true']")).not.toBeNull();
 		}
 	});
@@ -1114,6 +1122,9 @@ describe("popup : cadre et écrans d'accès", () => {
 		expect(document.activeElement).toBe(code);
 		expect(cells[3]?.className).toContain("--focus-ring");
 		expect(cells[2]?.className).not.toContain("--focus-ring");
+		// Contraste forcé : l'ombre disparaît, un contour marque la case courante.
+		expect(cells[3]?.className).toContain("forced-colors:outline-2");
+		expect(cells[2]?.className).not.toContain("forced-colors:outline");
 	});
 
 	test("code envoyé : l'anneau de la case courante suit le focus du champ", async () => {

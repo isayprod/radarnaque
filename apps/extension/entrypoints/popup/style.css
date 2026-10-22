@@ -1,10 +1,15 @@
 @import "tailwindcss";
 /* Tokens (hors de toute couche : voir theme.css), utilités Tailwind qui les relient,
-   animations partagées (squelette, mouvement réduit) et polices embarquées. */
+   animations partagées (squelette, mouvement réduit). */
 @import "@radarnaque/design/tokens.css";
 @import "@radarnaque/design/theme.css";
 @import "@radarnaque/design/motion.css";
-@import "@radarnaque/design/fonts.css";
+
+/* Classes lues dans la popup quelle que soit la racine de Vite : celle de WXT
+   (apps/extension) les couvre déjà, pas celle de la galerie (dev/, page popup.html).
+   Le build de l'extension ne parcourt jamais la galerie. */
+@source "./";
+@source not "../../dev";
 
 /* Popup de 380 px de large ; la hauteur suit le contenu, 600 px au plus (App.tsx). */
 html,
@@ -14,8 +19,62 @@ body {
 	color: var(--text-1);
 }
 
+/* Interface sombre : barre de défilement de la zone de contenu (suppression dépliée)
+   et contrôles natifs dans les tons sombres, plus de rail clair sur le navy. */
+html {
+	color-scheme: dark;
+}
+
 body {
 	width: 380px;
 	font-family: var(--font-sans);
 	-webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Polices embarquées : les WOFF2 que le build copie dans `/fonts/` pour le content
+ * script (wxt.config.ts), et non `fonts.css`, que Vite aurait copiés une seconde fois
+ * dans `assets/` (~166 Ko). Mêmes déclarations que `fonts.css` (FONT_FACES, vérifié par
+ * test/fonts.test.ts) ; chemins absolus, résolus à la racine de l'extension. Vite les
+ * laisse tels quels et l'écrit au build (« didn't resolve at build time ») : attendu,
+ * les fichiers n'arrivent dans `fonts/` qu'avec le hook `build:publicAssets`.
+ */
+@font-face {
+	font-family: "Radarnaque Inter";
+	font-style: normal;
+	font-weight: 400 600;
+	font-display: swap;
+	src: url("/fonts/inter-latin-wght-normal.woff2") format("woff2");
+	unicode-range:
+		U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+	font-family: "Radarnaque Inter";
+	font-style: normal;
+	font-weight: 400 600;
+	font-display: swap;
+	src: url("/fonts/inter-latin-ext-wght-normal.woff2") format("woff2");
+	unicode-range:
+		U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+	font-family: "Radarnaque Serif";
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url("/fonts/instrument-serif-latin-400-normal.woff2") format("woff2");
+	unicode-range:
+		U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+	font-family: "Radarnaque Serif";
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url("/fonts/instrument-serif-latin-ext-400-normal.woff2") format("woff2");
+	unicode-range:
+		U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
