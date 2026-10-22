@@ -3,6 +3,7 @@ import {
 	type RefObject,
 	useCallback,
 	useEffect,
+	useId,
 	useRef,
 	useState,
 } from "react";
@@ -18,18 +19,24 @@ import type { Listing } from "../lib/listing/types";
 import type { RiskReport } from "../lib/rules/score";
 import { AiErrorBoundary } from "./AiErrorBoundary";
 import { AiSection } from "./AiSection";
-import { BadgePill, useLaunch } from "./BadgePill";
+import { activeIn, BadgePill, focusPill, useLaunch } from "./BadgePill";
 import { DebugBoundary, DebugSection } from "./DebugSection";
 import { Icon } from "./Icon";
 import { Logo } from "./Logo";
 import { LABEL_CLASS } from "./risk-styles";
 import { useKeepInView } from "./useKeepInView";
 
-/** Ferme le panneau sur Escape et sur tout clic hors de `ref`, tant qu'il est ouvert. */
+/**
+ * Ferme le panneau sur Escape et sur tout clic hors de `ref`, tant qu'il est
+ * ouvert. Escape avec le focus dans la pastille (pilule ou panneau) passe par
+ * `closeToPill`, qui y rend le focus ; sinon `close`, qui ne le prend pas à la
+ * page hôte.
+ */
 function useDismiss(
 	open: boolean,
 	ref: RefObject<HTMLElement | null>,
 	close: () => void,
+	closeToPill: () => void,
 ) {
 	useEffect(() => {
 		const element = ref.current;
@@ -51,7 +58,9 @@ function useDismiss(
 			if (event.key !== "Escape") return;
 			event.preventDefault();
 			event.stopImmediatePropagation();
-			close();
+			const active = activeIn(element);
+			if (active && element.contains(active)) closeToPill();
+			else close();
 		};
 		document.addEventListener("pointerdown", onPointerDown, true);
 		window.addEventListener("keydown", onKeyDown, true);
@@ -59,7 +68,7 @@ function useDismiss(
 			document.removeEventListener("pointerdown", onPointerDown, true);
 			window.removeEventListener("keydown", onKeyDown, true);
 		};
-	}, [open, ref, close]);
+	}, [open, ref, close, closeToPill]);
 }
 
 /**
@@ -120,14 +129,16 @@ export function RiskBadge({
 	const panelRef = useRef<HTMLDivElement>(null);
 	useKeepInView(panelRef, open);
 	const close = useCallback(() => setOpen(false), []);
-	// Bouton « Fermer » : le focus revient à la pilule (le bouton, ou l'action de
-	// la pilule d'erreur), avant que le panneau, qui le contient, ne disparaisse.
+	const titleId = useId();
+	// « Fermer », ou Escape avec le focus dans la pastille : le focus revient à la
+	// pilule (le bouton, l'action de la pilule d'erreur, ou la pilule d'erreur
+	// elle-même), avant que le panneau, qui peut le contenir, ne disparaisse.
 	const closeToPill = useCallback(() => {
-		pillRef.current?.querySelector<HTMLElement>("button, a[href]")?.focus();
+		focusPill(pillRef.current);
 		setOpen(false);
 	}, []);
 	const openPanel = useCallback(() => setOpen(true), []);
-	useDismiss(open, rootRef, close);
+	useDismiss(open, rootRef, close, closeToPill);
 	// L'état IA vit ici, pas dans le panneau : il survit à sa fermeture.
 	const scan = useAiScan(
 		ai,
@@ -199,12 +210,15 @@ export function RiskBadge({
 				<div
 					ref={panelRef}
 					role="dialog"
-					aria-label={title}
+					aria-labelledby={titleId}
 					className={PANEL_CLASS}
 				>
 					<div className="mb-4 flex items-center gap-2">
 						<Logo size={14} className="shrink-0 text-text-1" />
-						<h2 className={`${LABEL_CLASS} min-w-0 flex-1 truncate`}>
+						<h2
+							id={titleId}
+							className={`${LABEL_CLASS} min-w-0 flex-1 truncate`}
+						>
 							{title}
 						</h2>
 						<button
