@@ -5,6 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"build": "vite build",
+		"og": "node scripts/og.ts",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit"
 	},
@@ -13,6 +14,7 @@
 		"@radarnaque/shared": "workspace:*"
 	},
 	"devDependencies": {
+		"@resvg/resvg-js": "^2.6.2",
 		"happy-dom": "^21.0.3",
 		"typescript": "~6.0.3",
 		"vite": "^8.0.0",

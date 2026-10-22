@@ -139,14 +139,17 @@ services:
       retries: 5
       start_period: 15s
 
-  # Seul service qui publie des ports. Le site est compilé dans l'image (VITE_EXTENSION_ID
-  # est lu au build). Le certificat TLS (Let's Encrypt) est conservé dans caddy-data.
+  # Seul service qui publie des ports. Le site est compilé dans l'image (VITE_EXTENSION_ID,
+  # VITE_CHROME_STORE_URL et VITE_PUBLIC_URL sont lus au build). Le certificat TLS
+  # (Let's Encrypt) est conservé dans caddy-data.
   caddy:
     build:
       context: ..
       dockerfile: infra/caddy/Dockerfile
       args:
         VITE_EXTENSION_ID: ${EXTENSION_ID:?EXTENSION_ID manquante}
+        VITE_CHROME_STORE_URL: ${CHROME_STORE_URL:-}
+        VITE_PUBLIC_URL: ${PUBLIC_URL}
     image: radarnaque-caddy
     restart: unless-stopped
     environment:

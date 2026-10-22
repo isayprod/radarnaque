@@ -4,9 +4,9 @@
  * `toHtml`) et dans la page (`/pricing`, `/privacy`, `toDom`).
  */
 import type { Locale } from "@radarnaque/shared";
-import { h, type VNode } from "./h";
-import { logoNode } from "./logo-node";
-import { fill, PRIVACY_EMAIL, PRIVACY_RETENTION_MONTHS } from "./pages-i18n";
+import { h, type VNode } from "./h.ts";
+import { logoNode } from "./logo-node.ts";
+import { fill, PRIVACY_EMAIL, PRIVACY_RETENTION_MONTHS } from "./pages-i18n.ts";
 
 export { logoNode };
 
