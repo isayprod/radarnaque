@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AnalysisResult, ScanProgressEvent } from "@radarnaque/shared";
@@ -449,7 +449,7 @@ describe("RiskBadge : panneau", () => {
 		for (const name of [
 			"bg-glass-host",
 			"border-border-default",
-			"rounded-m",
+			"rounded-md",
 			"shadow-[var(--shadow-float)]",
 			"w-[340px]",
 			"max-w-[90vw]",
@@ -1871,6 +1871,19 @@ describe("badge.css", () => {
 
 	test("la police de l'hôte est celle des tokens (--font-sans)", () => {
 		expect(blockOf(":host")).toMatch(/font-family:\s*var\(--font-sans\)/);
+	});
+
+	test("aucun composant n'utilise les rayons courts s, m, l (utilités logiques de Tailwind) : seulement sm, md, lg", () => {
+		const dir = resolve(
+			dirname(fileURLToPath(import.meta.url)),
+			"../components",
+		);
+		const sources = readdirSync(dir).filter((name) => name.endsWith(".tsx"));
+		expect(sources.length).toBeGreaterThan(5);
+		for (const name of sources) {
+			const source = readFileSync(resolve(dir, name), "utf8");
+			expect(source, name).not.toMatch(/(?<![\w-])rounded-[sml](?![\w-])/);
+		}
 	});
 
 	test("plus d'animations propres à la pastille : rotation et fondu viennent de motion.css", () => {

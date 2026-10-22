@@ -17,13 +17,9 @@ const BUTTON_CLASS = `${PILL_CLASS} h-[22px] min-w-[22px] cursor-pointer justify
 const SQUARE_CLASS = "w-[22px] px-0";
 const WIDE_CLASS = "px-2";
 
-/**
- * Infobulle : verre sombre, `--r-s`, 260 px, texte 12 px, au-dessus de la page.
- * `rounded-[var(--r-s)]` et non `rounded-s`, que Tailwind sert aussi pour les
- * coins du côté de début (logique) avec son propre rayon.
- */
+/** Infobulle : verre sombre, `--r-s`, 260 px, texte 12 px, au-dessus de la page. */
 const TOOLTIP_CLASS =
-	"absolute top-full left-0 z-[2147483000] mt-1 w-[260px] max-w-[80vw] rounded-[var(--r-s)] border border-border-default bg-glass-host p-2 font-sans text-[12px] leading-[1.4] whitespace-normal text-text-1 shadow-[var(--shadow-float)] supports-[backdrop-filter]:backdrop-blur-[18px]";
+	"absolute top-full left-0 z-[2147483000] mt-1 w-[260px] max-w-[80vw] rounded-sm border border-border-default bg-glass-host p-2 font-sans text-[12px] leading-[1.4] whitespace-normal text-text-1 shadow-[var(--shadow-float)] supports-[backdrop-filter]:backdrop-blur-[18px]";
 
 /**
  * Le site ne doit ni naviguer (carte-lien, clic du milieu compris) ni démarrer
