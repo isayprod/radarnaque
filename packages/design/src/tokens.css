@@ -37,6 +37,9 @@
 	/* Glass (translucent surfaces over gradient or navy) */
 	--glass-bg: rgba(8, 23, 74, 0.62);
 	--glass-bg-strong: rgba(3, 16, 51, 0.82);
+	/* Surfaces injectées dans les pages tierces (pastille, panneau, icônes de
+	   cartes) : presque opaque, le texte garde son contraste sur une page blanche */
+	--glass-bg-host: rgba(3, 16, 51, 0.96);
 	--glass-blur: 18px;
 
 	/* Lines */

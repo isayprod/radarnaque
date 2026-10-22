@@ -12,6 +12,11 @@ describe("tokens.css", () => {
 		expect(tokens).toMatch(/:root,\s*:host\s*\{/);
 	});
 
+	it("déclare le verre opaque des surfaces injectées dans les pages tierces", () => {
+		expect(tokens).toContain("--glass-bg-host: rgba(3, 16, 51, 0.96);");
+		expect(theme).toContain("--color-glass-host: var(--glass-bg-host);");
+	});
+
 	it("déclare les piles de polices", () => {
 		const flat = tokens.replace(/\s+/g, " ");
 		expect(flat).toContain('--font-sans: "Radarnaque Inter", system-ui');

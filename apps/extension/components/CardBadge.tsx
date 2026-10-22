@@ -23,7 +23,7 @@ const WIDE_CLASS = "px-2";
  * coins du côté de début (logique) avec son propre rayon.
  */
 const TOOLTIP_CLASS =
-	"absolute top-full left-0 z-[2147483000] mt-1 w-[260px] max-w-[80vw] rounded-[var(--r-s)] border border-border-default bg-glass-strong p-2 font-sans text-[12px] leading-[1.4] whitespace-normal text-text-1 shadow-[var(--shadow-float)] supports-[backdrop-filter]:backdrop-blur-[18px]";
+	"absolute top-full left-0 z-[2147483000] mt-1 w-[260px] max-w-[80vw] rounded-[var(--r-s)] border border-border-default bg-glass-host p-2 font-sans text-[12px] leading-[1.4] whitespace-normal text-text-1 shadow-[var(--shadow-float)] supports-[backdrop-filter]:backdrop-blur-[18px]";
 
 /**
  * Le site ne doit ni naviguer (carte-lien, clic du milieu compris) ni démarrer

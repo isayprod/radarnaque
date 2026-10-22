@@ -447,7 +447,7 @@ describe("RiskBadge : panneau", () => {
 		const user = userEvent.setup();
 		const dialog = await openHigh(user);
 		for (const name of [
-			"bg-glass-strong",
+			"bg-glass-host",
 			"border-border-default",
 			"rounded-m",
 			"shadow-[var(--shadow-float)]",
@@ -461,6 +461,15 @@ describe("RiskBadge : panneau", () => {
 		expect(dialog.className).not.toMatch(
 			/\bslate-|\bbg-white(?![\w/])|2147483647/,
 		);
+	});
+
+	test("contraste : la pilule et le panneau sont en verre opaque des pages tierces (bg-glass-host), jamais bg-glass-strong", async () => {
+		const user = userEvent.setup();
+		const dialog = await openHigh(user);
+		for (const surface of [toggle(), dialog]) {
+			expect(surface.classList.contains("bg-glass-host")).toBe(true);
+			expect(surface.classList.contains("bg-glass-strong")).toBe(false);
+		}
 	});
 
 	test("aucune classe z-[2147483647] dans RiskBadge", () => {
@@ -1283,7 +1292,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		for (const name of [
 			"h-7",
 			"rounded-pill",
-			"bg-glass-strong",
+			"bg-glass-host",
 			"supports-[backdrop-filter]:backdrop-blur-[18px]",
 			"border-white/12",
 			"shadow-[var(--shadow-pill)]",
@@ -1346,7 +1355,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		expect(separator?.getAttribute("aria-hidden")).toBe("true");
 		expect(separator?.textContent).toBe("");
 		expect(score?.textContent).toBe("82/100");
-		expect(score?.classList.contains("text-text-3")).toBe(true);
+		expect(score?.classList.contains("text-text-2")).toBe(true);
 		expect(score?.classList.contains("tabular-nums")).toBe(true);
 		// Pas de logo qui tourne avec un résultat.
 		expect(toggle().querySelector(".rq-logo--loading")).toBeNull();
@@ -1376,7 +1385,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		expect(relaunch.classList.contains("underline")).toBe(true);
 		const pill = relaunch.parentElement as HTMLElement;
 		expect(pill.contains(message)).toBe(true);
-		expect(pill.classList.contains("bg-glass-strong")).toBe(true);
+		expect(pill.classList.contains("bg-glass-host")).toBe(true);
 		const logo = logoOf(pill);
 		expect(logo?.classList.contains("rq-logo--loading")).toBe(false);
 		expect(logo?.classList.contains("opacity-60")).toBe(true);
@@ -1485,7 +1494,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		);
 		expect(logos).toHaveLength(1);
 		expect(logos[0]?.classList.contains("opacity-60")).toBe(true);
-		expect(logos[0]?.closest(".bg-glass-strong")).not.toBeNull();
+		expect(logos[0]?.closest(".bg-glass-host")).not.toBeNull();
 	});
 });
 

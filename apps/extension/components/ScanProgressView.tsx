@@ -28,13 +28,13 @@ function Step({
 	const body = event.type === "thinking" ? thinkingParts(event.text).body : "";
 	return (
 		<li className="flex items-start gap-2">
-			<span className="w-8 shrink-0 text-right text-text-3 tabular-nums">
+			<span className="w-8 shrink-0 text-right text-text-2 tabular-nums">
 				{elapsed(step.at, startedAt)}
 			</span>
 			<span className="min-w-0 break-words">
 				<span className="block">{line}</span>
 				{body && (
-					<span className="block whitespace-pre-line text-text-3">{body}</span>
+					<span className="block whitespace-pre-line text-text-2">{body}</span>
 				)}
 			</span>
 		</li>

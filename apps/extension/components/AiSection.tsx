@@ -32,8 +32,11 @@ const WHITE_PILL_CLASS =
 const STATE_TITLE_CLASS =
 	"m-0 font-serif text-[22px] leading-[1.15] font-normal text-text-1";
 
-/** Mentions et métadonnées du pied : `text-xs`, en px (taille `html` du site ignorée). */
-const META_CLASS = "m-0 text-[12px] leading-[1.4] text-text-3";
+/**
+ * Mentions et métadonnées du pied : `text-xs`, en px (taille `html` du site
+ * ignorée), en `--text-2` : texte à lire, 4,5:1 au moins sur le verre des pages tierces.
+ */
+const META_CLASS = "m-0 text-[12px] leading-[1.4] text-text-2";
 
 /**
  * Analyse coupée en route (flux interrompu, délai dépassé) : le message, et
@@ -248,7 +251,7 @@ function ResultView({
 						<span className="font-serif text-[44px] leading-none font-normal tracking-[-0.02em] text-text-1 tabular-nums">
 							{result.score}
 						</span>
-						<span className="text-[13px] text-text-3 tabular-nums">/100</span>
+						<span className="text-[13px] text-text-2 tabular-nums">/100</span>
 					</p>
 				</div>
 				<div
