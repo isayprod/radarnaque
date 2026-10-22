@@ -98,10 +98,10 @@ export const LANDING_TEXT: Record<Locale, LandingText> = {
 		sourceCode: "Code source",
 	},
 	nl: {
-		title: "Radarnaque – herken oplichting voor je betaalt",
+		title: "Radarnaque – herken oplichting vóór je betaalt",
 		description:
 			"Extensie voor Chrome die advertenties op 2dehands, 2ememain en Facebook Marketplace leest, tekst en foto's, en je zegt of er iets niet klopt. Gratis proef.",
-		heroTitle: "Herken oplichting voor je betaalt.",
+		heroTitle: "Herken oplichting vóór je betaalt.",
 		heroTagline:
 			"Radarnaque leest de advertentie en de foto's op 2dehands, 2ememain en Facebook Marketplace, en zegt je binnen enkele seconden of er iets niet klopt.",
 		heroNote: "Extensie voor Chrome · gratis proef, zonder bankkaart",
