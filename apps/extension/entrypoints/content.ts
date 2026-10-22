@@ -27,6 +27,8 @@ import {
 } from "../lib/content/card-mounter";
 import { createController } from "../lib/content/controller";
 import { createDebugFlag, disabledDebugFlag } from "../lib/content/debug-flag";
+import { loadFonts } from "../lib/content/fonts";
+import { CONTENT_MATCHES } from "../lib/content/matches";
 import { createUiFactory } from "../lib/content/ui-context";
 import { resolveContentLocale } from "../lib/content-i18n";
 import { createDebugLog, type DebugLog } from "../lib/debug-log";
@@ -91,14 +93,14 @@ async function getLocale(site: Site): Promise<Locale> {
 }
 
 export default defineContentScript({
-	matches: [
-		"*://*.2ememain.be/*",
-		"*://*.2dehands.be/*",
-		"*://*.facebook.com/*",
-	],
+	matches: CONTENT_MATCHES,
 	cssInjectionMode: "ui",
 	runAt: "document_idle",
 	main(ctx) {
+		// Polices de la pastille, sans attendre : le montage ne dépend pas d'elles.
+		void loadFonts(document.fonts, (path) =>
+			browser.runtime.getURL(path as PublicPath),
+		);
 		// Un seul client IA par content script, partagé par toutes les pastilles.
 		const ai = createAiClient();
 		// R8 : un accès en cache pour la pastille et les icônes de cartes.

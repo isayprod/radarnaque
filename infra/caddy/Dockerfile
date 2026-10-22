@@ -8,6 +8,7 @@ WORKDIR /repo
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY apps/extension/package.json apps/extension/package.json
 COPY services/auth/package.json services/auth/package.json
+COPY packages/design packages/design
 COPY packages/shared packages/shared
 COPY apps/site apps/site
 COPY apps/admin apps/admin

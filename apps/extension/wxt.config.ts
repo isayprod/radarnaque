@@ -1,5 +1,8 @@
+import { fileURLToPath } from "node:url";
+import { FONT_FACES } from "@radarnaque/design/fonts";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "wxt";
+import { CONTENT_MATCHES } from "./lib/content/matches";
 
 const DEV_PUBLIC_URL = "http://localhost:8080";
 
@@ -42,9 +45,23 @@ export default defineConfig({
 			permissions: ["storage"],
 			host_permissions: [`${origin}/*`],
 			externally_connectable: { matches: connectable },
+			// Polices lues par le content script (FontFace) depuis les pages prises en charge.
+			web_accessible_resources: [
+				{ resources: ["fonts/*.woff2"], matches: CONTENT_MATCHES },
+			],
 		};
 	},
 	hooks: {
+		"build:publicAssets": (_, files) => {
+			for (const { file } of FONT_FACES) {
+				files.push({
+					absoluteSrc: fileURLToPath(
+						import.meta.resolve(`@radarnaque/design/fonts/${file}`),
+					),
+					relativeDest: `fonts/${file}`,
+				});
+			}
+		},
 		"build:manifestGenerated": () => {
 			for (const name of ["WXT_PUBLIC_URL", "WXT_EXTENSION_KEY"]) {
 				if (!process.env[name]) {
