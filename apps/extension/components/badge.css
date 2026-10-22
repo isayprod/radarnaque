@@ -6,8 +6,10 @@
 @import "@radarnaque/design/motion.css";
 
 /* Classes lues dans les composants, quelle que soit la racine de Vite : celle de WXT
-   (apps/extension) les couvre déjà, pas celle de la galerie (dev/). */
+   (apps/extension) les couvre déjà, pas celle de la galerie (dev/). Le build de
+   l'extension ne parcourt jamais la galerie. */
 @source "./";
+@source not "../dev";
 
 /* Injecté dans le Shadow DOM (cssInjectionMode "ui") : aucun style global de la page
    ne s'applique, et ceux-ci ne fuient pas vers la page. */

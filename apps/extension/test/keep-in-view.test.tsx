@@ -5,8 +5,11 @@ import { useKeepInView, VIEW_MARGIN } from "../components/useKeepInView";
 
 afterEach(cleanup);
 
-/** Couche flottante dont la position mesurée est simulée. */
-function Layer({ open }: { open: boolean }) {
+/**
+ * Couche flottante dont la position mesurée est simulée. `tick` force un
+ * nouveau rendu, comme une pilule qui change de contenu (et de largeur).
+ */
+function Layer({ open }: { open: boolean; tick?: number }) {
 	const ref = useRef<HTMLDivElement>(null);
 	useKeepInView(ref, open);
 	return <div ref={ref} data-testid="layer" />;
@@ -52,6 +55,33 @@ describe("useKeepInView", () => {
 	test("fermée : rien n'est mesuré ni posé", () => {
 		measure(1280, 1100, 340);
 		const { container } = render(<Layer open={false} />);
+		expect(layer(container).style.left).toBe("");
+	});
+
+	test("l'ancre bouge entre deux rendus (pilule élargie, passée à la ligne) : le décalage est retiré", () => {
+		measure(1280, 1100, 340);
+		const { container, rerender } = render(<Layer open tick={0} />);
+		expect(layer(container).style.left).toBe(`-${160 + VIEW_MARGIN}px`);
+		// La racine saute à gauche : sans recalcul, la couche sortirait par la gauche.
+		measure(1280, 40, 340);
+		rerender(<Layer open tick={1} />);
+		expect(layer(container).style.left).toBe("");
+	});
+
+	test("l'ancre glisse vers la droite entre deux rendus (pilule rétrécie) : le décalage grandit", () => {
+		measure(1280, 1000, 340);
+		const { container, rerender } = render(<Layer open tick={0} />);
+		expect(layer(container).style.left).toBe(`-${60 + VIEW_MARGIN}px`);
+		measure(1280, 1100, 340);
+		rerender(<Layer open tick={1} />);
+		expect(layer(container).style.left).toBe(`-${160 + VIEW_MARGIN}px`);
+	});
+
+	test("refermée : le décalage posé est retiré", () => {
+		measure(1280, 1100, 340);
+		const { container, rerender } = render(<Layer open />);
+		expect(layer(container).style.left).not.toBe("");
+		rerender(<Layer open={false} />);
 		expect(layer(container).style.left).toBe("");
 	});
 

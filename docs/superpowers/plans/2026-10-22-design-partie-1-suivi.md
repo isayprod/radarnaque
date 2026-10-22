@@ -21,12 +21,12 @@ Remarques relevées pendant la partie 1 de la passe design : paquet `@radarnaque
 - **Bandeau professionnel** placé juste sous l'en-tête du panneau, la fermeture restant en haut à droite.
 - **Contrôles de lancement :** panneau ouvert au repos, la pilule « Analyser » et le bouton de la section IA coexistent ; un seul porte le nom « Analyser avec l'IA ».
 - **Vérification visuelle (galerie) :**
-  - le panneau et l'infobulle des cartes sont décalés vers la gauche quand ils dépasseraient le bord droit de la fenêtre (`useKeepInView`, 8 px de marge) : une pastille au bout d'un titre près du bord faisait défiler la page hôte horizontalement ;
+  - le panneau et l'infobulle des cartes sont décalés vers la gauche quand ils dépasseraient le bord droit de la fenêtre (`useKeepInView`, 8 px de marge, recalcul à chaque rendu et au redimensionnement) : une pastille au bout d'un titre près du bord faisait défiler la page hôte horizontalement ;
   - le filet en dégradé forme le bord haut du panneau (`border-t-0`) : la bordure grise du haut se voyait au-dessus ;
   - une seule pilule blanche par vue : quand l'erreur a sa propre action (connexion, formules), « Lancer une analyse IA » passe en pilule secondaire (transparente, bordure `--border-strong`) ;
   - le badge de gravité « Info » a son texte en `--text-1` sur `--info-soft` : `--info` n'y atteignait que 4,3:1 ;
   - les pilules blanches ne se soulèvent plus au survol si l'utilisateur réduit les animations ;
-  - `badge.css` déclare `@source "./"` : la galerie a sa propre racine Vite (`dev/`), que Tailwind aurait été seul à parcourir.
+  - `badge.css` déclare `@source "./"` : la galerie a sa propre racine Vite (`dev/`), que Tailwind aurait été seul à parcourir ; et `@source not "../dev"`, pour que le build de l'extension ne parcoure jamais la galerie.
 - **Contraste mesuré dans la galerie** (couleurs calculées, sur fond blanc) : 5,17:1 au plus bas pour les textes actifs (« Risque élevé » en `--danger` sur `--danger-soft`), 8,16:1 pour `--text-2`, 17,15:1 pour `--text-1`. Seule la pilule désactivée (« Analyser » sans analyse restante, `--text-3`) est sous 4,5:1 (3,99:1), ce qu'admet le WCAG pour un contrôle inactif.
 
 ## À vérifier en conditions réelles
@@ -59,4 +59,5 @@ Rien de ceci n'a été essayé hors des tests et de la galerie. Extension constr
 ## Limites connues
 
 - **Galerie :** les polices viennent de `fonts.css` chargé par le document, pas de `loadFonts` ; le chargement réel dans une page hôte reste à vérifier sur les sites. Elle ne couvre ni la section Debug du superuser, ni la popup.
+- **Décalage du panneau et de l'infobulle calculé sur la fenêtre :** `useKeepInView` ne connaît que la largeur de la fenêtre, pas le conteneur qui défile ou rogne le plus proche (la modale d'une annonce Facebook, par exemple) : dans un tel conteneur, la couche peut encore être coupée. Il recalcule à chaque rendu de la pastille et au redimensionnement, pas quand la page hôte se réorganise seule.
 - **Ligne d'état longue :** coupée à 60 caractères (`statusLine`, « … » compris), puis tronquée par la largeur de la pilule (340 px) ; pendant une attente, les points animés s'ajoutent juste après les points de suspension de la troncature, qui restent visibles malgré le reflet.

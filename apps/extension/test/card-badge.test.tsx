@@ -243,6 +243,36 @@ describe("CardBadge", () => {
 		expect(screen.getByRole("tooltip").style.left).toBe("-188px");
 	});
 
+	test("infobulle ouverte, l'icône change d'état et bouge : le décalage est recalculé", async () => {
+		vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(
+			1280,
+		);
+		let x = 1200;
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+			function (this: HTMLElement) {
+				const shift = Number.parseFloat(this.style.left || "0");
+				return DOMRect.fromRect({ x: x + shift, y: 0, width: 260 });
+			},
+		);
+		const user = userEvent.setup();
+		const { rerender } = renderInLink({
+			status: "loading",
+			progress: startProgress(0),
+		});
+		await user.hover(screen.getByRole("button"));
+		expect(screen.getByRole("tooltip").style.left).toBe("-188px");
+		// Le résultat arrive : la mini-pilule s'élargit et l'icône passe à la ligne.
+		x = 100;
+		rerender(
+			<CardBadge
+				state={{ status: "done", result: sampleAnalysis, progress: null }}
+				locale="fr"
+				onActivate={() => {}}
+			/>,
+		);
+		expect(screen.getByRole("tooltip").style.left).toBe("");
+	});
+
 	test("done medium : « Risque moyen », infobulle avec summary.fr au survol et au focus", async () => {
 		const user = userEvent.setup();
 		renderInLink({
