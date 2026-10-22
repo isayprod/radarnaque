@@ -27,8 +27,9 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro
-      - ../apps/site/dist:/srv/site:ro
-      - ../apps/admin/dist:/srv/admin:ro
+      # Dossiers parents, pas les dist : voir l'en-tête de Caddyfile.dev.
+      - ../apps/site:/srv/site-src:ro
+      - ../apps/admin:/srv/admin-src:ro
 
   # Moteur de recherche web de l'API (outil web_search), joint sur http://127.0.0.1:8888
   # (SEARXNG_URL par défaut de l'API). Configuration : searxng/settings.yml. Le secret ne sert
