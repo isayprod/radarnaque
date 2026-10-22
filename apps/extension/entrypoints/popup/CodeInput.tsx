@@ -18,14 +18,17 @@ const CURRENT_CELL_CLASS = "border-transparent shadow-[var(--focus-ring)]";
  * Le champ étant invisible, un clic ou une flèche pourrait placer le curseur au
  * milieu du code : un chiffre tapé s'insérerait alors sans que les cases le
  * montrent à sa place. Le curseur est ramené en fin de saisie (au focus, au clic,
- * à chaque changement de sélection).
+ * à chaque changement de sélection), sauf si la sélection couvre tout le code :
+ * « tout sélectionner » puis taper, coller ou effacer doit remplacer le code, pas
+ * s'y ajouter (un code collé à la suite serait tronqué à 6 chiffres, donc faux).
  */
 function caretToEnd(event: SyntheticEvent<HTMLInputElement>) {
 	const input = event.currentTarget;
 	const end = input.value.length;
+	const { selectionStart: start, selectionEnd: stop } = input;
+	if (end > 0 && start === 0 && stop === end) return;
 	// Condition nécessaire : `setSelectionRange` émet lui-même un `select`.
-	if (input.selectionStart !== end || input.selectionEnd !== end)
-		input.setSelectionRange(end, end);
+	if (start !== end || stop !== end) input.setSelectionRange(end, end);
 }
 
 /**

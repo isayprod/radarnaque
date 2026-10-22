@@ -1238,6 +1238,56 @@ describe("popup : cadre et écrans d'accès", () => {
 		]);
 	});
 
+	test("code : « tout sélectionner » puis coller remplace le code à moitié tapé", async () => {
+		background({
+			"auth/state": () => signedOut,
+			"auth/start": () => ok(null),
+		});
+		const verify = vi.fn();
+		const base = sendToBackground.getMockImplementation();
+		sendToBackground.mockImplementation((req) => {
+			if (req.type === "auth/verify-otp") {
+				verify(req);
+				return new Promise(() => {});
+			}
+			return base ? base(req) : Promise.reject(new Error("inattendu"));
+		});
+		const user = userEvent.setup();
+		render(<App />);
+		const code = await toCodeStep(user);
+		await user.type(code, "12");
+
+		await user.keyboard("{Control>}a{/Control}");
+		expect([code.selectionStart, code.selectionEnd]).toEqual([0, 2]);
+		await user.paste("654321");
+
+		await waitFor(() => expect(verify).toHaveBeenCalledTimes(1));
+		expect(verify).toHaveBeenCalledWith({
+			type: "auth/verify-otp",
+			email: "a@b.be",
+			otp: "654321",
+		});
+		expect(code.value).toBe("654321");
+	});
+
+	test("code : « tout sélectionner » puis Retour arrière vide le champ", async () => {
+		background({ "auth/state": () => signedOut, "auth/start": () => ok(null) });
+		const user = userEvent.setup();
+		render(<App />);
+		const code = await toCodeStep(user);
+		await user.type(code, "482");
+
+		code.select();
+		fireEvent.select(code);
+		expect([code.selectionStart, code.selectionEnd]).toEqual([0, 3]);
+		await user.keyboard("{Backspace}");
+
+		expect(code.value).toBe("");
+		expect(codeCells().map((cell) => cell.textContent)).toEqual(
+			Array(6).fill(""),
+		);
+	});
+
 	test("7 chiffres collés : les 6 premiers", async () => {
 		const { code, verify } = await pasteCode("1234567");
 		await expectSingleVerify(code, verify, "123456");

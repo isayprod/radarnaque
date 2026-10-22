@@ -29,7 +29,8 @@ describe("icônes de l'extension", () => {
 		expect(existsSync(resolve(racine, "public/icon-with-shadow.svg"))).toBe(
 			false,
 		);
-		// Sources de l'extension (hors tests, sorties et dépendances).
+		// Sources texte de l'extension (hors tests, sorties et dépendances).
+		const TEXTES = /\.(?:tsx?|html|css|json|svg)$/;
 		const fichiers = (dossier: string): string[] =>
 			readdirSync(dossier).flatMap((nom) => {
 				const chemin = join(dossier, nom);
@@ -40,7 +41,7 @@ describe("icônes de l'extension", () => {
 				fichiers(resolve(racine, dossier)),
 			),
 			resolve(racine, "wxt.config.ts"),
-		].filter((chemin) => !chemin.endsWith(".png"));
+		].filter((chemin) => TEXTES.test(chemin));
 		expect(sources.length).toBeGreaterThan(10);
 		const references = sources.filter((chemin) =>
 			readFileSync(chemin, "utf8").includes("icon-with-shadow"),
