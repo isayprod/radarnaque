@@ -6,6 +6,7 @@
 	"scripts": {
 		"dev": "wxt",
 		"build": "wxt build",
+		"gallery": "vite --config vite.gallery.config.ts --port 3101 --strictPort",
 		"test": "vitest run",
 		"typecheck": "wxt prepare && tsc --noEmit",
 		"postinstall": "wxt prepare"
@@ -23,6 +24,7 @@
 		"@types/node": "^24.0.0",
 		"@types/react": "^19.2.0",
 		"@types/react-dom": "^19.2.0",
+		"@vitejs/plugin-react": "^6.1.2",
 		"@wxt-dev/module-react": "^1.2.2",
 		"happy-dom": "^21.0.0",
 		"tailwindcss": "~4.3.3",
