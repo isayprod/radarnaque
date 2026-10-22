@@ -2069,6 +2069,161 @@ describe("RiskBadge : focus clavier", () => {
 		);
 	});
 
+	/**
+	 * Comme Chromium (`RemoveFocusedElementOfSubtree`) : avant de retirer un nœud
+	 * qui contient l'élément focalisé, `blur` puis `focusout` (qui remonte), sans
+	 * `relatedTarget`, émis sur l'élément encore dans le DOM. happy-dom, comme
+	 * Firefox, n'émet rien. React retire ses nœuds par `removeChild` : l'espion
+	 * l'enveloppe et compte les suppressions simulées, pour que chaque test
+	 * vérifie que le cas Chrome a bien eu lieu.
+	 */
+	const removalLikeChrome = () => {
+		const removeChild = Node.prototype.removeChild;
+		let blurred = 0;
+		const spy = vi
+			.spyOn(Node.prototype, "removeChild")
+			.mockImplementation(function <T extends Node>(this: Node, child: T): T {
+				let focused = document.activeElement;
+				while (focused?.shadowRoot?.activeElement)
+					focused = focused.shadowRoot.activeElement;
+				if (focused && focused !== document.body && child.contains(focused)) {
+					blurred += 1;
+					focused.dispatchEvent(
+						new FocusEvent("blur", { relatedTarget: null }),
+					);
+					focused.dispatchEvent(
+						new FocusEvent("focusout", {
+							bubbles: true,
+							composed: true,
+							relatedTarget: null,
+						}),
+					);
+				}
+				return removeChild.call(this, child) as T;
+			});
+		return {
+			blurred: () => blurred,
+			restore: () => spy.mockRestore(),
+		};
+	};
+
+	describe("comme Chrome : blur et focusout émis à la suppression du nœud focalisé", () => {
+		let chrome: ReturnType<typeof removalLikeChrome>;
+		beforeEach(() => {
+			chrome = removalLikeChrome();
+		});
+		afterEach(() => chrome.restore());
+
+		test("analyse lancée au clavier puis interrompue : le focus passe à « Relancer »", async () => {
+			const user = userEvent.setup();
+			const finish = pendingScan();
+			renderWithPage();
+			launch().focus();
+			await user.keyboard("{Enter}");
+			expect(document.activeElement).toBe(toggle());
+			await finish({ ok: false, error: { code: "stream_interrupted" } });
+			expect(chrome.blurred()).toBe(1);
+			expect(document.activeElement).toBe(retry());
+		});
+
+		test("analyse lancée au clavier puis en échec : le focus passe à « Analyser » de la pilule d'erreur", async () => {
+			const user = userEvent.setup();
+			const finish = pendingScan();
+			renderWithPage();
+			launch().focus();
+			await user.keyboard("{Enter}");
+			await finish({ ok: false, error: { code: "analysis_failed" } });
+			expect(chrome.blurred()).toBe(1);
+			expect(document.activeElement).toBe(launch());
+		});
+
+		test("« Relancer » au clavier : le focus passe à la pilule de l'analyse en cours, puis du résultat", async () => {
+			const user = userEvent.setup();
+			const first = pendingScan();
+			renderWithPage();
+			launch().focus();
+			await user.keyboard("{Enter}");
+			await first({ ok: false, error: { code: "timeout" } });
+			// Focus remis à la main : ce test ne vérifie que le passage suivant.
+			retry().focus();
+			const second = pendingScan();
+			await user.keyboard("{Enter}");
+			expect(chrome.blurred()).toBe(2);
+			expect(toggle().getAttribute("aria-busy")).toBe("true");
+			expect(document.activeElement).toBe(toggle());
+			await second({ ok: true, data: aiHigh });
+			expect(toggle().textContent).toContain("82/100");
+			expect(document.activeElement).toBe(toggle());
+		});
+
+		test("dans un Shadow DOM : analyse interrompue, le focus passe à « Relancer »", async () => {
+			const user = userEvent.setup();
+			const finish = pendingScan();
+			const host = document.createElement("div");
+			document.body.append(host);
+			const shadow = host.attachShadow({ mode: "open" });
+			const container = document.createElement("div");
+			shadow.append(container);
+			const view = render(
+				<RiskBadge
+					report={high}
+					listing={listing}
+					locale="fr"
+					ai={ai}
+					accessCache={cached(active)}
+				/>,
+				{ container },
+			);
+			within(container).getByRole("button", { name: LAUNCH }).focus();
+			await user.keyboard("{Enter}");
+			await finish({ ok: false, error: { code: "stream_interrupted" } });
+			expect(chrome.blurred()).toBe(1);
+			expect(shadow.activeElement).toBe(
+				within(container).getByRole("button", { name: RETRY }),
+			);
+			view.unmount();
+			host.remove();
+		});
+
+		test("fenêtre quittée pendant l'analyse (focusout sans relatedTarget, pilule toujours là) : le focus n'est pas repris à l'échec", async () => {
+			const user = userEvent.setup();
+			const finish = pendingScan();
+			renderWithPage();
+			launch().focus();
+			await user.keyboard("{Enter}");
+			const pill = toggle();
+			// L'utilisateur passe à une autre fenêtre : Chrome émet blur et focusout
+			// sur la pilule, qui reste dans le DOM et reste l'élément actif.
+			pill.dispatchEvent(new FocusEvent("blur", { relatedTarget: null }));
+			pill.dispatchEvent(
+				new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+			);
+			window.dispatchEvent(new FocusEvent("blur"));
+			// Fenêtre sans focus : Chrome n'émet plus rien à la suppression.
+			chrome.restore();
+			await finish({ ok: false, error: { code: "stream_interrupted" } });
+			expect(pill.isConnected).toBe(false);
+			expect(document.activeElement).toBe(document.body);
+		});
+
+		test("focus quitté vers `body` (pilule toujours là) puis rendu dans la même tâche : le focus n'est pas repris", async () => {
+			const user = userEvent.setup();
+			renderWithPage();
+			await launchToResult(user);
+			const pill = toggle();
+			pill.focus();
+			// Clic sur un fond de page non focalisable : focusout sans relatedTarget,
+			// focus sur `body`, et un rendu avant la micro-tâche suivante.
+			act(() => {
+				pill.blur();
+				fireEvent.click(pill);
+			});
+			expect(screen.getByRole("dialog")).toBeTruthy();
+			expect(pill.isConnected).toBe(true);
+			expect(document.activeElement).toBe(document.body);
+		});
+	});
+
 	test("pilule d'erreur avec une action : pas de tabindex sur la pilule", async () => {
 		const user = userEvent.setup();
 		const finish = pendingScan();
