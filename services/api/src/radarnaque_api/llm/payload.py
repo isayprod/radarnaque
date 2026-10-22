@@ -46,6 +46,7 @@ _SELLER_FIELDS = {
 _RANGE_FIELDS = {"min": "min", "max": "max"}
 _LOCATION_FIELDS = {"city": "city", "region": "region", "country": "country"}
 _PRICE_FIELDS = {"amount_cents": "amountCents", "currency": "currency"}
+_ATTRIBUTE_FIELDS = {"label": "label", "value": "value"}
 _SIGNAL_FIELDS = {"id": "id", "weight": "weight", "severity": "severity", "params": "params"}
 
 
@@ -68,6 +69,12 @@ def _pick(obj: Any, fields: Mapping[str, str]) -> dict[str, Any] | None:
     if obj is None:
         return None
     return {camel: _get(obj, snake, camel) for snake, camel in fields.items()}
+
+
+def _attribute(attribute: Any) -> dict[str, Any]:
+    """Libellé et valeur, contacts masqués : le vendeur choisit une partie de ces textes."""
+    picked = _pick(attribute, _ATTRIBUTE_FIELDS) or {}
+    return {key: mask_contacts(value or "") for key, value in picked.items()}
 
 
 def _seller(seller: Any) -> dict[str, Any]:
@@ -93,6 +100,7 @@ def _facts(listing: ListingIn, rules: RulesIn, images_sent: int, today: date) ->
         "priceType": listing.price_type,
         "category": listing.category,
         "condition": listing.condition,
+        "attributes": [_attribute(attribute) for attribute in listing.attributes or []],
         "postedAt": listing.posted_at,
         "location": _pick(listing.location, _LOCATION_FIELDS),
         "imageCount": len(listing.images),

@@ -1043,6 +1043,16 @@ export interface components {
             served: number;
         };
         /**
+         * AttributeIn
+         * @description Caractéristique affichée par le site (année, kilométrage…), libellé dans sa langue.
+         */
+        AttributeIn: {
+            /** Label */
+            label: string;
+            /** Value */
+            value: string;
+        };
+        /**
          * BillingUrlOut
          * @description Adresse vers laquelle rediriger l'utilisateur (paiement ou portail de gestion).
          */
@@ -1205,6 +1215,8 @@ export interface components {
         };
         /** ListingIn */
         ListingIn: {
+            /** Attributes */
+            attributes?: components["schemas"]["AttributeIn"][];
             /** Category */
             category?: string | null;
             /** Condition */

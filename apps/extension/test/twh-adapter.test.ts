@@ -434,6 +434,113 @@ describe("twhAdapter.extractListing — seller verification", () => {
 	});
 });
 
+/** `carAttributes` d'une annonce voiture : « Main » répète les faits des autres groupes. */
+const CAR_ATTRIBUTES = {
+	groupedWithIcons: [
+		{
+			key: "Main",
+			attributes: [
+				{
+					key: "brand",
+					label: "Marque & Modèle, version",
+					value: "Suzuki Jimny, 1.3i 16v JLX",
+					dataType: "String",
+				},
+				{
+					key: "constructionYear",
+					label: "Année de fabrication",
+					value: 2004,
+					dataType: "Integer",
+				},
+				{
+					key: "mileage",
+					label: "Kilométrage",
+					value: "155.562",
+					unit: "km",
+					dataType: "Integer",
+				},
+				{ key: "fuel", label: "Carburant", value: "Essence" },
+			],
+		},
+		{
+			key: "Basics",
+			attributes: [
+				{ key: "brand", label: "Marque & Modèle", value: "Suzuki Jimny" },
+				{ key: "trim", label: "Version", value: "1.3i 16v JLX" },
+				{ key: "constructionYear", label: "Année de fabrication", value: 2004 },
+				{ key: "mileage", label: "Kilométrage", value: "155.562", unit: "km" },
+			],
+		},
+		{
+			key: "Technical",
+			attributes: [
+				{ key: "powerInKiloWatt", label: "Puissance", value: 59, unit: "kW" },
+				{ key: "broken", label: "Sans valeur", value: null },
+			],
+		},
+	],
+	carPassUrl: "",
+};
+
+describe("twhAdapter.extractListing — caractéristiques", () => {
+	test("bloc « Caractéristiques » du DOM, dans l'ordre affiché", () => {
+		const { listing, missing } = extract(fixed(), FIXED_URL);
+		expect(listing.attributes).toEqual([
+			{ label: "État", value: "Comme neuf" },
+			{ label: "Modèle", value: "iPhone 14" },
+		]);
+		expect(missing).not.toContain("attributes");
+	});
+
+	test("bloc « Kenmerken » sur 2dehands.be", () => {
+		const doc = fixed();
+		const heading = [...doc.querySelectorAll("h2")].find(
+			(h) => h.textContent === "Caractéristiques",
+		);
+		if (!heading) throw new Error("no attributes heading");
+		heading.textContent = "Kenmerken";
+		const url = new URL(
+			"https://www.2dehands.be/v/telefonie/apple-iphone/m1000000001-iphone-14-pro-128-gb",
+		);
+		expect(extract(doc, url).listing.attributes).toHaveLength(2);
+	});
+
+	test("voiture : carAttributes de __CONFIG__, sans doublon, avec l'unité", () => {
+		const doc = fixed();
+		editListingConfig(doc, (listing) => {
+			listing.carAttributes = CAR_ATTRIBUTES;
+		});
+		expect(extract(doc, FIXED_URL).listing.attributes).toEqual([
+			{ label: "Marque & Modèle", value: "Suzuki Jimny" },
+			{ label: "Version", value: "1.3i 16v JLX" },
+			{ label: "Année de fabrication", value: "2004" },
+			{ label: "Kilométrage", value: "155.562 km" },
+			{ label: "Puissance", value: "59 kW" },
+			// Seulement dans « Main » : repris à la fin.
+			{ label: "Carburant", value: "Essence" },
+		]);
+	});
+
+	test("carAttributes illisible → bloc du DOM", () => {
+		const doc = fixed();
+		editListingConfig(doc, (listing) => {
+			listing.carAttributes = { groupedWithIcons: "?" };
+		});
+		expect(extract(doc, FIXED_URL).listing.attributes).toHaveLength(2);
+	});
+
+	test("aucune caractéristique → champ absent et signalé", () => {
+		const doc = fixed();
+		const heading = [...doc.querySelectorAll("h2")].find(
+			(h) => h.textContent === "Caractéristiques",
+		);
+		heading?.parentElement?.remove();
+		const { listing, missing } = extract(doc, FIXED_URL);
+		expect(listing).not.toHaveProperty("attributes");
+		expect(missing).toContain("attributes");
+	});
+});
+
 describe("twhAdapter.extractListing — privacy and stale data", () => {
 	test("visitor data from __ENV_CONFIG__ never leaks", () => {
 		const doc = fixed();

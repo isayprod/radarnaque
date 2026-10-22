@@ -19,6 +19,10 @@ export const BOUNDS = {
 	category: 200,
 	condition: 100,
 	postedAt: 64,
+	/** Caractéristiques : nombre d'entrées, puis longueur du libellé et de la valeur. */
+	attributes: 30,
+	attributeLabel: 60,
+	attributeValue: 200,
 	/** `location.city`, `location.region` et `location.country`, chacun. */
 	location: 100,
 	signals: 20,
@@ -136,6 +140,14 @@ export function toScanIn(req: ScanRequest): ScanIn {
 	}
 	if (l.condition !== undefined) {
 		listing.condition = cut(l.condition, BOUNDS.condition);
+	}
+	if (l.attributes?.length) {
+		listing.attributes = l.attributes
+			.slice(0, BOUNDS.attributes)
+			.map(({ label, value }) => ({
+				label: cut(label, BOUNDS.attributeLabel),
+				value: cut(value, BOUNDS.attributeValue),
+			}));
 	}
 	if (l.postedAt !== undefined) {
 		listing.postedAt = cut(l.postedAt, BOUNDS.postedAt);

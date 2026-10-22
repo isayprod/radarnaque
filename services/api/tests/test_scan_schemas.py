@@ -71,6 +71,38 @@ def test_limits_on_title_description_and_images():
         )
 
 
+def test_attributes_are_accepted_in_order_and_default_to_empty():
+    attributes = [
+        {"label": "Kilométrage", "value": "155.562 km"},
+        {"label": "Année", "value": "2004"},
+    ]
+    listing = ListingIn.model_validate({**_listing(), "attributes": attributes})
+    assert [(a.label, a.value) for a in listing.attributes] == [
+        ("Kilométrage", "155.562 km"),
+        ("Année", "2004"),
+    ]
+    assert ListingIn.model_validate(_listing()).attributes == []
+    ListingIn.model_validate(
+        {**_listing(), "attributes": [{"label": "l" * 60, "value": "v" * 200}] * 30}
+    )
+
+
+@pytest.mark.parametrize(
+    "attributes",
+    [
+        [{"label": "Année", "value": "2004"}] * 31,
+        [{"label": "l" * 61, "value": "2004"}],
+        [{"label": "Année", "value": "v" * 201}],
+        [{"label": "", "value": "2004"}],
+        [{"label": "Année", "value": ""}],
+        [{"label": "Année", "value": "2004", "key": "constructionYear"}],
+    ],
+)
+def test_invalid_attributes_are_rejected(attributes):
+    with pytest.raises(ValidationError):
+        ListingIn.model_validate({**_listing(), "attributes": attributes})
+
+
 @pytest.mark.parametrize(
     "override",
     [

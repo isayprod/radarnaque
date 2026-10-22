@@ -23,6 +23,11 @@ export interface Listing {
 		| "unknown";
 	category?: string;
 	condition?: string;
+	/**
+	 * Caractéristiques affichées par le site (année, kilométrage, capacité…), dans
+	 * l'ordre, libellés dans la langue de la page.
+	 */
+	attributes?: { label: string; value: string }[];
 	/** ISO 8601 */
 	postedAt?: string;
 	location: { city?: string; region?: string; country?: string };

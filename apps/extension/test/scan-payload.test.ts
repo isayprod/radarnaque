@@ -131,6 +131,29 @@ describe("toScanIn", () => {
 		});
 	});
 
+	test("attributes: kept in order, cut to the bounds", () => {
+		const long = "a".repeat(500);
+		const attributes = Array.from({ length: 40 }, (_, i) => ({
+			label: i === 0 ? long : `Label ${i}`,
+			value: i === 0 ? long : `${i}`,
+		}));
+		const body = toScanIn(request({ listing: listing({ attributes }) }));
+		const sent = body.listing.attributes ?? [];
+		expect(sent).toHaveLength(30);
+		expect(codePoints(sent[0]?.label)).toBe(60);
+		expect(codePoints(sent[0]?.value)).toBe(200);
+		expect(sent[1]).toEqual({ label: "Label 1", value: "1" });
+		expect(BOUNDS).toMatchObject({
+			attributes: 30,
+			attributeLabel: 60,
+			attributeValue: 200,
+		});
+	});
+
+	test("no attributes → field absent", () => {
+		expect(toScanIn(request()).listing).not.toHaveProperty("attributes");
+	});
+
 	test("truncation never cuts an emoji in half", () => {
 		const body = toScanIn(
 			request({ listing: listing({ title: "😀".repeat(400) }) }),

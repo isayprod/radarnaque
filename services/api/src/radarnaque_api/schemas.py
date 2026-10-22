@@ -62,6 +62,9 @@ LOCATION_MAX = 100
 CATEGORY_MAX = 200
 CONDITION_MAX = 100
 POSTED_AT_MAX = 64
+ATTRIBUTES_MAX_ENTRIES = 30
+ATTRIBUTE_LABEL_MAX = 60
+ATTRIBUTE_VALUE_MAX = 200
 PARAMS_MAX_ENTRIES = 10
 PARAM_KEY_MAX = 40
 PARAM_VALUE_MAX = 200
@@ -71,6 +74,13 @@ class LocationIn(CamelInModel):
     city: str | None = Field(default=None, max_length=LOCATION_MAX)
     region: str | None = Field(default=None, max_length=LOCATION_MAX)
     country: str | None = Field(default=None, max_length=LOCATION_MAX)
+
+
+class AttributeIn(CamelInModel):
+    """Caractéristique affichée par le site (année, kilométrage…), libellé dans sa langue."""
+
+    label: str = Field(min_length=1, max_length=ATTRIBUTE_LABEL_MAX)
+    value: str = Field(min_length=1, max_length=ATTRIBUTE_VALUE_MAX)
 
 
 # Types de prix lus sur les annonces : `on_request`, `see_description`, `exchange` et
@@ -90,6 +100,7 @@ class ListingIn(CamelInModel):
     price_type: PriceType
     category: str | None = Field(default=None, max_length=CATEGORY_MAX)
     condition: str | None = Field(default=None, max_length=CONDITION_MAX)
+    attributes: list[AttributeIn] = Field(default_factory=list, max_length=ATTRIBUTES_MAX_ENTRIES)
     posted_at: str | None = Field(default=None, max_length=POSTED_AT_MAX)
     location: LocationIn
     images: list[HttpUrl] = Field(default_factory=list, max_length=10)
