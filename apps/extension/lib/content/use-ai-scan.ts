@@ -54,6 +54,8 @@ interface Slots {
 	 */
 	rescanError: string | null;
 	loginUnavailable: boolean;
+	/** Lecture du magasin des résultats IA en cours pour cette annonce. */
+	restoring: boolean;
 }
 
 /**
@@ -77,7 +79,11 @@ interface Scope {
 
 const IDLE: ScanState = { status: "idle" };
 
-const freshSlots = (key: string, access: AccessState | null): Slots => ({
+const freshSlots = (
+	key: string,
+	access: AccessState | null,
+	restoring: boolean,
+): Slots => ({
 	key,
 	access,
 	ai: IDLE,
@@ -85,6 +91,7 @@ const freshSlots = (key: string, access: AccessState | null): Slots => ({
 	rescanning: false,
 	rescanError: null,
 	loginUnavailable: false,
+	restoring,
 });
 
 /** Un état `done` d'une autre version de l'annonce revient à `idle` (I2). */
@@ -130,6 +137,13 @@ export interface AiScan {
 	rescanning: boolean;
 	/** Code d'erreur de la dernière relance ; effacé à la suivante. */
 	rescanError: string | null;
+	/**
+	 * Vrai de l'arrivée sur l'annonce jusqu'à la fin de la lecture du magasin
+	 * (entrée trouvée ou non, lecture en échec) ; faux d'emblée sans magasin.
+	 * Pendant ce temps, la pastille n'offre rien à cliquer : un « Analyser »
+	 * lancerait un vrai scan sur une fiche déjà analysée.
+	 */
+	restoring: boolean;
 	login(): void;
 }
 
@@ -162,7 +176,7 @@ export function useAiScan(
 	const cache = accessCache ?? ownCache;
 	const key = keyOf(view);
 	const [stored, setSlots] = useState<Slots>(() =>
-		freshSlots(key, cache.current()),
+		freshSlots(key, cache.current(), aiResults !== undefined),
 	);
 	const scopeRef = useRef<Scope>(freshScope(key));
 	// Nouvelle annonce : nouvelle portée, les réponses de l'ancienne sont ignorées.
@@ -172,7 +186,7 @@ export function useAiScan(
 	// L'accès en cache reste affiché : il ne dépend pas de l'annonce.
 	let slots = stored;
 	if (stored.key !== key) {
-		slots = freshSlots(key, cache.current());
+		slots = freshSlots(key, cache.current(), aiResults !== undefined);
 		setSlots(slots);
 	}
 	// Même annonce, autre version (prix, description…) : l'ancien verdict IA
@@ -275,8 +289,13 @@ export function useAiScan(
 				true,
 			);
 		};
-		void aiResults.get(site, externalId).then(adopt, () => {});
-	}, [aiResults, key, setAi]);
+		// Lecture finie, réussie ou non : la pastille peut proposer « Analyser ».
+		const settled = (entry: StoredAiResult | null) => {
+			adopt(entry);
+			patch(scope, (prev) => ({ ...prev, restoring: false }));
+		};
+		void aiResults.get(site, externalId).then(settled, () => settled(null));
+	}, [aiResults, key, setAi, patch]);
 
 	const readAccess = useCallback(
 		(scope: Scope) => {
@@ -430,6 +449,7 @@ export function useAiScan(
 		rescan,
 		rescanning: slots.rescanning,
 		rescanError: slots.rescanError,
+		restoring: slots.restoring,
 		login,
 	};
 }

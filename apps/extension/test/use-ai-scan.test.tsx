@@ -627,6 +627,55 @@ const storedFor = (
 });
 
 describe("useAiScan : résultats gardés 24 h", () => {
+	test("restoring : vrai jusqu'à la fin de la lecture du magasin, puis le résultat repris", async () => {
+		const store = fakeStore({ "2ememain.be|m1": storedFor(listingOf("m1")) });
+		const t = setup(viewOf("m1"), store);
+		// Premier rendu : la lecture n'est pas finie, rien ne doit pouvoir lancer un scan.
+		expect(t.result.current.restoring).toBe(true);
+		expect(t.result.current.ai).toEqual({ status: "idle" });
+		await settle();
+		expect(t.result.current.restoring).toBe(false);
+		expect(t.result.current.ai).toEqual(ADOPTED);
+	});
+
+	test("restoring : rien en magasin, faux une fois la lecture finie", async () => {
+		const t = setup(viewOf("m1"), fakeStore());
+		expect(t.result.current.restoring).toBe(true);
+		await settle();
+		expect(t.result.current.restoring).toBe(false);
+		expect(t.result.current.ai).toEqual({ status: "idle" });
+	});
+
+	test("restoring : lecture du magasin en échec, faux quand même", async () => {
+		const store = fakeStore();
+		store.get.mockRejectedValueOnce(new Error("stockage indisponible"));
+		const t = setup(viewOf("m1"), store);
+		expect(t.result.current.restoring).toBe(true);
+		await settle();
+		expect(t.result.current.restoring).toBe(false);
+		expect(t.result.current.ai).toEqual({ status: "idle" });
+	});
+
+	test("restoring : sans magasin, faux dès le premier rendu", () => {
+		const t = setup(viewOf("m1"));
+		expect(t.result.current.restoring).toBe(false);
+	});
+
+	test("restoring : nouvelle annonce, vrai jusqu'à la lecture de sa propre entrée", async () => {
+		const store = fakeStore();
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		expect(t.result.current.restoring).toBe(false);
+		const pending = deferred<StoredAiResult | null>();
+		store.get.mockReturnValueOnce(pending.promise);
+		t.rerender({ view: viewOf("m2") });
+		expect(t.result.current.restoring).toBe(true);
+		await settle();
+		expect(t.result.current.restoring).toBe(true);
+		await act(async () => pending.resolve(null));
+		expect(t.result.current.restoring).toBe(false);
+	});
+
 	test("stored result adopted without scan", async () => {
 		const store = fakeStore({ "2ememain.be|m1": storedFor(listingOf("m1")) });
 		const t = setup(viewOf("m1"), store);
