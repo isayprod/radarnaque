@@ -226,6 +226,23 @@ describe("CardBadge", () => {
 		expect(document.body.innerHTML).not.toContain("2147483647");
 	});
 
+	test("infobulle près du bord droit : décalée vers la gauche, la page ne défile pas", async () => {
+		vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(
+			1280,
+		);
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+			function (this: HTMLElement) {
+				const shift = Number.parseFloat(this.style.left || "0");
+				return DOMRect.fromRect({ x: 1200 + shift, y: 0, width: 260 });
+			},
+		);
+		const user = userEvent.setup();
+		renderInLink({ status: "done", result: sampleAnalysis, progress: null });
+		await user.hover(screen.getByRole("button"));
+		// 1200 + 260 = 1460 : 180 px de trop, plus la marge de 8 px.
+		expect(screen.getByRole("tooltip").style.left).toBe("-188px");
+	});
+
 	test("done medium : « Risque moyen », infobulle avec summary.fr au survol et au focus", async () => {
 		const user = userEvent.setup();
 		renderInLink({

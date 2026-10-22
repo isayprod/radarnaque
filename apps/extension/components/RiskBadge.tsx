@@ -23,6 +23,7 @@ import { DebugBoundary, DebugSection } from "./DebugSection";
 import { Icon } from "./Icon";
 import { Logo } from "./Logo";
 import { LABEL_CLASS } from "./risk-styles";
+import { useKeepInView } from "./useKeepInView";
 
 /** Ferme le panneau sur Escape et sur tout clic hors de `ref`, tant qu'il est ouvert. */
 function useDismiss(
@@ -81,10 +82,12 @@ function ProNotice({ locale }: { locale: Locale }) {
  * Carte du panneau (spec §3) : verre sombre et flou si disponible, bordure,
  * `--r-m`, ombre des couches flottantes, filet `--gradient-hairline` de 2 px en
  * haut (pseudo-élément : `content` explicite, `@property` étant ignoré dans le
- * shadow root). 340 px, au plus 90 % de la fenêtre.
+ * shadow root). Pas de bordure en haut : le filet y forme le bord, sans ligne
+ * grise au-dessus. 340 px, au plus 90 % de la fenêtre, et décalé vers la gauche
+ * s'il dépasserait à droite (`useKeepInView`).
  */
 const PANEL_CLASS =
-	"absolute top-full left-0 z-[2147483000] mt-1.5 w-[340px] max-w-[90vw] overflow-hidden rounded-md border border-border-default bg-glass-host p-4 text-[13px] leading-[1.45] font-normal text-text-2 shadow-[var(--shadow-float)] supports-[backdrop-filter]:backdrop-blur-[18px] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:bg-[image:var(--gradient-hairline)] before:content-['']";
+	"absolute top-full left-0 z-[2147483000] mt-1.5 w-[340px] max-w-[90vw] overflow-hidden rounded-md border border-t-0 border-border-default bg-glass-host p-4 text-[13px] leading-[1.45] font-normal text-text-2 shadow-[var(--shadow-float)] supports-[backdrop-filter]:backdrop-blur-[18px] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:bg-[image:var(--gradient-hairline)] before:content-['']";
 
 const CLOSE_CLASS =
 	"-my-1 -mr-1.5 inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-pill text-text-2 hover:bg-white/8 hover:text-text-1 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
@@ -114,6 +117,8 @@ export function RiskBadge({
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const pillRef = useRef<HTMLSpanElement>(null);
+	const panelRef = useRef<HTMLDivElement>(null);
+	useKeepInView(panelRef, open);
 	const close = useCallback(() => setOpen(false), []);
 	// Bouton « Fermer » : le focus revient à la pilule (le bouton, ou l'action de
 	// la pilule d'erreur), avant que le panneau, qui le contient, ne disparaisse.
@@ -191,7 +196,12 @@ export function RiskBadge({
 				pillRef={pillRef}
 			/>
 			{open && (
-				<div role="dialog" aria-label={title} className={PANEL_CLASS}>
+				<div
+					ref={panelRef}
+					role="dialog"
+					aria-label={title}
+					className={PANEL_CLASS}
+				>
 					<div className="mb-4 flex items-center gap-2">
 						<Logo size={14} className="shrink-0 text-text-1" />
 						<h2 className={`${LABEL_CLASS} min-w-0 flex-1 truncate`}>

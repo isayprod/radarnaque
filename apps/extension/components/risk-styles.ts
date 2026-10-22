@@ -46,11 +46,13 @@ export const LEVEL_STYLE: Record<
 	},
 };
 
-// Badges de gravité des raisons de l'IA : fond doux et texte de la même couleur.
+// Badges de gravité des raisons de l'IA : fond doux et texte de la même couleur,
+// sauf « Info » : `--info` sur `--info-soft` n'atteint que 4,3:1 sur le verre des
+// pages tierces ; texte clair, comme le bandeau professionnel.
 export const SEVERITY_STYLE: Record<Severity, string> = {
 	danger: "bg-danger-soft text-danger",
 	warning: "bg-warning-soft text-warning",
-	info: "bg-info-soft text-info",
+	info: "bg-info-soft text-text-1",
 };
 
 /**

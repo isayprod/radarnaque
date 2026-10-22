@@ -463,6 +463,28 @@ describe("RiskBadge : panneau", () => {
 		);
 	});
 
+	test("filet : le dégradé forme le bord haut, sans bordure grise au-dessus (border-t-0)", async () => {
+		const user = userEvent.setup();
+		const dialog = await openHigh(user);
+		expect(dialog.classList.contains("border-t-0")).toBe(true);
+		expect(dialog.classList.contains("before:top-0")).toBe(true);
+	});
+
+	test("pilule près du bord droit : le panneau est décalé vers la gauche, la page ne défile pas", async () => {
+		vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(
+			1280,
+		);
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+			function (this: HTMLElement) {
+				const shift = Number.parseFloat(this.style.left || "0");
+				return DOMRect.fromRect({ x: 1100 + shift, y: 0, width: 340 });
+			},
+		);
+		const user = userEvent.setup();
+		const dialog = await openHigh(user);
+		expect(dialog.style.left).toBe("-168px");
+	});
+
 	test("contraste : la pilule et le panneau sont en verre opaque des pages tierces (bg-glass-host), jamais bg-glass-strong", async () => {
 		const user = userEvent.setup();
 		const dialog = await openHigh(user);
