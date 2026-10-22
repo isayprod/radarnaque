@@ -1,7 +1,10 @@
 # Caddy de développement : une seule origine http://localhost:8080.
 # auth (port 3000) et api (port 8000) tournent sur l'hôte ; le site est servi depuis
-# apps/site/dist (monté en lecture seule dans /srv/site) ; l'admin sous /admin/ vient de
-# apps/admin/dist (monté dans /srv/admin).
+# apps/site/dist et l'admin (sous /admin/) depuis apps/admin/dist. On monte les dossiers
+# parents (apps/site → /srv/site-src, apps/admin → /srv/admin-src, en lecture seule) et non
+# les dist : un build qui supprime puis recrée dist laisserait sinon le conteneur sur
+# l'ancien dossier (404 partout jusqu'à sa recréation). Seul dist est servi (root).
+# Mêmes routes que le Caddyfile de production, qui copie les dist dans /srv/site et /srv/admin.
 {
 	admin off
 	auto_https off
@@ -12,7 +15,7 @@
 	# Jamais de joker : Better Auth possède /auth/callback/:provider.
 	@callback path /auth/callback /auth/callback/
 	handle @callback {
-		root * /srv/site
+		root * /srv/site-src/dist
 		rewrite * /auth/callback/index.html
 		file_server
 	}
@@ -60,7 +63,8 @@
 			Referrer-Policy no-referrer
 			Cache-Control "public, max-age=31536000, immutable"
 		}
-		root * /srv
+		uri strip_prefix /admin
+		root * /srv/admin-src/dist
 		file_server
 	}
 
@@ -71,13 +75,14 @@
 			Referrer-Policy no-referrer
 			Cache-Control no-store
 		}
-		root * /srv
-		try_files {path} /admin/index.html
+		uri strip_prefix /admin
+		root * /srv/admin-src/dist
+		try_files {path} /index.html
 		file_server
 	}
 
 	handle {
-		root * /srv/site
+		root * /srv/site-src/dist
 		file_server
 	}
 }
