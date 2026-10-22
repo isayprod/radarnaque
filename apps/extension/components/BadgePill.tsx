@@ -158,6 +158,8 @@ function LaunchControl({
  *    « Relancer » (analyse coupée en route) ou le contrôle de lancement, ni l'un
  *    ni l'autre si l'accès relu ne laisse plus d'analyse ;
  * 4. repos : le contrôle de lancement.
+ * Rien tant que le magasin des résultats IA n'est pas lu (`restoring`) : une
+ * fiche déjà analysée affiche directement son résultat, sans « Analyser » avant.
  * L'analyse locale (règles) n'est jamais affichée : elle part seulement avec la
  * demande, comme contexte pour l'IA.
  */
@@ -189,8 +191,10 @@ export function BadgePill({
 	const announced = useThrottled(line || error || "");
 	const ariaLabel = contentText(locale, "badge.aria");
 
-	let pill: ReactNode;
-	if (shown) {
+	let pill: ReactNode = null;
+	if (scan.restoring) {
+		// Lecture du magasin en cours : rien à cliquer.
+	} else if (shown) {
 		const style = LEVEL_STYLE[shown.level];
 		pill = (
 			<button

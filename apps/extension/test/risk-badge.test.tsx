@@ -1153,14 +1153,21 @@ describe("RiskBadge : seule l'IA donne un résultat", () => {
 				storedAt: 1,
 			},
 		});
-		render(
+		const { container } = render(
 			<RiskBadge
 				report={medium}
 				listing={listing}
 				locale="fr"
 				ai={ai}
 				aiResults={aiResults}
+				accessCache={cached(active)}
 			/>,
+		);
+		// Premier rendu, magasin pas encore lu : aucun « Analyser » à cliquer, qui
+		// lancerait un vrai scan (accès actif en cache) sur une fiche déjà analysée.
+		expect(launchControls()).toHaveLength(0);
+		expect(container.textContent).not.toContain(
+			contentText("fr", "ai.launchShort"),
 		);
 		await vi.waitFor(() => expect(toggle().textContent).toContain("82/100"));
 		expect(toggle().textContent).toContain("Risque élevé");
@@ -1173,6 +1180,41 @@ describe("RiskBadge : seule l'IA donne un résultat", () => {
 		expect(dialog.textContent).toContain(aiHigh.summary.fr);
 		for (const text of LOCAL_TEXTS)
 			expect(dialog.textContent).not.toContain(text);
+		expect(ai.scan).not.toHaveBeenCalled();
+	});
+
+	test("fiche sans résultat en magasin : « Analyser » apparaît une fois la lecture finie", async () => {
+		render(
+			<RiskBadge
+				report={medium}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				aiResults={storeWith({})}
+			/>,
+		);
+		expect(launchControls()).toHaveLength(0);
+		await vi.waitFor(() => expect(launchControls()).toHaveLength(1));
+		expect(launch().textContent).toBe(contentText("fr", "ai.launchShort"));
+	});
+
+	test("magasin dont la lecture échoue : « Analyser » apparaît, jamais une pastille vide", async () => {
+		const failing: AiResultStore = {
+			...storeWith({}),
+			get: async () => {
+				throw new Error("stockage indisponible");
+			},
+		};
+		render(
+			<RiskBadge
+				report={medium}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				aiResults={failing}
+			/>,
+		);
+		await vi.waitFor(() => expect(launchControls()).toHaveLength(1));
 		expect(ai.scan).not.toHaveBeenCalled();
 	});
 
