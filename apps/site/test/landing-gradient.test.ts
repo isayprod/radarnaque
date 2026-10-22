@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	contrastRatio,
 	HERO_END,
+	heroAnchor,
 	PALETTE_KEYS,
 	paletteAt,
 	scrollProgress,
@@ -137,6 +138,73 @@ describe("scrollProgress", () => {
 
 	it("page sans scroll : 0", () => {
 		expect(scrollProgress(0, 0, 0)).toBe(0);
+	});
+});
+
+describe("heroAnchor", () => {
+	it("fenêtre basse : le premier texte entre en bas de la fenêtre (1441 − 900 px)", () => {
+		expect(
+			heroAnchor({
+				heroHeight: 867,
+				firstTextTop: 1441,
+				viewport: 900,
+				max: 2351,
+			}),
+		).toBe(541);
+	});
+
+	it("fenêtre haute : texte déjà visible en haut de page → 1 px, sans borne d'un tiers du hero", () => {
+		// 1080 × 1800 : le premier texte est à 1500 px, dans la fenêtre dès y = 0.
+		expect(
+			heroAnchor({
+				heroHeight: 900,
+				firstTextTop: 1500,
+				viewport: 1800,
+				max: 1900,
+			}),
+		).toBe(1);
+		// Le premier texte juste sous la fenêtre : le repère le suit, même sous un tiers du hero.
+		expect(
+			heroAnchor({
+				heroHeight: 900,
+				firstTextTop: 1900,
+				viewport: 1800,
+				max: 1900,
+			}),
+		).toBe(100);
+	});
+
+	it("au plus le hero entier et la moitié du scroll", () => {
+		expect(
+			heroAnchor({
+				heroHeight: 700,
+				firstTextTop: 2400,
+				viewport: 600,
+				max: 5000,
+			}),
+		).toBe(700);
+		expect(
+			heroAnchor({
+				heroHeight: 900,
+				firstTextTop: 1700,
+				viewport: 900,
+				max: 600,
+			}),
+		).toBe(300);
+	});
+
+	it("avec le repère, p atteint 0,15 dès que le premier texte entre dans la fenêtre", () => {
+		const m = {
+			heroHeight: 900,
+			firstTextTop: 1950,
+			viewport: 1500,
+			max: 3000,
+		};
+		const anchor = heroAnchor(m);
+		const yEntree = m.firstTextTop - m.viewport;
+		expect(scrollProgress(yEntree, m.max, anchor)).toBeGreaterThanOrEqual(
+			HERO_END,
+		);
 	});
 });
 

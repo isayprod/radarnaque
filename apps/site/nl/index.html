@@ -3,6 +3,8 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<!-- Classe js posée avant le rendu (apparitions sans éclair), seulement si les modules sont pris en charge : sinon main.ts ne tournerait pas et les blocs resteraient cachés. -->
+		<script>"noModule" in HTMLScriptElement.prototype && document.documentElement.classList.add("js");</script>
 		<!--landing:head-->
 		<link rel="stylesheet" href="/src/landing/landing.css" />
 	</head>

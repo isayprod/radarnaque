@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { contrastRatio } from "../src/landing/gradient";
 import { fillOffer, startLanding, startReveal } from "../src/landing/main";
 import { renderLanding } from "../src/landing/render";
 import type { Offer } from "../src/offer";
@@ -11,6 +12,17 @@ const CSS = readFileSync(
 	resolve(import.meta.dirname, "../src/landing/landing.css"),
 	"utf8",
 );
+const TOKENS = readFileSync(
+	resolve(import.meta.dirname, "../../../packages/design/src/tokens.css"),
+	"utf8",
+);
+
+/** Valeur d'une variable des tokens (`--bg-0: #020b2d;` → `#020b2d`). */
+function token(nom: string): string {
+	const m = new RegExp(`${nom}:\\s*([^;]+);`).exec(TOKENS);
+	if (!m?.[1]) throw new Error(`token absent : ${nom}`);
+	return m[1].trim();
+}
 
 /** Règles du CSS, sélecteur et déclarations ; les règles des `@media` gardent leur requête. */
 function regles(
@@ -216,6 +228,36 @@ describe("apparitions et fonds : CSS", () => {
 		expect(main?.body).toMatch(/background-color:\s*var\(--bg-0\)/);
 		const hero = toutes.find((r) => r.selector === ".landing-hero");
 		expect(hero?.body).toMatch(/var\(--grad-1\)/);
+	});
+
+	it("sous le hero, tant que --sky-mix < 1 : un fond où --text-2 garde 4,5:1 (fenêtres hautes)", () => {
+		const sky = toutes.find((r) => r.selector === ".sky");
+		const corps = (sky?.body ?? "").replace(/\s+/g, " ");
+		// Fond sous le hero : --sky-below, résolu jusqu'au token.
+		const below = /--sky-below:\s*var\((--[\w-]+)\)/.exec(corps)?.[1];
+		expect(below).toBe("--bg-0");
+		const couleur = token(below ?? "");
+		expect(contrastRatio(token("--text-2"), couleur)).toBeGreaterThanOrEqual(
+			4.5,
+		);
+		// Dernier arrêt du dégradé : rien n'est peint après lui (tout le bas en --sky-below).
+		const degrade = /linear-gradient\((.*)\);/.exec(corps)?.[1] ?? "";
+		const arrets = degrade.split(/,(?![^(]*\))/).map((a) => a.trim());
+		const dernier = arrets.at(-1) ?? "";
+		expect(dernier).toMatch(/^var\(--sky-below\)/);
+		// Atteint --sky-fade sous le bas du hero à --sky-mix = 0, repoussé au bas de la fenêtre à 1.
+		expect(dernier).toContain(
+			"(var(--hero-h) + var(--sky-fade)) * (1 - var(--sky-mix))",
+		);
+		expect(dernier).toMatch(/100% \* var\(--sky-mix\)/);
+		// L'arrêt orange (--s5) finit au bas du hero : --sky-below n'est jamais l'orange.
+		expect(arrets.at(-2)).toMatch(
+			/^var\(--s5\) calc\(var\(--hero-h\) \* \(1 - var\(--sky-mix\)\)/,
+		);
+		// Fondu court : il reste sous la maquette, avant le premier texte.
+		const fondu = /--sky-fade:\s*(\d+)px/.exec(corps)?.[1];
+		expect(Number(fondu)).toBeGreaterThan(0);
+		expect(Number(fondu)).toBeLessThanOrEqual(160);
 	});
 
 	it("calque fixe derrière la page, palette 0 par défaut", () => {
