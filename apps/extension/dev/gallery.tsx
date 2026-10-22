@@ -117,7 +117,7 @@ const RESULTS: Record<"low" | "medium" | "high", AnalysisResult> = {
 		},
 		advice: {
 			fr: "Voyez le vélo avant de payer.",
-			nl: "Bekijk de fiets voor je betaalt.",
+			nl: "Bekijk de fiets vóór je betaalt.",
 		},
 		reasons: [],
 		remaining: { scans: 2 },

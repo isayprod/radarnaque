@@ -179,6 +179,18 @@ describe("renderLanding : textes", () => {
 		expect(contient(html, "Betalen kan binnenkort.")).toBe(true);
 		expect(contient(html, "Formules in detail")).toBe(true);
 	});
+
+	it("NL : « vóór je betaalt » (avec accent, comme la popup) et la formule « Standard » (nom propre, comme en FR)", () => {
+		expect(LANDING_TEXT.nl.heroTitle).toBe(
+			"Herken oplichting vóór je betaalt.",
+		);
+		expect(LANDING_TEXT.nl.title).toBe(
+			"Radarnaque – herken oplichting vóór je betaalt",
+		);
+		expect(chaines(LANDING_TEXT.nl).join(" ")).not.toMatch(/\bvoor je betaalt/);
+		expect(PRICING.nl.plans.standard.name).toBe("Standard");
+		expect(PRICING.fr.plans.standard.name).toBe("Standard");
+	});
 });
 
 describe("renderLanding : formules de secours", () => {

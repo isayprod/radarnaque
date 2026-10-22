@@ -119,7 +119,7 @@ const nl: Record<MessageKey, string> = {
 	"footer.pricing": "Formules",
 
 	"plan.trial": "Proef",
-	"plan.standard": "Standaard",
+	"plan.standard": "Standard",
 	"plan.premium": "Premium",
 	"plan.none": "Geen actief abonnement",
 	"plan.unlimited": "Beheerder · onbeperkt",

@@ -518,6 +518,12 @@ describe("popup", () => {
 		expect(quotaCount()).toBe("130");
 	});
 
+	test("formule Standard : même nom propre en FR et en NL (comme le site), titre NL « vóór je betaalt »", () => {
+		expect(t("fr", "plan.standard")).toBe("Standard");
+		expect(t("nl", "plan.standard")).toBe("Standard");
+		expect(t("nl", "signin.title")).toBe("Herken oplichting vóór je betaalt");
+	});
+
 	test("superuser shows Premium : « Superuser (dev) — Premium » en FR et en NL, sans analyses restantes", async () => {
 		background({ "auth/state": () => signedIn(superuserMe) });
 		const { unmount } = render(<App />);
