@@ -21,12 +21,24 @@ const PRICING_CODES = new Set([
 	"feature_not_in_plan",
 ]);
 
+/** Forme commune des pilules du panneau, 32 px de haut. */
+const PILL_BASE_CLASS =
+	"inline-flex h-8 cursor-pointer items-center justify-center rounded-pill px-4 text-[13px] leading-none font-medium whitespace-nowrap no-underline focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-40";
+
 /**
  * Action principale du panneau : pilule blanche, texte sombre, ombre de la pilule
- * primaire (DESIGN.md, boutons « Primary »). Grisée à 40 % une fois désactivée.
+ * primaire (DESIGN.md, boutons « Primary »), soulevée de 1 px au survol (sauf
+ * mouvement réduit). Grisée à 40 % une fois désactivée.
  */
-const WHITE_PILL_CLASS =
-	"inline-flex h-8 cursor-pointer items-center justify-center rounded-pill bg-white px-4 text-[13px] leading-none font-medium whitespace-nowrap text-text-on-light no-underline shadow-[var(--shadow-pill)] hover:-translate-y-px focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0";
+const WHITE_PILL_CLASS = `${PILL_BASE_CLASS} bg-white text-text-on-light shadow-[var(--shadow-pill)] hover:-translate-y-px disabled:hover:translate-y-0 motion-reduce:hover:translate-y-0`;
+
+/**
+ * Action secondaire (DESIGN.md, boutons « Secondary ») : transparente, bordure
+ * `--border-strong`, texte `--text-1`. Une seule pilule blanche par vue : quand
+ * l'erreur a sa propre action (formules, connexion), « Lancer une analyse IA »
+ * passe en secondaire.
+ */
+const SECONDARY_PILL_CLASS = `${PILL_BASE_CLASS} border border-border-strong bg-transparent text-text-1 hover:bg-white/8`;
 
 /** Phrase d'un état sans résultat (déconnecté, sans abonnement, erreur) : titre serif. */
 const STATE_TITLE_CLASS =
@@ -126,6 +138,8 @@ function ScanBlock(props: AiSectionProps) {
 	const { locale, ai } = props;
 	const loading = ai.status === "loading";
 	const relaunch = ai.status === "error" && RELAUNCH_CODES.has(ai.code);
+	// L'erreur affichée a déjà sa pilule blanche (connexion, formules).
+	const errorHasAction = ai.status === "error" && hasOwnAction(ai.code);
 	let label = contentText(locale, "ai.run");
 	if (loading) label = contentText(locale, "ai.loading");
 	else if (relaunch) label = contentText(locale, "ai.retry");
@@ -144,7 +158,7 @@ function ScanBlock(props: AiSectionProps) {
 				disabled={loading}
 				aria-busy={loading}
 				onClick={() => props.onScan()}
-				className={WHITE_PILL_CLASS}
+				className={errorHasAction ? SECONDARY_PILL_CLASS : WHITE_PILL_CLASS}
 			>
 				{label}
 			</button>
@@ -157,6 +171,10 @@ function ScanBlock(props: AiSectionProps) {
 		</div>
 	);
 }
+
+/** L'erreur `code` a sa propre action dans `ErrorNotice` (connexion ou formules). */
+const hasOwnAction = (code: string) =>
+	RELOGIN_CODES.has(code) || PRICING_CODES.has(code);
 
 /**
  * Message d'une erreur en titre serif, suivi du bouton de connexion ou du lien

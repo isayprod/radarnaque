@@ -576,7 +576,8 @@ describe("AiSection : design du panneau", () => {
 		const expected = [
 			["Grave", "bg-danger-soft", "text-danger"],
 			["Attention", "bg-warning-soft", "text-warning"],
-			["Info", "bg-info-soft", "text-info"],
+			// Texte clair sur le fond bleu doux : `text-info` y tombe à 4,3:1 (galerie).
+			["Info", "bg-info-soft", "text-text-1"],
 		] as const;
 		expect(items).toHaveLength(expected.length);
 		expected.forEach(([text, soft, color], index) => {
@@ -669,6 +670,48 @@ describe("AiSection : design du panneau", () => {
 	test("accès actif au repos : « Lancer une analyse IA » en pilule blanche", () => {
 		setup();
 		expectWhitePill(button("Lancer une analyse IA"));
+	});
+
+	/** Pilule secondaire (DESIGN.md §3) : transparente, bordure --border-strong, texte --text-1. */
+	const expectSecondaryPill = (el: Element) => {
+		for (const name of [
+			"bg-transparent",
+			"border",
+			"border-border-strong",
+			"text-text-1",
+			"rounded-pill",
+		])
+			expect(classesOf(el).has(name), name).toBe(true);
+		expect(classesOf(el).has("bg-white")).toBe(false);
+	};
+
+	test.each([
+		["feature_not_in_plan", "link", "Voir les formules"],
+		["quota_exhausted", "link", "Voir les formules"],
+		["session_expired", "button", "Se connecter"],
+	] as const)(
+		"erreur %s avec sa propre action : une seule pilule blanche, « Lancer une analyse IA » en secondaire",
+		(code, role, name) => {
+			setup({ ai: { status: "error", code } });
+			expectWhitePill(screen.getByRole(role, { name }));
+			expectSecondaryPill(button("Lancer une analyse IA"));
+		},
+	);
+
+	test("erreur sans action propre : « Lancer une analyse IA » reste la pilule blanche", () => {
+		setup({ ai: { status: "error", code: "analysis_failed" } });
+		expectWhitePill(button("Lancer une analyse IA"));
+	});
+
+	test("survol des pilules : pas de déplacement si l'utilisateur réduit les animations", () => {
+		setup({ ai: { status: "error", code: "session_expired" } });
+		expect(button("Se connecter").className).toContain(
+			"motion-reduce:hover:translate-y-0",
+		);
+		// La pilule secondaire ne se soulève jamais.
+		expect(button("Lancer une analyse IA").className).not.toContain(
+			"translate",
+		);
 	});
 
 	test("plus aucune couleur Tailwind brute (slate, red) dans la section", () => {

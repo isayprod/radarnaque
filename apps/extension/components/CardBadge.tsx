@@ -7,6 +7,7 @@ import { aiErrorText, contentText } from "../lib/content-i18n";
 import { PILL_CLASS } from "./BadgePill";
 import { Logo } from "./Logo";
 import { CARD_LEVEL_KEY, LEVEL_KEY, LEVEL_STYLE } from "./risk-styles";
+import { useKeepInView } from "./useKeepInView";
 
 /**
  * Mini-pilule (spec §4) : la surface de la pilule de la fiche, 22 px de haut,
@@ -17,7 +18,10 @@ const BUTTON_CLASS = `${PILL_CLASS} h-[22px] min-w-[22px] cursor-pointer justify
 const SQUARE_CLASS = "w-[22px] px-0";
 const WIDE_CLASS = "px-2";
 
-/** Infobulle : verre sombre, `--r-s`, 260 px, texte 12 px, au-dessus de la page. */
+/**
+ * Infobulle : verre sombre, `--r-s`, 260 px, texte 12 px, au-dessus de la page,
+ * décalée vers la gauche si elle dépasserait à droite (`useKeepInView`).
+ */
 const TOOLTIP_CLASS =
 	"absolute top-full left-0 z-[2147483000] mt-1 w-[260px] max-w-[80vw] rounded-sm border border-border-default bg-glass-host p-2 font-sans text-[12px] leading-[1.4] whitespace-normal text-text-1 shadow-[var(--shadow-float)] supports-[backdrop-filter]:backdrop-blur-[18px]";
 
@@ -94,6 +98,7 @@ export function CardBadge({ state, locale, onActivate }: CardView) {
 	const [open, setOpen] = useState(false);
 	const tipId = useId();
 	const buttonRef = useRef<HTMLButtonElement>(null);
+	const tipRef = useRef<HTMLSpanElement>(null);
 	// `preventDefault` sur l'appui : la carte-lien ne peut pas démarrer un
 	// glisser depuis l'icône. Il retire aussi le focus par défaut du bouton,
 	// rendu ici à la main.
@@ -104,6 +109,7 @@ export function CardBadge({ state, locale, onActivate }: CardView) {
 			button.focus({ preventScroll: true });
 	};
 	const tip = tooltipOf(state, locale);
+	useKeepInView(tipRef, open && tip !== null);
 	// Inactif ou en erreur, le clic lance l'analyse : le nom du bouton le dit.
 	// Terminé, son nom est le niveau complet (le texte visible est le niveau
 	// court) ; en cours, le texte d'attente, et l'infobulle suit la ligne d'état.
@@ -154,6 +160,7 @@ export function CardBadge({ state, locale, onActivate }: CardView) {
 			</button>
 			{tip !== null && (
 				<span
+					ref={tipRef}
 					role="tooltip"
 					id={tipId}
 					hidden={!open}
