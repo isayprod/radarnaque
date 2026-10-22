@@ -172,7 +172,9 @@ describe("RiskBadge", () => {
 		expect(container.textContent).not.toContain("Risque");
 		expect(container.textContent).not.toContain("90/100");
 		// Ni couleur de niveau, ni nom accessible qui l'évoquerait.
-		expect(container.querySelector("[class*='bg-red-']")).toBeNull();
+		expect(
+			container.querySelector(".bg-danger, .bg-warning, .bg-success"),
+		).toBeNull();
 		expect(screen.queryByRole("button", { name: /Radarnaque/ })).toBeNull();
 		expect(launchControls()).toHaveLength(1);
 		expect(launch().textContent).toBe(contentText("fr", "ai.launchShort"));
@@ -671,7 +673,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		// après la réponse de l'accès (hors `act`) : `ai.scan` est appelé avant le
 		// rendu de l'état `loading`. On attend donc ce rendu, pas l'appel.
 		await vi.waitFor(() =>
-			expect(toggle().querySelector(".radarnaque-spin")).not.toBeNull(),
+			expect(toggle().querySelector(".rq-logo--loading")).not.toBeNull(),
 		);
 		expect(ai.scan).toHaveBeenCalledTimes(1);
 		expect(ai.access).toHaveBeenCalledTimes(1);
@@ -1108,8 +1110,8 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 			);
 			await user.click(launch());
 			expect(await screen.findByText(aiErrorText("fr", code))).toBeTruthy();
-			// Jamais une icône qui tourne sans fin.
-			expect(document.querySelector(".radarnaque-spin")).toBeNull();
+			// Jamais un logo qui tourne sans fin.
+			expect(document.querySelector(".rq-logo--loading")).toBeNull();
 			expect(queryLaunch()).toBeNull();
 			expect(screen.queryByRole("dialog")).toBeNull();
 			await user.click(screen.getByRole("button", { name: "Relancer" }));
@@ -1140,6 +1142,227 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		const dialog = screen.getByRole("dialog");
 		expect(within(dialog).getByText(text)).toBeTruthy();
 		expect(container.querySelector("img")).toBeNull();
+	});
+
+	// Design de la pilule (verre sombre, logo, reflet de la ligne d'état).
+	const logoOf = (element: Element) => element.querySelector("svg");
+
+	test("au repos : le logo est présent, sans rq-logo--loading", () => {
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		const pill = launch();
+		const logo = logoOf(pill);
+		expect(logo).not.toBeNull();
+		expect(logo?.getAttribute("aria-hidden")).toBe("true");
+		expect(logo?.getAttribute("width")).toBe("16");
+		expect(logo?.classList.contains("rq-logo--loading")).toBe(false);
+		expect(pill.textContent).toBe(contentText("fr", "ai.launchShort"));
+		// Verre sombre, Inter, anneau de focus au clavier.
+		for (const name of [
+			"h-7",
+			"rounded-pill",
+			"bg-glass-strong",
+			"supports-[backdrop-filter]:backdrop-blur-[18px]",
+			"border-white/12",
+			"shadow-[var(--shadow-pill)]",
+			"font-sans",
+			"text-[13px]",
+			"font-medium",
+			"text-text-1",
+			"focus-visible:shadow-[var(--focus-ring)]",
+		])
+			expect(pill.classList.contains(name), name).toBe(true);
+		// Plus aucune couleur Tailwind brute.
+		expect(pill.className).not.toMatch(
+			/slate-|white\b(?!\/)|red-|green-|amber-/,
+		);
+	});
+
+	test("en cours : le logo porte rq-logo--loading et la ligne d'état rq-shimmer ; plus aucun radarnaque-spin", () => {
+		scanReply.mockImplementation(() => new Promise(() => {}));
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		fireEvent.click(launch());
+		emit(searchEvent);
+		const logo = logoOf(toggle());
+		expect(logo?.classList.contains("rq-logo--loading")).toBe(true);
+		expect(logo?.querySelector(".rq-logo-spin .rq-logo-arc")).not.toBeNull();
+		const text = statusLineEl()?.querySelector(".rq-shimmer");
+		expect(text?.textContent).toBe(SEARCH_LINE);
+		expect(document.querySelector(".radarnaque-spin")).toBeNull();
+		expect(document.querySelector(".radarnaque-fade")).toBeNull();
+	});
+
+	test("résultat : point, niveau en toutes lettres, séparateur, score ; la couleur vient de LEVEL_STYLE (bg-danger pour high)", async () => {
+		const user = userEvent.setup();
+		scanReply.mockResolvedValue({ ok: true, data: aiHigh });
+		render(
+			<RiskBadge
+				report={medium}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		await launchToResult(user, 82);
+		const [dot, level, separator, score, ...rest] = Array.from(
+			toggle().children,
+		);
+		expect(rest).toHaveLength(0);
+		expect(dot?.getAttribute("aria-hidden")).toBe("true");
+		expect(dot?.classList.contains("bg-danger")).toBe(true);
+		expect(dot?.classList.contains("size-2")).toBe(true);
+		expect(level?.textContent).toBe("Risque élevé");
+		expect(separator?.getAttribute("aria-hidden")).toBe("true");
+		expect(separator?.textContent).toBe("");
+		expect(score?.textContent).toBe("82/100");
+		expect(score?.classList.contains("text-text-3")).toBe(true);
+		expect(score?.classList.contains("tabular-nums")).toBe(true);
+		// Pas de logo qui tourne avec un résultat.
+		expect(toggle().querySelector(".rq-logo--loading")).toBeNull();
+	});
+
+	test("erreur : logo sans animation et à 60 % d'opacité, message, « Relancer »", async () => {
+		const user = userEvent.setup();
+		scanReply.mockResolvedValueOnce({
+			ok: false,
+			error: { code: "stream_interrupted" },
+		});
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		await user.click(launch());
+		const message = await screen.findByText(
+			aiErrorText("fr", "stream_interrupted"),
+		);
+		expect(message.classList.contains("text-text-2")).toBe(true);
+		const relaunch = screen.getByRole("button", { name: "Relancer" });
+		expect(relaunch.classList.contains("underline")).toBe(true);
+		const pill = relaunch.parentElement as HTMLElement;
+		expect(pill.contains(message)).toBe(true);
+		expect(pill.classList.contains("bg-glass-strong")).toBe(true);
+		const logo = logoOf(pill);
+		expect(logo?.classList.contains("rq-logo--loading")).toBe(false);
+		expect(logo?.classList.contains("opacity-60")).toBe(true);
+	});
+
+	test("ligne d'état de 200 caractères : tronquée (classe truncate) dans une pilule bornée à 340 px", () => {
+		scanReply.mockImplementation(() => new Promise(() => {}));
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		fireEvent.click(launch());
+		const query = "iPhone 18 Pro ".repeat(15).slice(0, 200);
+		emit({ type: "search", id: 2, query, aspect: "price" });
+		const pill = toggle();
+		expect(pill.classList.contains("max-w-[340px]")).toBe(true);
+		expect(pill.classList.contains("min-w-0")).toBe(true);
+		const text = statusLineEl()?.querySelector(".rq-shimmer");
+		// `statusLine` coupe déjà le texte ; la pilule le tronque encore à l'affichage.
+		expect(text?.textContent).toMatch(
+			/^Recherche web \(prix du marché\) : “iPhone 18 Pro/,
+		);
+		expect(text?.classList.contains("truncate")).toBe(true);
+		expect(text?.classList.contains("min-w-0")).toBe(true);
+		expect(statusLineEl()?.classList.contains("min-w-0")).toBe(true);
+		// Le logo ne rétrécit pas : seul le texte est tronqué.
+		expect(logoOf(pill)?.classList.contains("shrink-0")).toBe(true);
+	});
+
+	test("lancée au clavier, l'analyse garde le focus sur la pilule", async () => {
+		const user = userEvent.setup();
+		scanReply.mockImplementation(() => new Promise(() => {}));
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		const pill = launch();
+		pill.focus();
+		await user.keyboard("{Enter}");
+		expect(ai.scan).toHaveBeenCalledTimes(1);
+		expect(toggle().getAttribute("aria-busy")).toBe("true");
+		// Le même élément passe du repos à l'analyse en cours.
+		expect(toggle()).toBe(pill);
+		expect(document.activeElement).toBe(pill);
+	});
+
+	test("lancée au clavier avec un accès inconnu : le focus reste sur la pilule une fois l'accès lu", async () => {
+		const user = userEvent.setup();
+		scanReply.mockImplementation(() => new Promise(() => {}));
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		const pill = launch();
+		pill.focus();
+		await user.keyboard("{Enter}");
+		await vi.waitFor(() =>
+			expect(toggle().getAttribute("aria-busy")).toBe("true"),
+		);
+		expect(document.activeElement).toBe(toggle());
+	});
+
+	test("panneau ouvert après une erreur, accès relu à 0 : la pilule garde le logo atténué, jamais vide", async () => {
+		const user = userEvent.setup();
+		let answer!: (value: BgResponse<AnalysisResult>) => void;
+		scanReply.mockReturnValueOnce(
+			new Promise((resolve) => {
+				answer = resolve;
+			}),
+		);
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { ...active, remaining: { scans: 0 } },
+		}));
+		const { container } = render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		await user.click(launch());
+		await user.click(toggle());
+		const dialog = screen.getByRole("dialog");
+		await act(async () =>
+			answer({ ok: false, error: { code: "quota_exhausted" } }),
+		);
+		await vi.waitFor(() => expect(ai.access).toHaveBeenCalled());
+		await vi.waitFor(() => expect(launchControls()).toHaveLength(0));
+		expect(screen.queryByRole("button", { name: "Relancer" })).toBeNull();
+		// Le texte de l'erreur reste dans le panneau seulement.
+		expect(
+			within(dialog).getByText(aiErrorText("fr", "quota_exhausted")),
+		).toBeTruthy();
+		const logos = Array.from(container.querySelectorAll("svg")).filter(
+			(svg) => !dialog.contains(svg),
+		);
+		expect(logos).toHaveLength(1);
+		expect(logos[0]?.classList.contains("opacity-60")).toBe(true);
+		expect(logos[0]?.closest(".bg-glass-strong")).not.toBeNull();
 	});
 });
 
@@ -1483,10 +1706,10 @@ describe("badge.css", () => {
 		const vars = [
 			"--tw-border-style: solid",
 			"--tw-outline-style: solid",
-			"--tw-inset-shadow: 0 0 #0000",
-			"--tw-inset-ring-shadow: 0 0 #0000",
-			"--tw-ring-offset-shadow: 0 0 #0000",
-			"--tw-ring-shadow: 0 0 #0000",
+			"--tw-inset-shadow: 0 0 transparent",
+			"--tw-inset-ring-shadow: 0 0 transparent",
+			"--tw-ring-offset-shadow: 0 0 transparent",
+			"--tw-ring-shadow: 0 0 transparent",
 		];
 		const shared = css.match(/:host,\s*\.radarnaque-root\s*\{([^}]*)\}/)?.[1];
 		expect(shared).toBeDefined();
@@ -1498,18 +1721,44 @@ describe("badge.css", () => {
 		expect(css).toMatch(/@theme\s*\{[^}]*--spacing:\s*4px/);
 	});
 
+	test("aucune couleur hexadécimale (resets --tw-* en transparent)", () => {
+		expect(css).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+	});
+
+	test("importe tailwindcss, puis les tokens, le thème et les animations du paquet design", () => {
+		const imports = [...css.matchAll(/@import\s+"([^"]+)"/g)].map((m) => m[1]);
+		expect(imports).toEqual([
+			"tailwindcss",
+			"@radarnaque/design/tokens.css",
+			"@radarnaque/design/theme.css",
+			"@radarnaque/design/motion.css",
+		]);
+	});
+
+	test("la police de l'hôte est celle des tokens (--font-sans)", () => {
+		expect(blockOf(":host")).toMatch(/font-family:\s*var\(--font-sans\)/);
+	});
+
+	test("plus d'animations propres à la pastille : rotation et fondu viennent de motion.css", () => {
+		expect(css).not.toContain("@keyframes radarnaque-spin");
+		expect(css).not.toContain("@keyframes radarnaque-fade");
+		expect(css).not.toContain(".radarnaque-spin");
+		expect(css).not.toContain(".radarnaque-fade");
+	});
+
 	test("animations réduites : ni rotation, ni fondu, ni points animés", () => {
-		expect(blockOf("\\.radarnaque-spin")).toContain("animation:");
+		// Rotation et reflet : motion.css les coupe (testé dans le paquet design).
+		// Ici, les points d'attente restent affichés, fixes.
 		expect(blockOf("\\.radarnaque-status\\.is-waiting::after")).toContain(
 			"animation:",
 		);
 		const reduced =
 			css.split("@media (prefers-reduced-motion: reduce)")[1] ?? "";
-		expect(reduced).toMatch(
-			/\.radarnaque-spin,\s*\.radarnaque-fade\s*\{\s*animation:\s*none;/,
-		);
-		expect(reduced).toMatch(
-			/\.radarnaque-status\.is-waiting::after\s*\{[^}]*animation:\s*none;/,
-		);
+		const dots =
+			reduced.match(
+				/\.radarnaque-status\.is-waiting::after\s*\{([^}]*)\}/,
+			)?.[1] ?? "";
+		expect(dots).toMatch(/content:\s*"…"/);
+		expect(dots).toMatch(/animation:\s*none;/);
 	});
 });

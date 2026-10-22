@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* Tokens (déclarés sur `:root, :host`), utilités Tailwind qui les relient, et
+   animations partagées (logo de chargement, reflet du texte d'état). */
+@import "@radarnaque/design/tokens.css";
+@import "@radarnaque/design/theme.css";
+@import "@radarnaque/design/motion.css";
 
 /* Injecté dans le Shadow DOM (cssInjectionMode "ui") : aucun style global de la page
    ne s'applique, et ceux-ci ne fuient pas vers la page. */
@@ -8,12 +13,11 @@
 	--spacing: 4px;
 }
 
+/* Police Inter chargée par le content script (FontFace) ; sinon, la pile de repli. */
 :host {
 	all: initial;
 	display: inline-block;
-	font-family:
-		system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-		sans-serif;
+	font-family: var(--font-sans);
 }
 
 /* Tailwind 4 déclare les valeurs initiales de ces variables par `@property`, ignoré
@@ -24,41 +28,18 @@
 .radarnaque-root {
 	--tw-border-style: solid;
 	--tw-outline-style: solid;
-	--tw-inset-shadow: 0 0 #0000;
-	--tw-inset-ring-shadow: 0 0 #0000;
-	--tw-ring-offset-shadow: 0 0 #0000;
-	--tw-ring-shadow: 0 0 #0000;
+	--tw-inset-shadow: 0 0 transparent;
+	--tw-inset-ring-shadow: 0 0 transparent;
+	--tw-ring-offset-shadow: 0 0 transparent;
+	--tw-ring-shadow: 0 0 transparent;
 }
 
-/* Analyse en cours : l'icône qui tourne, le fondu entre deux lignes d'état, et les
-   points de suspension après 4 s sans événement (`is-waiting`). */
-@keyframes radarnaque-spin {
-	to {
-		transform: rotate(360deg);
-	}
-}
-
-@keyframes radarnaque-fade {
-	from {
-		opacity: 0;
-	}
-	to {
-		opacity: 1;
-	}
-}
-
+/* Analyse en cours : points de suspension après 4 s sans événement (`is-waiting`).
+   Le logo animé et le reflet de la ligne d'état viennent de motion.css. */
 @keyframes radarnaque-dots {
 	to {
 		width: 1.2em;
 	}
-}
-
-.radarnaque-spin {
-	animation: radarnaque-spin 0.9s linear infinite;
-}
-
-.radarnaque-fade {
-	animation: radarnaque-fade 0.25s ease-out;
 }
 
 .radarnaque-status.is-waiting::after {
@@ -70,14 +51,9 @@
 	animation: radarnaque-dots 1.2s steps(4, end) infinite;
 }
 
-/* Animations réduites : ni rotation, ni fondu, ni points animés ; l'attente reste
-   indiquée par des points fixes. */
+/* Animations réduites : les points ne s'animent plus, l'attente reste indiquée par
+   des points fixes (motion.css coupe déjà la rotation du logo et le reflet). */
 @media (prefers-reduced-motion: reduce) {
-	.radarnaque-spin,
-	.radarnaque-fade {
-		animation: none;
-	}
-
 	.radarnaque-status.is-waiting::after {
 		content: "…";
 		width: auto;

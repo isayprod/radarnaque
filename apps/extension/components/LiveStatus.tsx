@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Logo } from "./Logo";
 
 /** Sans nouvel événement pendant ce délai, la ligne d'état montre des points animés. */
 export const WAITING_MS = 4_000;
@@ -6,33 +7,13 @@ export const WAITING_MS = 4_000;
 /** La région `aria-live` est mise à jour au plus une fois par intervalle. */
 export const ANNOUNCE_MS = 2_000;
 
-/** Icône qui tourne (analyse en cours) ; fixe si l'utilisateur réduit les animations. */
+/**
+ * Indicateur d'attente des icônes de cartes : le logo animé. Gardé pour
+ * `CardBadge` jusqu'à son restyle, qui utilisera `<Logo animated>` directement ;
+ * `radarnaque-spin` n'y est plus qu'un repère pour ses tests.
+ */
 export function Spinner({ size = 12 }: { size?: number }) {
-	return (
-		<svg
-			aria-hidden="true"
-			width={size}
-			height={size}
-			viewBox="0 0 16 16"
-			fill="none"
-			className="radarnaque-spin shrink-0 text-slate-600"
-		>
-			<circle
-				cx="8"
-				cy="8"
-				r="6"
-				stroke="currentColor"
-				strokeOpacity="0.25"
-				strokeWidth="2"
-			/>
-			<path
-				d="M14 8a6 6 0 0 0-6-6"
-				stroke="currentColor"
-				strokeWidth="2"
-				strokeLinecap="round"
-			/>
-		</svg>
-	);
+	return <Logo size={size} animated className="radarnaque-spin shrink-0" />;
 }
 
 /**
@@ -76,9 +57,10 @@ export function useThrottled(text: string, ms = ANNOUNCE_MS): string {
 }
 
 /**
- * Ligne d'état visible : un fondu à chaque nouveau texte, et des points de suspension
- * animés (`is-waiting`) pendant une attente. Masquée aux lecteurs d'écran, qui ont
- * leur propre région `aria-live` ralentie.
+ * Ligne d'état visible : le texte balayé par un reflet (`rq-shimmer`, coupé si
+ * l'utilisateur réduit les animations), tronqué s'il est trop long, et des points
+ * de suspension pendant une attente (`is-waiting`). Masquée aux lecteurs d'écran,
+ * qui ont leur propre région `aria-live` ralentie.
  */
 export function LiveLine({
 	text,
@@ -90,12 +72,9 @@ export function LiveLine({
 	return (
 		<span
 			aria-hidden="true"
-			className={`radarnaque-status inline-flex min-w-0 max-w-[340px] items-baseline font-normal text-slate-700${waiting ? " is-waiting" : ""}`}
+			className={`radarnaque-status inline-flex min-w-0 items-baseline text-text-2${waiting ? " is-waiting" : ""}`}
 		>
-			{/* Nouvelle clé à chaque texte : le fondu rejoue. */}
-			<span key={text} className="radarnaque-fade truncate">
-				{text}
-			</span>
+			<span className="rq-shimmer min-w-0 truncate">{text}</span>
 		</span>
 	);
 }
