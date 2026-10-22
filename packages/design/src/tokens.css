@@ -1,0 +1,101 @@
+/* Tokens de DESIGN.md §2.2, §2.4, §2.5 et §2.6. Source unique : toute valeur change ici d'abord. */
+:root,
+:host {
+	/* Signature gradient stops (atmosphere only) */
+	--grad-1: #0649b8; /* cobalt */
+	--grad-2: #4e8fe8; /* sky blue */
+	--grad-3: #c7b9ec; /* lilac */
+	--grad-4: #ffd4ad; /* warm peach */
+	--grad-5: #e16c3f; /* horizon orange */
+	--gradient-hero: linear-gradient(
+		180deg,
+		var(--grad-1) 0%,
+		var(--grad-2) 28%,
+		var(--grad-3) 55%,
+		var(--grad-4) 80%,
+		var(--grad-5) 100%
+	);
+	--gradient-compact: linear-gradient(
+		160deg,
+		var(--grad-1) 0%,
+		var(--grad-2) 60%,
+		var(--grad-3) 100%
+	); /* small areas: popup header, login */
+	--gradient-hairline: linear-gradient(
+		90deg,
+		var(--grad-2),
+		var(--grad-3),
+		var(--grad-4)
+	); /* 1-2px accent lines */
+
+	/* Ground (navy, from deepest to raised) */
+	--bg-0: #020b2d; /* page / app background */
+	--bg-1: #031033; /* section background, sidebar */
+	--bg-2: #08174a; /* raised panel */
+	--bg-3: #0d2160; /* hover / selected row */
+
+	/* Glass (translucent surfaces over gradient or navy) */
+	--glass-bg: rgba(8, 23, 74, 0.62);
+	--glass-bg-strong: rgba(3, 16, 51, 0.82);
+	--glass-blur: 18px;
+
+	/* Lines */
+	--border-subtle: rgba(255, 255, 255, 0.06);
+	--border-default: rgba(255, 255, 255, 0.1);
+	--border-strong: rgba(255, 255, 255, 0.18);
+
+	/* Text */
+	--text-1: #ffffff; /* headings, primary values */
+	--text-2: rgba(226, 232, 255, 0.74); /* body, labels */
+	--text-3: rgba(200, 210, 240, 0.52); /* metadata, timestamps, placeholders */
+	--text-on-light: #020b2d; /* text on white pills */
+
+	/* Interaction */
+	--accent: #4e8fe8; /* active nav, focus, selected */
+	--accent-soft: rgba(78, 143, 232, 0.16);
+	--focus-ring: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--accent);
+
+	/* Semantic (harmonised with the gradient) */
+	--success: #5fd3a5;
+	--success-soft: rgba(95, 211, 165, 0.14);
+	--warning: #ffb877;
+	--warning-soft: rgba(255, 184, 119, 0.14);
+	--danger: #ff6b6b;
+	--danger-soft: rgba(255, 107, 107, 0.14);
+	--info: #4e8fe8;
+	--info-soft: rgba(78, 143, 232, 0.14);
+
+	/* Data visualisation (ordered, use in sequence) */
+	--chart-1: #4e8fe8;
+	--chart-2: #c7b9ec;
+	--chart-3: #ffd4ad;
+	--chart-4: #e16c3f;
+	--chart-5: #5fd3a5;
+	--chart-grid: rgba(255, 255, 255, 0.06);
+
+	/* Typographie (familles chargées par fonts.css ou par le content script) */
+	--font-sans:
+		"Radarnaque Inter", system-ui, -apple-system, "Segoe UI", Roboto,
+		"Helvetica Neue", Arial, sans-serif;
+	--font-serif: "Radarnaque Serif", Georgia, "Times New Roman", serif;
+
+	/* Rayons */
+	--r-xs: 6px;
+	--r-s: 10px;
+	--r-m: 14px;
+	--r-l: 20px;
+	--r-pill: 999px;
+
+	/* Ombres (trois cas seulement) */
+	--shadow-pill:
+		0 1px 2px rgba(2, 11, 45, 0.2), 0 6px 20px rgba(2, 11, 45, 0.18);
+	--shadow-float: 0 12px 40px rgba(0, 0, 0, 0.45);
+	--shadow-mockup: 0 40px 120px rgba(2, 11, 45, 0.45);
+
+	/* Mouvement */
+	--dur-fast: 120ms;
+	--dur-base: 200ms;
+	--dur-slow: 320ms;
+	--ease-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
+	--ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}

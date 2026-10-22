@@ -1,0 +1,80 @@
+/*
+ * Animations partagées (DESIGN.md §2.6) : logo de chargement et reflet du texte d'état.
+ * Le logo animé est le seul élément qui tourne : indicateur d'attente, jamais décoration.
+ * Le SVG est en ligne ; le groupe tournant n'a aucun attribut transform.
+ */
+
+/* Trait : la queue rattrape la tête (240 -> 24), puis la tête repart (24 -> 240). */
+@keyframes rq-logo-tail {
+	0% {
+		stroke-dasharray: 240 120;
+		stroke-dashoffset: -15;
+		animation-timing-function: cubic-bezier(0.6, 0, 0.4, 1);
+	}
+	50% {
+		stroke-dasharray: 24 336;
+		stroke-dashoffset: -231;
+		animation-timing-function: cubic-bezier(0.6, 0, 0.4, 1);
+	}
+	100% {
+		stroke-dasharray: 240 120;
+		stroke-dashoffset: -231;
+	}
+}
+
+/* Rotation de l'ensemble : 216 + 144 = 360, la boucle est continue. */
+@keyframes rq-logo-rotate {
+	from {
+		transform: rotate(0);
+	}
+	to {
+		transform: rotate(144deg);
+	}
+}
+
+/* Reflet du texte d'état. */
+@keyframes rq-shimmer {
+	from {
+		background-position: 100% 0;
+	}
+	to {
+		background-position: -150% 0;
+	}
+}
+
+.rq-logo--loading .rq-logo-arc {
+	animation: rq-logo-tail 1.6s infinite;
+}
+
+.rq-logo--loading .rq-logo-spin {
+	transform-box: view-box;
+	transform-origin: 16px 16px;
+	animation: rq-logo-rotate 1.6s linear infinite;
+}
+
+.rq-shimmer {
+	background: linear-gradient(
+		90deg,
+		var(--text-2) 35%,
+		var(--text-1) 50%,
+		var(--text-2) 65%
+	);
+	background-size: 250% 100%;
+	background-clip: text;
+	-webkit-background-clip: text;
+	color: transparent;
+	animation: rq-shimmer 2.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.rq-logo--loading .rq-logo-arc,
+	.rq-logo--loading .rq-logo-spin,
+	.rq-shimmer {
+		animation: none;
+	}
+
+	.rq-shimmer {
+		background: none;
+		color: inherit;
+	}
+}
