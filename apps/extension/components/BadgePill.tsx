@@ -1,5 +1,12 @@
 import type { Locale } from "@radarnaque/shared";
-import { type ReactNode, useCallback, useEffect, useId, useRef } from "react";
+import {
+	type ReactNode,
+	type Ref,
+	useCallback,
+	useEffect,
+	useId,
+	useRef,
+} from "react";
 import type { ScanState } from "../lib/content/ai-client";
 import { statusLine } from "../lib/content/scan-progress";
 import { shownResult } from "../lib/content/shown-result";
@@ -129,6 +136,7 @@ export function BadgePill({
 	open,
 	onToggle,
 	onLaunch,
+	pillRef,
 }: {
 	scan: AiScan;
 	locale: Locale;
@@ -136,6 +144,8 @@ export function BadgePill({
 	open: boolean;
 	onToggle(): void;
 	onLaunch(): void;
+	/** Conteneur de la pilule : la fermeture du panneau y rend le focus. */
+	pillRef?: Ref<HTMLSpanElement>;
 }) {
 	const levelId = useId();
 	const scoreId = useId();
@@ -286,7 +296,10 @@ export function BadgePill({
 
 	return (
 		<>
-			<span className="inline-flex max-w-full items-center align-middle">
+			<span
+				ref={pillRef}
+				className="inline-flex max-w-full items-center align-middle"
+			>
 				{pill}
 				{disabledReason && (
 					<span id={reasonId} className="sr-only">

@@ -179,4 +179,16 @@ describe("ScanProgressView", () => {
 		expect(container.querySelector("img")).toBeNull();
 		expect(container.textContent).toContain("<img src=x onerror=alert(1)>");
 	});
+
+	test("tokens du design : plus aucune couleur slate ; replié, le déroulé se range à droite", () => {
+		const { container } = render(
+			<ScanProgressView progress={sample} locale="fr" live={false} />,
+		);
+		expect(container.innerHTML).not.toMatch(/\bslate-/);
+		const details = container.querySelector("details");
+		expect(details?.className).toContain("ml-auto");
+		expect(details?.querySelector("summary")?.className).toContain(
+			"text-text-2",
+		);
+	});
 });

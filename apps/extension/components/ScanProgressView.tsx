@@ -28,15 +28,13 @@ function Step({
 	const body = event.type === "thinking" ? thinkingParts(event.text).body : "";
 	return (
 		<li className="flex items-start gap-2">
-			<span className="w-8 shrink-0 text-right text-slate-500 tabular-nums">
+			<span className="w-8 shrink-0 text-right text-text-3 tabular-nums">
 				{elapsed(step.at, startedAt)}
 			</span>
 			<span className="min-w-0 break-words">
 				<span className="block">{line}</span>
 				{body && (
-					<span className="block whitespace-pre-line text-slate-600">
-						{body}
-					</span>
+					<span className="block whitespace-pre-line text-text-3">{body}</span>
 				)}
 			</span>
 		</li>
@@ -89,11 +87,13 @@ export function ScanProgressView({
 	);
 	if (live) return list;
 	return (
-		<details className="text-[12px]">
-			<summary className="cursor-pointer font-semibold text-slate-700">
+		// Repliée, à droite des analyses restantes (pied du panneau) ; dépliée, elle
+		// prend toute la largeur, la liste alignée à gauche.
+		<details className="ml-auto text-right text-[12px] leading-[1.4] open:w-full">
+			<summary className="cursor-pointer font-medium text-text-2 hover:text-text-1 focus-visible:rounded-xs focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden">
 				{contentText(locale, "ai.howAnalyzed")}
 			</summary>
-			<div className="mt-1">{list}</div>
+			<div className="mt-2 text-left text-text-2">{list}</div>
 		</details>
 	);
 }

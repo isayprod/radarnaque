@@ -121,6 +121,7 @@ const aiHigh: AnalysisResult = {
 };
 
 const LAUNCH = contentText("fr", "ai.launch");
+const PANEL_CLOSE = contentText("fr", "panel.close");
 /** Pilule au repos : « Analyser », nommée « Analyser avec l'IA ». */
 const launch = () => screen.getByRole("button", { name: LAUNCH });
 const queryLaunch = () => screen.queryByRole("button", { name: LAUNCH });
@@ -369,6 +370,126 @@ describe("RiskBadge", () => {
 	});
 });
 
+describe("RiskBadge : panneau", () => {
+	/** Résultat high 82, panneau ouvert. */
+	const openHigh = async (
+		user: ReturnType<typeof userEvent.setup>,
+		locale: "fr" | "nl" = "fr",
+	) => {
+		scanReply.mockResolvedValue({ ok: true, data: aiHigh });
+		render(
+			<RiskBadge
+				report={medium}
+				listing={listing}
+				locale={locale}
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		await user.click(
+			screen.getByRole("button", { name: contentText(locale, "ai.launch") }),
+		);
+		await vi.waitFor(() => expect(toggle().textContent).toContain("82/100"));
+		await user.click(toggle());
+		return screen.getByRole("dialog", {
+			name: contentText(locale, "panel.title"),
+		});
+	};
+
+	test("panneau : en-tête avec le titre et un bouton « Fermer » qui ferme et rend le focus à la pilule", async () => {
+		const user = userEvent.setup();
+		const dialog = await openHigh(user);
+		const header = dialog.firstElementChild;
+		if (!header) throw new Error("en-tête attendu");
+		// Logo 14 px, titre en style label, bouton de fermeture.
+		const logo = header.querySelector("svg");
+		expect(logo?.getAttribute("width")).toBe("14");
+		expect(logo?.getAttribute("aria-hidden")).toBe("true");
+		const title = within(header as HTMLElement).getByRole("heading", {
+			level: 2,
+		});
+		expect(title.textContent).toBe("Analyse Radarnaque");
+		for (const name of ["uppercase", "text-[11px]", "tracking-[0.06em]"])
+			expect(title.classList.contains(name), name).toBe(true);
+		const close = within(header as HTMLElement).getByRole("button", {
+			name: "Fermer",
+		});
+		expect(close.getAttribute("type")).toBe("button");
+		// Icône Lucide « close » : deux traits, décorative.
+		const icon = close.querySelector("svg");
+		expect(icon?.getAttribute("aria-hidden")).toBe("true");
+		expect(icon?.querySelectorAll("path")).toHaveLength(2);
+
+		await user.click(close);
+		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(toggle().getAttribute("aria-expanded")).toBe("false");
+		expect(document.activeElement).toBe(toggle());
+	});
+
+	test("fermer au clavier : Entrée sur « Fermer », le focus revient à la pilule", async () => {
+		const user = userEvent.setup();
+		await openHigh(user);
+		screen.getByRole("button", { name: "Fermer" }).focus();
+		await user.keyboard("{Enter}");
+		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(document.activeElement).toBe(toggle());
+	});
+
+	test("nl : « Sluiten »", async () => {
+		const user = userEvent.setup();
+		const dialog = await openHigh(user, "nl");
+		const close = within(dialog).getByRole("button", { name: "Sluiten" });
+		await user.click(close);
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
+	test("carte : verre sombre, bordure, --r-m, ombre flottante, filet en dégradé, 340 px au plus 90 vw", async () => {
+		const user = userEvent.setup();
+		const dialog = await openHigh(user);
+		for (const name of [
+			"bg-glass-strong",
+			"border-border-default",
+			"rounded-m",
+			"shadow-[var(--shadow-float)]",
+			"w-[340px]",
+			"max-w-[90vw]",
+			"z-[2147483000]",
+			"before:bg-[image:var(--gradient-hairline)]",
+			"before:h-0.5",
+		])
+			expect(dialog.classList.contains(name), name).toBe(true);
+		expect(dialog.className).not.toMatch(
+			/\bslate-|\bbg-white(?![\w/])|2147483647/,
+		);
+	});
+
+	test("aucune classe z-[2147483647] dans RiskBadge", () => {
+		const source = readFileSync(
+			resolve(
+				dirname(fileURLToPath(import.meta.url)),
+				"../components/RiskBadge.tsx",
+			),
+			"utf8",
+		);
+		expect(source).not.toContain("2147483647");
+		expect(source).toContain("z-[2147483000]");
+	});
+
+	test("résultat dans le panneau : score serif, badge de verdict, barre", async () => {
+		const user = userEvent.setup();
+		const dialog = await openHigh(user);
+		const score = within(dialog).getByText("82");
+		expect(score.classList.contains("font-serif")).toBe(true);
+		expect(score.nextElementSibling?.textContent).toBe("/100");
+		expect(
+			within(dialog).getByText("Risque élevé").closest("[data-verdict]"),
+		).not.toBeNull();
+		const fill = dialog.querySelector("[role='presentation']")
+			?.firstElementChild as HTMLElement | null;
+		expect(fill?.style.width).toBe("82%");
+	});
+});
+
 describe("RiskBadge : analyse IA", () => {
 	/** Bouton « Lancer une analyse IA » du panneau, affiché une fois l'accès chargé. */
 	const findRun = () =>
@@ -571,9 +692,11 @@ describe("RiskBadge : analyse IA", () => {
 			window.dispatchEvent(new Event("focus"));
 		});
 		await findRun();
-		expect(
-			within(screen.getByRole("dialog")).getAllByRole("button"),
-		).toHaveLength(1);
+		// Une seule action, en plus du bouton « Fermer » de l'en-tête.
+		const actions = within(screen.getByRole("dialog"))
+			.getAllByRole("button")
+			.filter((b) => b.getAttribute("aria-label") !== PANEL_CLOSE);
+		expect(actions).toHaveLength(1);
 		expect(screen.queryByText(/photos/)).toBeNull();
 	});
 
@@ -1650,8 +1773,10 @@ describe("RiskBadge : bandeau des annonces professionnelles", () => {
 		const dialog = await openAtRest(user);
 		const note = within(dialog).getByRole("note");
 		expect(note.textContent).toBe(contentText("fr", "pro.notice"));
-		// Au-dessus de tout le reste du panneau.
-		expect(dialog.firstElementChild).toBe(note);
+		// En tête du panneau, juste sous son en-tête, au-dessus de tout le reste.
+		expect(dialog.firstElementChild?.nextElementSibling).toBe(note);
+		expect(note.className).toContain("bg-info-soft");
+		expect(note.className).not.toMatch(/\bslate-/);
 		expect(container.textContent).not.toContain("40/100");
 		expect(container.textContent).not.toContain("Risque moyen");
 		for (const text of LOCAL_TEXTS)
