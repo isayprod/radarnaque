@@ -1,6 +1,7 @@
 import type { Me } from "@radarnaque/shared";
 import {
 	cleanup,
+	fireEvent,
 	render,
 	screen,
 	waitFor,
@@ -176,7 +177,8 @@ describe("popup", () => {
 			{ type: "auth/verify-otp", email: "a@b.be", otp: "123456" },
 		]);
 		expect(screen.getByText("a@b.be")).toBeTruthy();
-		expect(screen.getByText("3 analyses IA restantes")).toBeTruthy();
+		expect(screen.getByText("Analyses IA restantes")).toBeTruthy();
+		expect(quotaCount()).toBe("3");
 		expect(screen.queryByText(/photos/)).toBeNull();
 		expect(screen.getByRole("button", { name: "Se déconnecter" })).toBeTruthy();
 	});
@@ -468,9 +470,13 @@ describe("popup", () => {
 		const user = userEvent.setup();
 		render(<App />);
 
-		expect(
-			await screen.findByText("Service momentanément indisponible. Réessayez."),
-		).toBeTruthy();
+		// Le message générique reste annoncé (aria-live), masqué à l'écran : le titre
+		// et la phrase de l'écran injoignable disent déjà la même chose.
+		const message = await screen.findByText(
+			"Service momentanément indisponible. Réessayez.",
+		);
+		expect(message.closest(".sr-only")).not.toBeNull();
+		expect(message.closest("[aria-live='polite']")).not.toBeNull();
 		await user.click(screen.getByRole("button", { name: "Réessayer" }));
 
 		expect(await screen.findByText("Essai")).toBeTruthy();
@@ -509,7 +515,7 @@ describe("popup", () => {
 		});
 		render(<App />);
 		expect(await screen.findByText("Standard")).toBeTruthy();
-		expect(screen.getByText("130 analyses IA restantes")).toBeTruthy();
+		expect(quotaCount()).toBe("130");
 	});
 
 	test("superuser shows Premium : « Superuser (dev) — Premium » en FR et en NL, sans analyses restantes", async () => {
@@ -524,10 +530,11 @@ describe("popup", () => {
 		render(<App />);
 		expect(await screen.findByText("Superuser (dev) — Premium")).toBeTruthy();
 		expect(screen.queryByText("Beheerder · onbeperkt")).toBeNull();
-		expect(screen.queryByText(/over$/)).toBeNull();
+		expect(screen.queryByText("Resterende AI-analyses")).toBeNull();
+		expect(quotaCount()).toBeNull();
 	});
 
-	test("shows remaining scans : le quota full, limité par le plafond total, au singulier pour 0 et 1", async () => {
+	test("shows remaining scans : le quota full, limité par le plafond total, 0 compris", async () => {
 		const premium = (remaining: number, cap: number | null = null): Me => ({
 			...trialMe,
 			plan: "premium",
@@ -540,21 +547,23 @@ describe("popup", () => {
 			],
 		});
 		const cases: Array<[Me, string]> = [
-			[premium(300), "300 analyses IA restantes"],
-			[premium(120, 40), "40 analyses IA restantes"],
-			[premium(1), "1 analyse IA restante"],
-			[premium(0), "0 analyse IA restante"],
+			[premium(300), "300"],
+			[premium(120, 40), "40"],
+			[premium(1), "1"],
+			[premium(0), "0"],
 		];
-		for (const [me, text] of cases) {
+		for (const [me, count] of cases) {
 			background({ "auth/state": () => signedIn(me) });
 			const { unmount } = render(<App />);
-			expect(await screen.findByText(text)).toBeTruthy();
+			expect(await screen.findByText("Analyses IA restantes")).toBeTruthy();
+			expect(quotaCount()).toBe(count);
 			unmount();
 		}
 		await localePref.setValue("nl");
 		background({ "auth/state": () => signedIn(premium(2)) });
 		render(<App />);
-		expect(await screen.findByText("2 AI-analyses over")).toBeTruthy();
+		expect(await screen.findByText("Resterende AI-analyses")).toBeTruthy();
+		expect(quotaCount()).toBe("2");
 	});
 
 	test("NL locale renders Dutch labels", async () => {
@@ -574,7 +583,8 @@ describe("popup", () => {
 		render(<App />);
 
 		expect(await screen.findByText("Proef")).toBeTruthy();
-		expect(screen.getByText("3 AI-analyses over")).toBeTruthy();
+		expect(screen.getByText("Resterende AI-analyses")).toBeTruthy();
+		expect(quotaCount()).toBe("3");
 		expect(screen.getByRole("button", { name: "Afmelden" })).toBeTruthy();
 	});
 
@@ -957,6 +967,11 @@ async function toCodeStep(user: ReturnType<typeof userEvent.setup>) {
 	)) as HTMLInputElement;
 }
 
+/** Nombre affiché dans le panneau du quota, `null` s'il n'y en a pas. */
+function quotaCount(): string | null {
+	return document.querySelector("[data-quota-count]")?.textContent ?? null;
+}
+
 /** Les six cases décoratives du code, dans l'ordre. */
 function codeCells(): HTMLElement[] {
 	return [...document.querySelectorAll<HTMLElement>("[data-code-cell]")];
@@ -1184,6 +1199,45 @@ describe("popup : cadre et écrans d'accès", () => {
 		expect(screen.getByLabelText("Code à 6 chiffres")).toBe(code);
 	}
 
+	test("code : le curseur reste en fin de saisie (focus, clic, flèches, sélection)", async () => {
+		background({ "auth/state": () => signedOut, "auth/start": () => ok(null) });
+		const user = userEvent.setup();
+		render(<App />);
+		const code = await toCodeStep(user);
+		await user.type(code, "482");
+		const atEnd = () => [code.selectionStart, code.selectionEnd];
+
+		await user.keyboard("{ArrowLeft}{ArrowLeft}");
+		expect(atEnd()).toEqual([3, 3]);
+
+		await user.keyboard("{Home}");
+		expect(atEnd()).toEqual([3, 3]);
+
+		await user.pointer({ target: code, offset: 1, keys: "[MouseLeft]" });
+		expect(atEnd()).toEqual([3, 3]);
+
+		code.setSelectionRange(0, 2);
+		fireEvent.select(code);
+		expect(atEnd()).toEqual([3, 3]);
+
+		await user.tab();
+		code.setSelectionRange(0, 0);
+		await user.click(code);
+		expect(atEnd()).toEqual([3, 3]);
+
+		// Le chiffre suivant s'ajoute à la fin : « 4825 », pas « 4582 ».
+		await user.keyboard("{ArrowLeft}5");
+		expect(code.value).toBe("4825");
+		expect(codeCells().map((cell) => cell.textContent)).toEqual([
+			"4",
+			"8",
+			"2",
+			"5",
+			"",
+			"",
+		]);
+	});
+
 	test("7 chiffres collés : les 6 premiers", async () => {
 		const { code, verify } = await pasteCode("1234567");
 		await expectSingleVerify(code, verify, "123456");
@@ -1228,6 +1282,8 @@ describe("popup : cadre et écrans d'accès", () => {
 		);
 		const error = await screen.findByText("Adresse email invalide.");
 		expect(error.className).toContain("bg-danger-soft");
+		// Hors de l'écran injoignable, le message reste visible.
+		expect(error.closest(".sr-only")).toBeNull();
 		expect(error.closest("[aria-live='polite']")).not.toBeNull();
 
 		await user.clear(screen.getByLabelText("Adresse email"));
@@ -1236,6 +1292,189 @@ describe("popup : cadre et écrans d'accès", () => {
 		const resent = await screen.findByText("Email renvoyé.");
 		expect(resent.className).toContain("bg-success-soft");
 		expect(resent.closest("[aria-live='polite']")).not.toBeNull();
+	});
+});
+
+/** Un compte d'essai avec ce plan et sans quota ni plafond. */
+function accountWith(overrides: Partial<Me>): Me {
+	return { ...trialMe, quotas: [], totalCap: null, ...overrides };
+}
+
+describe("popup : écran du compte", () => {
+	test("connecté (essai, 3) : email, étiquette account.scansLabel, badge « Essai », nombre « 3 »", async () => {
+		background({ "auth/state": () => signedIn() });
+		render(<App />);
+
+		const email = await screen.findByText("a@b.be");
+		expect(email.className).toContain("truncate");
+		expect(email.className).toContain("text-text-2");
+		const panel = document.querySelector<HTMLElement>("[data-quota]");
+		expect(panel?.className).toContain("bg-bg-2");
+		expect(panel?.className).toContain("rounded-md");
+		const scoped = within(panel as HTMLElement);
+		expect(scoped.getByText("Analyses IA restantes")).toBeTruthy();
+		expect(scoped.getByText("Essai").className).toContain("bg-accent-soft");
+		const count = scoped.getByText("3");
+		expect(count.hasAttribute("data-quota-count")).toBe(true);
+		expect(count.className).toContain("font-serif");
+		expect(count.className).toContain("text-[48px]");
+		expect(count.className).toContain("tabular-nums");
+	});
+
+	test("connecté illimité : badge plan.unlimited sans nombre", async () => {
+		background({
+			"auth/state": () =>
+				signedIn(accountWith({ role: "admin", plan: null, unlimited: true })),
+		});
+		render(<App />);
+
+		const badge = await screen.findByText("Administrateur · illimité");
+		expect(badge.className).toContain("bg-accent-soft");
+		expect(badge.closest("[data-quota]")).not.toBeNull();
+		expect(quotaCount()).toBeNull();
+		expect(screen.queryByText("Analyses IA restantes")).toBeNull();
+	});
+
+	test("sans abonnement : badge plan.none sans nombre", async () => {
+		background({
+			"auth/state": () => signedIn(accountWith({ plan: null })),
+		});
+		render(<App />);
+
+		const badge = await screen.findByText("Aucun abonnement actif");
+		expect(badge.className).toContain("bg-accent-soft");
+		expect(quotaCount()).toBeNull();
+		expect(screen.queryByText("Analyses IA restantes")).toBeNull();
+	});
+
+	test("aide : account.how avec la pastille miniature (logo et « Analyser ») rendue en nœuds, pas en HTML", async () => {
+		background({ "auth/state": () => signedIn() });
+		const user = userEvent.setup();
+		render(<App />);
+
+		const badge = (await screen.findByText("Analyser")).closest<HTMLElement>(
+			"[data-mini-badge]",
+		);
+		expect(badge).not.toBeNull();
+		expect(badge?.querySelector("svg")?.getAttribute("aria-hidden")).toBe(
+			"true",
+		);
+		// Logo statique : pas l'animation de chargement de la pastille.
+		expect(badge?.querySelector(".rq-logo--loading")).toBeNull();
+		const help = badge?.parentElement as HTMLElement;
+		expect(help.textContent).toBe(
+			"Ouvrez une annonce sur 2ememain, 2dehands ou Marketplace, puis cliquez sur Analyser à côté du titre.",
+		);
+		expect(help.innerHTML).not.toContain("{badge}");
+		expect(help.innerHTML).not.toContain("&lt;");
+
+		await user.click(screen.getByRole("button", { name: "NL" }));
+
+		const nl = (await screen.findByText("Analyseren")).closest<HTMLElement>(
+			"[data-mini-badge]",
+		);
+		expect(nl?.parentElement?.textContent).toBe(
+			"Open een advertentie op 2dehands, 2ememain of Marketplace en klik op Analyseren naast de titel.",
+		);
+	});
+
+	test("« Voir les formules » pointe vers {PUBLIC_URL}/pricing/?lang=fr (puis nl après bascule) et s'ouvre dans un nouvel onglet (target _blank, rel noopener noreferrer)", async () => {
+		background({ "auth/state": () => signedIn() });
+		const user = userEvent.setup();
+		render(<App />);
+
+		const pricing = await screen.findByRole("link", {
+			name: "Voir les formules",
+		});
+		expect(pricing.getAttribute("href")).toBe(`${PUBLIC_URL}/pricing/?lang=fr`);
+		expect(pricing.getAttribute("target")).toBe("_blank");
+		expect(pricing.getAttribute("rel")).toBe("noopener noreferrer");
+		expect(pricing.className).toContain("bg-white");
+
+		await user.click(screen.getByRole("button", { name: "NL" }));
+
+		const nl = await screen.findByRole("link", { name: "Formules bekijken" });
+		expect(nl.getAttribute("href")).toBe(`${PUBLIC_URL}/pricing/?lang=nl`);
+		expect(nl.getAttribute("target")).toBe("_blank");
+		expect(nl.getAttribute("rel")).toBe("noopener noreferrer");
+	});
+
+	test("barre d'actions fixe hors de la zone qui défile ; pied réduit à « Confidentialité »", async () => {
+		background({ "auth/state": () => signedIn() });
+		render(<App />);
+
+		const pricing = await screen.findByRole("link", {
+			name: "Voir les formules",
+		});
+		const signOut = screen.getByRole("button", { name: "Se déconnecter" });
+		const main = screen.getByRole("main");
+		expect(main.className).toContain("overflow-y-auto");
+		expect(main.contains(pricing)).toBe(false);
+		expect(main.contains(signOut)).toBe(false);
+		const bar = pricing.parentElement as HTMLElement;
+		expect(bar.contains(signOut)).toBe(true);
+		expect(bar.className).toContain("border-border-subtle");
+		expect(bar.className).toContain("shrink-0");
+		const footer = screen.getByRole("contentinfo");
+		expect(
+			within(footer)
+				.getAllByRole("link")
+				.map((link) => link.textContent),
+		).toEqual(["Confidentialité"]);
+	});
+
+	test("suppression dépliée : bouton plein danger, désactivé tant que le mot n'est pas tapé", async () => {
+		background({ "auth/state": () => signedIn() });
+		const user = userEvent.setup();
+		render(<App />);
+
+		const summary = await screen.findByText("Supprimer mon compte");
+		expect(summary.tagName).toBe("SUMMARY");
+		expect(summary.className).toContain("text-danger");
+		await user.click(summary);
+		expect(summary.closest("details")?.hasAttribute("open")).toBe(true);
+
+		const button = screen.getByRole("button", {
+			name: "Supprimer définitivement",
+		}) as HTMLButtonElement;
+		for (const token of [
+			"bg-danger",
+			"text-text-on-light",
+			"w-full",
+			"h-9",
+			"disabled:opacity-40",
+		])
+			expect(button.className).toContain(token);
+		expect(button.disabled).toBe(true);
+
+		await user.type(
+			screen.getByLabelText("Tapez SUPPRIMER pour confirmer"),
+			"SUPPRIMER",
+		);
+		expect(button.disabled).toBe(false);
+	});
+
+	test("suppression en échec : message sur bg-danger-soft", async () => {
+		background({
+			"auth/state": () => signedIn(),
+			"account/delete": () => fail("unavailable"),
+		});
+		const user = userEvent.setup();
+		render(<App />);
+		await user.type(
+			await screen.findByLabelText("Tapez SUPPRIMER pour confirmer"),
+			"SUPPRIMER",
+		);
+
+		await user.click(
+			screen.getByRole("button", { name: "Supprimer définitivement" }),
+		);
+
+		const failure = await screen.findByRole("alert");
+		expect(failure.textContent).toBe(
+			"La suppression a échoué, votre compte n'a pas été modifié. Réessayez.",
+		);
+		expect(failure.className).toContain("bg-danger-soft");
 	});
 });
 
@@ -1267,6 +1506,12 @@ describe("i18n", () => {
 			],
 			"code.title": ["Vérifiez vos emails", "Controleer je e-mail"],
 			"footer.pricing": ["Formules", "Formules"],
+			"account.how": [
+				"Ouvrez une annonce sur 2ememain, 2dehands ou Marketplace, puis cliquez sur {badge} à côté du titre.",
+				"Open een advertentie op 2dehands, 2ememain of Marketplace en klik op {badge} naast de titel.",
+			],
+			"account.scansLabel": ["Analyses IA restantes", "Resterende AI-analyses"],
+			"action.pricing": ["Voir les formules", "Formules bekijken"],
 			"app.unavailableTitle": ["Service injoignable", "Dienst onbereikbaar"],
 			"app.unavailableText": [
 				"Impossible de joindre Radarnaque. Vérifiez votre connexion, puis réessayez.",

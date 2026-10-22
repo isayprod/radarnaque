@@ -12,6 +12,7 @@ import { browser } from "wxt/browser";
 import { Logo } from "../../components/Logo";
 import { accessOf } from "../../lib/access";
 import { PUBLIC_URL } from "../../lib/config";
+import { contentText } from "../../lib/content-i18n";
 import { isValidEmail, normalizeEmail } from "../../lib/email";
 import { detectLocale, errorMessage, type MessageKey, t } from "../../lib/i18n";
 import { type AuthState, sendToBackground } from "../../lib/messages";
@@ -75,6 +76,10 @@ export default function App() {
 	const [resent, setResent] = useState(false);
 	// Compte supprimé : le message reste affiché sur l'écran de connexion.
 	const [deleted, setDeleted] = useState(false);
+	// Suppression en cours : la déconnexion attend (et inversement, `busy`), pour qu'une
+	// déconnexion ne passe pas pour un compte supprimé. Tenu ici : le bouton
+	// « Se déconnecter » est dans la barre d'actions, hors de l'écran du compte.
+	const [deleting, setDeleting] = useState(false);
 	const emailRef = useRef<HTMLInputElement>(null);
 	const codeRef = useRef<HTMLInputElement>(null);
 	// Seule la dernière demande d'état compte (le watch du stockage en lance aussi).
@@ -252,6 +257,7 @@ export default function App() {
 	}
 
 	async function onDeleted() {
+		setDeleting(false);
 		latestState.current++;
 		void pendingSignIn.setValue(null);
 		setMe(null);
@@ -412,13 +418,36 @@ export default function App() {
 					me={me}
 					locale={locale}
 					busy={busy}
-					onSignOut={onSignOut}
+					onDeletePendingChange={setDeleting}
 					onDeleted={onDeleted}
 					onSessionExpired={() => fail("session_expired")}
 				/>
 			) : null;
 			break;
 	}
+
+	// Barre d'actions de l'écran du compte : fixe, hors de la zone qui défile.
+	const actions =
+		view === "signedIn" && me ? (
+			<div className="flex shrink-0 items-center justify-between gap-3 border-t border-border-subtle px-4 py-3">
+				<a
+					href={`${PUBLIC_URL}/pricing/?lang=${locale}`}
+					target="_blank"
+					rel="noopener noreferrer"
+					className={WHITE_PILL_CLASS}
+				>
+					{tr("action.pricing")}
+				</a>
+				<button
+					type="button"
+					className={LINK_CLASS}
+					disabled={busy || deleting}
+					onClick={onSignOut}
+				>
+					{tr("action.signOut")}
+				</button>
+			</div>
+		) : null;
 
 	// Pied : « Formules » partout, sauf sur l'écran du compte (sa barre d'actions y mène).
 	const footerLinks: FooterLink[] = [
@@ -437,10 +466,16 @@ export default function App() {
 	return (
 		<div className="flex max-h-[600px] flex-col">
 			<PopupHeader locale={locale} onLocale={chooseLocale} />
-			{/* Seule la zone de contenu défile : l'en-tête et le pied restent fixes. */}
+			{/* Seule la zone de contenu défile : l'en-tête, la barre d'actions et le pied
+			    restent fixes. */}
 			<main className="min-h-0 flex-1 space-y-3.5 overflow-y-auto p-4">
 				{content}
-				<div aria-live="polite" className="space-y-2">
+				{/* Écran injoignable : son titre et sa phrase disent déjà l'erreur ; le
+				    message reste annoncé, mais n'est pas affiché une seconde fois. */}
+				<div
+					aria-live="polite"
+					className={view === "unavailable" ? "sr-only" : "space-y-2"}
+				>
 					{deleted && (
 						<p className={`${MESSAGE_CLASS} bg-success-soft`}>
 							{tr("delete.success")}
@@ -449,6 +484,7 @@ export default function App() {
 					{status}
 				</div>
 			</main>
+			{actions}
 			<PopupFooter links={footerLinks} />
 		</div>
 	);
@@ -550,67 +586,95 @@ function offerName(plan: string | null, locale: Locale): string {
 	}
 }
 
-/** « N analyses IA restantes », au singulier selon la langue (« 0 analyse » en FR). */
-function scansLeft(count: number, locale: Locale): string {
-	const one = new Intl.PluralRules(locale).select(count) === "one";
-	return t(locale, one ? "account.scansLeftOne" : "account.scansLeft").replace(
-		"{count}",
-		String(count),
+/** Badge de formule : `--accent-soft`, 22 px, texte blanc (4,5:1 au moins). */
+const PLAN_BADGE_CLASS =
+	"inline-flex h-[22px] shrink-0 items-center rounded-pill bg-accent-soft px-2.5 text-xs font-medium whitespace-nowrap text-text-1";
+
+/**
+ * La pastille « Analyser » de la fiche, en miniature et immobile (logo statique) :
+ * même verre, même bordure, même ombre. Son texte est celui de la vraie pastille.
+ */
+function MiniBadge({ locale }: { locale: Locale }) {
+	return (
+		<span
+			data-mini-badge=""
+			className="mx-0.5 inline-flex h-5 items-center gap-1 rounded-pill border border-white/12 bg-glass-host px-2 align-middle text-[11px] leading-none font-medium whitespace-nowrap text-text-1 shadow-[var(--shadow-pill)]"
+		>
+			<Logo size={12} className="shrink-0" />
+			{contentText(locale, "ai.launchShort")}
+		</span>
 	);
 }
 
+/** Aide fixe : `account.how`, dont `{badge}` devient la pastille miniature (un nœud). */
+function HowTo({ locale }: { locale: Locale }) {
+	const [before, after = ""] = t(locale, "account.how").split("{badge}");
+	return (
+		<p className={LEAD_CLASS}>
+			{before}
+			<MiniBadge locale={locale} />
+			{after}
+		</p>
+	);
+}
+
+/**
+ * Écran du compte : email, panneau du quota, aide, suppression repliée. La barre
+ * d'actions (formules, déconnexion) est rendue par `App`, hors de la zone qui défile.
+ */
 function Account({
 	me,
 	locale,
 	busy,
-	onSignOut,
+	onDeletePendingChange,
 	onDeleted,
 	onSessionExpired,
 }: {
 	me: Me;
 	locale: Locale;
 	busy: boolean;
-	onSignOut: () => void;
+	onDeletePendingChange: (pending: boolean) => void;
 	onDeleted: () => void;
 	onSessionExpired: () => void;
 }) {
-	// Suppression en cours : la déconnexion attend (et inversement, `busy`), pour qu'une
-	// déconnexion ne passe pas pour un compte supprimé.
-	const [deleting, setDeleting] = useState(false);
 	// Une seule analyse (`full`) : son quota, limité par le plafond de l'essai ;
 	// rien pour un compte illimité (admin, superuser) ou sans abonnement.
 	const access = accessOf(me);
 	const remaining = access.status === "active" ? access.remaining.scans : null;
 
 	return (
-		<div className="space-y-4">
-			<div className="space-y-1">
-				<p className="break-all text-sm text-slate-600">{me.email}</p>
-				<p className="inline-block rounded-full bg-brand-50 px-3 py-1 text-sm font-semibold text-brand-700">
-					{planName(me, locale)}
-				</p>
+		<>
+			<p className="truncate text-xs text-text-2" title={me.email}>
+				{me.email}
+			</p>
+			{/* Panneau du quota ; compte illimité ou sans abonnement : le badge seul. */}
+			<div data-quota="" className="space-y-2 rounded-md bg-bg-2 p-4">
+				<div className="flex items-start justify-between gap-3">
+					{remaining !== null && (
+						<p className="pt-0.5 text-xs font-medium text-text-2">
+							{t(locale, "account.scansLabel")}
+						</p>
+					)}
+					<span className={PLAN_BADGE_CLASS}>{planName(me, locale)}</span>
+				</div>
+				{remaining !== null && (
+					<p
+						data-quota-count=""
+						className="font-serif text-[48px] leading-none font-normal text-text-1 tabular-nums"
+					>
+						{remaining}
+					</p>
+				)}
 			</div>
-			{remaining !== null && (
-				<p className="rounded-lg border border-slate-200 px-3 py-2 text-sm tabular-nums">
-					{scansLeft(remaining, locale)}
-				</p>
-			)}
-			<button
-				type="button"
-				className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:opacity-60"
-				disabled={busy || deleting}
-				onClick={onSignOut}
-			>
-				{t(locale, "action.signOut")}
-			</button>
+			<HowTo locale={locale} />
 			<DeleteAccount
 				locale={locale}
 				disabled={busy}
-				onPendingChange={setDeleting}
+				onPendingChange={onDeletePendingChange}
 				onDeleted={onDeleted}
 				onSessionExpired={onSessionExpired}
 			/>
-		</div>
+		</>
 	);
 }
 
@@ -672,16 +736,16 @@ function DeleteAccount({
 	}
 
 	return (
-		<details className="rounded-lg border border-slate-200 px-3 py-2">
-			<summary className="cursor-pointer text-sm font-medium text-slate-700">
+		<details className="rounded-md border border-border-subtle px-3 py-2.5">
+			<summary className="cursor-pointer rounded-xs text-[13px] font-medium text-danger focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden">
 				{t(locale, "delete.title")}
 			</summary>
 			<form className="mt-3 space-y-3" noValidate onSubmit={onSubmit}>
-				<p className="text-xs text-slate-600">
+				<p className="text-xs leading-[1.45] text-text-2">
 					{t(locale, "delete.explanation")}
 				</p>
-				<div className="space-y-1">
-					<label className="text-sm font-medium" htmlFor="delete-confirm">
+				<div className="space-y-1.5">
+					<label className={LABEL_CLASS} htmlFor="delete-confirm">
 						{t(locale, "delete.prompt")}
 					</label>
 					<input
@@ -696,9 +760,11 @@ function DeleteAccount({
 						onChange={(event) => setTyped(event.target.value)}
 					/>
 				</div>
+				{/* Seul bouton plein rouge de la popup (DESIGN.md §3) ; texte sombre :
+				    le blanc n'atteint pas 4,5:1 sur `--danger`. */}
 				<button
 					type="submit"
-					className="w-full rounded-lg bg-red-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+					className="h-9 w-full cursor-pointer rounded-sm bg-danger px-4 text-sm font-semibold text-text-on-light hover:brightness-110 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100"
 					disabled={!confirmed || pending || disabled}
 				>
 					{pending
@@ -706,7 +772,7 @@ function DeleteAccount({
 						: t(locale, "delete.submit")}
 				</button>
 				{failedCode && (
-					<p role="alert" className="text-sm text-red-700">
+					<p role="alert" className={`${MESSAGE_CLASS} bg-danger-soft`}>
 						{deleteFailure(locale, failedCode)}
 					</p>
 				)}
