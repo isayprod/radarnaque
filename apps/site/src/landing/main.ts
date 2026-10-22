@@ -9,7 +9,7 @@ import type { Locale } from "@radarnaque/shared";
 import { toDom } from "../h.ts";
 import { fetchOffer, type Offer, parseOffer } from "../offer.ts";
 import { startSky } from "./gradient.ts";
-import { planPanelNode } from "./render.ts";
+import { planPanelNode } from "./plan-panel.ts";
 
 const PLAN_KEYS = ["trial", "standard", "premium"] as const;
 

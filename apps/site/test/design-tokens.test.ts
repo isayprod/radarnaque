@@ -131,6 +131,8 @@ describe("garde-fou des tokens du site", () => {
 				"src/layout.css",
 				"src/landing/landing.css",
 				"src/landing/render.ts",
+				"src/landing/plan-panel.ts",
+				"src/privacy-i18n.ts",
 				"index.html",
 				"nl/index.html",
 				"pricing/index.html",

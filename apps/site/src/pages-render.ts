@@ -8,12 +8,11 @@ import {
 	PLANS,
 	type PlanText,
 	PRICING,
-	PRIVACY,
 	PRIVACY_EMAIL,
-	PRIVACY_ORDER,
 	PRIVACY_RETENTION_MONTHS,
 } from "./pages-i18n";
 import { featureLines } from "./plan-lines";
+import { PRIVACY, PRIVACY_ORDER } from "./privacy-i18n";
 
 // All text goes through textContent / text nodes, never innerHTML.
 
