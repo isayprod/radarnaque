@@ -28,6 +28,7 @@
 
 	--color-glass: var(--glass-bg);
 	--color-glass-strong: var(--glass-bg-strong);
+	--color-glass-host: var(--glass-bg-host);
 
 	--radius-xs: var(--r-xs);
 	--radius-s: var(--r-s);

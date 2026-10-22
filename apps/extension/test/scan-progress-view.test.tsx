@@ -180,6 +180,18 @@ describe("ScanProgressView", () => {
 		expect(container.textContent).toContain("<img src=x onerror=alert(1)>");
 	});
 
+	test("contraste : temps écoulé et corps de la réflexion en text-text-2, jamais text-text-3", () => {
+		const { container } = render(
+			<ScanProgressView progress={sample} locale="fr" live />,
+		);
+		const time = screen.getAllByText("0 s")[0];
+		expect(time?.classList.contains("text-text-2")).toBe(true);
+		expect(screen.getByText("Le prix suit le marché.").className).toContain(
+			"text-text-2",
+		);
+		expect(container.innerHTML).not.toContain("text-text-3");
+	});
+
 	test("tokens du design : plus aucune couleur slate ; replié, le déroulé se range à droite", () => {
 		const { container } = render(
 			<ScanProgressView progress={sample} locale="fr" live={false} />,

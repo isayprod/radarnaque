@@ -78,6 +78,7 @@ describe("CardBadge", () => {
 			...PILL_CLASS.split(" "),
 			"h-[22px]",
 			"min-w-[22px]",
+			"bg-glass-host",
 			"text-[11px]",
 			"font-medium",
 		])
@@ -219,7 +220,7 @@ describe("CardBadge", () => {
 		const tooltip = screen.getByRole("tooltip", { hidden: true });
 		expect(tooltip.className).not.toContain("2147483647");
 		expect(tooltip.classList.contains("z-[2147483000]")).toBe(true);
-		expect(tooltip.classList.contains("bg-glass-strong")).toBe(true);
+		expect(tooltip.classList.contains("bg-glass-host")).toBe(true);
 		expect(tooltip.classList.contains("w-[260px]")).toBe(true);
 		expect(tooltip.classList.contains("rounded-[var(--r-s)]")).toBe(true);
 		expect(document.body.innerHTML).not.toContain("2147483647");

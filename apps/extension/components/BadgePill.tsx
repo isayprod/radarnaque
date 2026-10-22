@@ -20,13 +20,14 @@ import { LEVEL_KEY, LEVEL_STYLE } from "./risk-styles";
 type Access = AiScan["access"];
 
 /**
- * Surface de la pilule (tableau des valeurs du spec) : verre sombre et flou si
+ * Surface de la pilule (tableau des valeurs du spec) : verre sombre des pages
+ * tierces (`--glass-bg-host`, presque opaque pour le contraste) et flou si
  * disponible, bordure blanche à 12 %, ombre de la pilule primaire, Inter poids 500
  * en blanc, anneau de focus au clavier. Sans taille : chaque usage donne la sienne
  * (28 px pour la fiche, 22 px pour les cartes).
  */
 export const PILL_CLASS =
-	"inline-flex items-center rounded-pill border border-white/12 bg-glass-strong font-sans font-medium whitespace-nowrap text-text-1 no-underline shadow-[var(--shadow-pill)] supports-[backdrop-filter]:backdrop-blur-[18px] focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
+	"inline-flex items-center rounded-pill border border-white/12 bg-glass-host font-sans font-medium whitespace-nowrap text-text-1 no-underline shadow-[var(--shadow-pill)] supports-[backdrop-filter]:backdrop-blur-[18px] focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
 
 // Pilule de la fiche : 28 px de haut, au plus 340 px de large (seule la ligne
 // d'état ou le message se tronquent), texte 13 px.
@@ -204,7 +205,7 @@ export function BadgePill({
 				/>
 				<span id={levelId}>{contentText(locale, LEVEL_KEY[shown.level])}</span>
 				<span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-white/12" />
-				<span id={scoreId} className="text-text-3 tabular-nums">
+				<span id={scoreId} className="text-text-2 tabular-nums">
 					{shown.score}/100
 				</span>
 			</button>

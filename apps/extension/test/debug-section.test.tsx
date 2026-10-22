@@ -59,6 +59,18 @@ describe("DebugSection", () => {
 		);
 	});
 
+	test("contraste : les libellés dt en text-text-2, jamais text-text-3", () => {
+		const { container } = renderSection();
+		const labels = [...container.querySelectorAll("dt")];
+		expect(labels.length).toBeGreaterThan(0);
+		for (const dt of labels) {
+			expect(dt.classList.contains("text-text-2"), dt.textContent ?? "").toBe(
+				true,
+			);
+			expect(dt.classList.contains("text-text-3")).toBe(false);
+		}
+	});
+
 	test("fournisseur, modèle, prompt, appel LLM, cache, tokens et coût", () => {
 		const { container } = renderSection();
 		expect(shownValue(container, "provider / model")?.textContent).toBe(

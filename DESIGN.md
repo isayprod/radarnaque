@@ -87,6 +87,7 @@ Define as CSS custom properties in one shared file consumed by all surfaces (lan
   /* Glass (translucent surfaces over gradient or navy) */
   --glass-bg: rgba(8, 23, 74, 0.62);
   --glass-bg-strong: rgba(3, 16, 51, 0.82);
+  --glass-bg-host: rgba(3, 16, 51, 0.96); /* surfaces injected into third-party pages */
   --glass-blur: 18px;
 
   /* Lines */
@@ -297,6 +298,7 @@ For badges, tooltips or panels the extension injects into third-party pages:
 - Render inside a **Shadow DOM** root with `all: initial` on the host to block page CSS in both directions. Load the token file inside the shadow root.
 - The in-page badge shows the AI analysis only.
 - Default form: a compact glass pill (height 24 to 28px, `--r-pill`, `text-xs`/500) with the semantic dot and a short label. Click expands a small glass card (max 320px wide) with the detail and a link to open the popup or dashboard.
+- Every injected surface (page pill, panel, result-card icon and its tooltip) uses `--glass-bg-host` (`bg-glass-host`), not `--glass-bg-strong`: over a white host page the 82 % glass lightens too much and `--text-3` falls under 4.5:1. Text the user reads in these surfaces (score "/100", footer mentions, step times, remaining scans, debug labels) is `--text-2`; `--text-3` stays for purely decorative marks and disabled controls.
 - Never shift the host page layout; position absolutely or use an overlay layer. `z-index` 2 147 483 000 for the pill and its panels, never `2147483647`.
 - Never mimic the host site's UI or branding. The injected UI must be recognisably ours.
 - Provide a per-site "hide on this site" control.

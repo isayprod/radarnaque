@@ -149,7 +149,7 @@ export function DebugSection({
 			<dl className="m-0 mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
 				{linesOf(debug).map(({ label, value, title }) => (
 					<Fragment key={label}>
-						<dt className="text-text-3">{label}</dt>
+						<dt className="text-text-2">{label}</dt>
 						<dd className="m-0 break-all" title={title}>
 							{value}
 						</dd>

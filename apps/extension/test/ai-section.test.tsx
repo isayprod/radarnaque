@@ -260,7 +260,9 @@ describe("AiSection : analyse", () => {
 
 	test("remaining : les analyses restantes du résultat", () => {
 		setup({ ai: done({ ...result, remaining: { scans: 7 } }) });
-		expect(screen.getByText("Analyses restantes : 7")).not.toBeNull();
+		const line = screen.getByText("Analyses restantes : 7");
+		// Texte à lire : --text-2 (contraste sur le verre des pages tierces).
+		expect(line.classList.contains("text-text-2")).toBe(true);
 	});
 
 	test("remaining à null : aucun texte « restantes »", () => {
@@ -500,7 +502,7 @@ describe("AiSection : design du panneau", () => {
 			expect(classesOf(score).has(name), name).toBe(true);
 		const outOf = score.nextElementSibling;
 		expect(outOf?.textContent).toBe("/100");
-		expect(classesOf(outOf).has("text-text-3")).toBe(true);
+		expect(classesOf(outOf).has("text-text-2")).toBe(true);
 
 		const verdict = screen.getByText("Risque élevé").closest("[data-verdict]");
 		if (!verdict) throw new Error("badge de verdict attendu");
@@ -607,7 +609,7 @@ describe("AiSection : design du panneau", () => {
 		expect(classesOf(details).has("ml-auto")).toBe(true);
 	});
 
-	test("mentions cache, partiel, sans photo : dans le pied, en 12 px text-text-3", () => {
+	test("mentions cache, partiel, sans photo : dans le pied, en 12 px text-text-2 (contraste)", () => {
 		const { container } = setup({
 			ai: done({
 				...result,
@@ -620,7 +622,7 @@ describe("AiSection : design du panneau", () => {
 		for (const key of ["ai.fromCache", "ai.partial", "ai.noPhoto"] as const) {
 			const el = screen.getByText(contentText("fr", key));
 			expect(footer?.contains(el), key).toBe(true);
-			expect(classesOf(el).has("text-text-3"), key).toBe(true);
+			expect(classesOf(el).has("text-text-2"), key).toBe(true);
 			expect(classesOf(el).has("text-[12px]"), key).toBe(true);
 		}
 	});
