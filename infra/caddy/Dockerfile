@@ -18,6 +18,12 @@ RUN pnpm install --frozen-lockfile --filter site... --filter admin...
 # Identifiant de l'extension compilé dans la page /auth/callback.
 ARG VITE_EXTENSION_ID
 ENV VITE_EXTENSION_ID=$VITE_EXTENSION_ID
+# Landing : lien du Chrome Web Store (vide : « Bientôt disponible ») et origine publique
+# des adresses absolues (canonical, hreflang, Open Graph).
+ARG VITE_CHROME_STORE_URL
+ENV VITE_CHROME_STORE_URL=$VITE_CHROME_STORE_URL
+ARG VITE_PUBLIC_URL
+ENV VITE_PUBLIC_URL=$VITE_PUBLIC_URL
 RUN pnpm --filter site build
 RUN pnpm --filter admin build
 

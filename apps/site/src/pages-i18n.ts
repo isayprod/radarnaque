@@ -1,5 +1,5 @@
 import type { Locale } from "@radarnaque/shared";
-import type { Offer } from "./offer";
+import type { Offer } from "./offer.ts";
 
 /** Offre de secours (centimes, TVA comprise) : affichée tant que `GET /api/offer` n'a pas répondu, ou s'il échoue. */
 export const PLANS: Offer = {

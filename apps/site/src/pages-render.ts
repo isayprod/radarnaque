@@ -5,7 +5,6 @@ import type { Offer, OfferPlan } from "./offer";
 import {
 	fill,
 	formatCents,
-	formatInt,
 	PLANS,
 	type PlanText,
 	PRICING,
@@ -14,6 +13,7 @@ import {
 	PRIVACY_ORDER,
 	PRIVACY_RETENTION_MONTHS,
 } from "./pages-i18n";
+import { featureLines } from "./plan-lines";
 
 // All text goes through textContent / text nodes, never innerHTML.
 
@@ -43,29 +43,6 @@ function layout(
 	const header = el(doc, "header", undefined, "site-header");
 	header.append(toDom(doc, navNode(locale, page)));
 	root.replaceChildren(header, main, toDom(doc, footerNode(locale)));
-}
-
-/** Lignes d'une carte : quota, photos, bouton, puis icônes seulement si le plan les a. */
-function featureLines(
-	text: PlanText,
-	plan: OfferPlan,
-	locale: Locale,
-	quota: "scansTotal" | "scansMonth",
-): string[] {
-	const f = text.features;
-	const photos =
-		plan.maxImages === 0
-			? f.photosNone
-			: plan.maxImages === 1
-				? f.photosOne
-				: fill(f.photosMany, { photos: formatInt(plan.maxImages, locale) });
-	const lines = [
-		fill(f[quota] ?? "", { scans: formatInt(plan.scans, locale) }),
-		photos,
-		f.button,
-	];
-	if (plan.cardIcons) lines.push(f.icons);
-	return lines;
 }
 
 function planCard(

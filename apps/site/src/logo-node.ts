@@ -1,6 +1,6 @@
 /** Le logo en arbre `h`, à part de layout.ts : /auth/callback l'emploie sans les textes du site. */
 import { LOGO } from "@radarnaque/design/logo";
-import { h, type VNode } from "./h";
+import { h, type VNode } from "./h.ts";
 
 /**
  * Le logo construit depuis `LOGO` : même structure, mêmes attributs et mêmes
