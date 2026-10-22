@@ -64,26 +64,73 @@ export function activeIn(element: Element): Element | null {
 }
 
 /**
+ * Vrai si plus rien n'a le focus dans le document de `element` : seul cas où la
+ * pilule le reprend, jamais pris à un autre élément. Le navigateur laisse alors
+ * `document.activeElement` sur `body` (null sans `body`), en light DOM comme en
+ * Shadow DOM (vu dans Chrome 155). happy-dom, l'environnement des tests, laisse
+ * après la suppression de l'élément focalisé d'un shadow root l'hôte actif,
+ * avec un `activeElement` null dans le shadow root : c'est aussi un focus
+ * perdu. L'hôte de la pastille n'est pas focalisable lui-même : actif, c'est
+ * qu'un élément de son arbre a le focus, et le shadow root le donne alors
+ * comme `activeElement`.
+ */
+function focusLost(element: Element): boolean {
+	const { activeElement, body } = element.ownerDocument;
+	if (activeElement === null || activeElement === body) return true;
+	const root = element.getRootNode();
+	return (
+		root instanceof ShadowRoot &&
+		root.activeElement === null &&
+		activeElement === root.host
+	);
+}
+
+/**
  * Garde le focus sur la pilule quand elle change d'élément : le bouton devient
  * une pilule d'erreur (`span`), son action disparaît (accès relu à 0), ou
  * « Relancer » laisse place au bouton de l'analyse en cours. Le navigateur
  * mettrait sinon le focus sur `body`. Seulement si la pilule avait le focus :
  * jamais volé à la page hôte ni au panneau.
+ *
+ * Quand React retire l'élément focalisé, les navigateurs diffèrent :
+ * - Firefox (et happy-dom) suivent le spec : aucun événement. Le dernier
+ *   `focusin` laisse `focusedRef` vrai.
+ * - Chromium émet `blur` puis `focusout` (qui remonte jusqu'au conteneur) sur
+ *   l'élément encore attaché, sans `relatedTarget`, avant de le détacher, en
+ *   light DOM comme en Shadow DOM. `focusedRef` repasse à faux ; l'élément est
+ *   retenu dans `lostFromRef`, et le trouver détaché au rendu qui suit dit que
+ *   c'était une suppression.
+ * Un `focusout` sans `relatedTarget` vient aussi d'une fenêtre ou d'un onglet
+ * quitté, ou d'un clic hors de tout élément focalisable : l'élément reste
+ * attaché, le focus n'est pas repris. La suppression, son `focusout` et l'effet
+ * de mise en page ont lieu dans le même commit : l'élément retenu est oublié à
+ * la micro-tâche suivante, pour qu'une suppression bien plus tard (fenêtre
+ * quittée, où Chromium n'émet plus rien) ne reprenne pas le focus.
  */
 function useKeepPillFocus(container: RefObject<HTMLSpanElement | null>) {
-	// Vrai tant que le focus est dans la pilule. Un élément retiré du DOM ne
-	// remonte pas son `focusout` jusqu'au conteneur : le drapeau reste vrai.
+	// Vrai tant que le focus est dans la pilule (et après une suppression sans
+	// événement, comme dans Firefox).
 	const focusedRef = useRef(false);
+	// Élément de la pilule qui a perdu le focus sans `relatedTarget` (Chromium).
+	const lostFromRef = useRef<Node | null>(null);
 	useEffect(() => {
 		const element = container.current;
 		if (!element) return;
 		const onFocusIn = () => {
 			focusedRef.current = true;
+			lostFromRef.current = null;
 		};
 		const onFocusOut = (event: FocusEvent) => {
 			const next = event.relatedTarget;
 			if (next instanceof Node && element.contains(next)) return;
 			focusedRef.current = false;
+			const from =
+				next === null && event.target instanceof Node ? event.target : null;
+			lostFromRef.current = from;
+			if (from)
+				queueMicrotask(() => {
+					if (lostFromRef.current === from) lostFromRef.current = null;
+				});
 		};
 		element.addEventListener("focusin", onFocusIn);
 		element.addEventListener("focusout", onFocusOut);
@@ -95,10 +142,16 @@ function useKeepPillFocus(container: RefObject<HTMLSpanElement | null>) {
 	// Après chaque rendu : le focus a-t-il quitté une pilule qui l'avait ?
 	useLayoutEffect(() => {
 		const element = container.current;
-		if (!focusedRef.current || !element) return;
-		const active = activeIn(element);
-		if (active && element.contains(active)) return;
-		if (!focusPill(element)) focusedRef.current = false;
+		const lost = lostFromRef.current;
+		lostFromRef.current = null;
+		if (!element) return;
+		if (!focusedRef.current && !(lost && !lost.isConnected)) return;
+		if (!focusLost(element)) {
+			const active = activeIn(element);
+			focusedRef.current = active !== null && element.contains(active);
+			return;
+		}
+		focusedRef.current = focusPill(element);
 	});
 }
 
