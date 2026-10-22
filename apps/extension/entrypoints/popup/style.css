@@ -1,22 +1,21 @@
 @import "tailwindcss";
+/* Tokens (hors de toute couche : voir theme.css), utilités Tailwind qui les relient,
+   animations partagées (squelette, mouvement réduit) et polices embarquées. */
+@import "@radarnaque/design/tokens.css";
+@import "@radarnaque/design/theme.css";
+@import "@radarnaque/design/motion.css";
+@import "@radarnaque/design/fonts.css";
 
-@theme {
-	--color-brand-50: #f1f5ff;
-	--color-brand-600: #4f46e5;
-	--color-brand-700: #4338ca;
-	--font-sans:
-		system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-		sans-serif;
-}
-
+/* Popup de 380 px de large ; la hauteur suit le contenu, 600 px au plus (App.tsx). */
 html,
 body {
 	margin: 0;
-	background: #fff;
-	color: #0f172a;
+	background: var(--bg-0);
+	color: var(--text-1);
 }
 
 body {
-	width: 360px;
+	width: 380px;
 	font-family: var(--font-sans);
+	-webkit-font-smoothing: antialiased;
 }

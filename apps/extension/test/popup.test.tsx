@@ -1,11 +1,18 @@
 import type { Me } from "@radarnaque/shared";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+	cleanup,
+	render,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { browser } from "wxt/browser";
 import { fakeBrowser } from "wxt/testing/fake-browser";
 import App from "../entrypoints/popup/App";
-import { detectLocale, dictionaries, t } from "../lib/i18n";
+import { PUBLIC_URL } from "../lib/config";
+import { detectLocale, dictionaries, type MessageKey, t } from "../lib/i18n";
 import type { BgRequest, BgResponse } from "../lib/messages";
 import { localePref, pendingSignIn, sessionToken } from "../lib/storage";
 import { superuserMe, trialMe } from "./helpers";
@@ -939,6 +946,299 @@ describe("popup", () => {
 	});
 });
 
+/** Passe l'écran de connexion : email « a@b.be » envoyé, champ du code affiché. */
+async function toCodeStep(user: ReturnType<typeof userEvent.setup>) {
+	await user.type(await screen.findByLabelText("Adresse email"), "a@b.be");
+	await user.click(
+		screen.getByRole("button", { name: "Recevoir mon lien de connexion" }),
+	);
+	return (await screen.findByLabelText(
+		"Code à 6 chiffres",
+	)) as HTMLInputElement;
+}
+
+/** Les six cases décoratives du code, dans l'ordre. */
+function codeCells(): HTMLElement[] {
+	return [...document.querySelectorAll<HTMLElement>("[data-code-cell]")];
+}
+
+describe("popup : cadre et écrans d'accès", () => {
+	test("en-tête : logo, « Radarnaque », FR/NL en aria-pressed", async () => {
+		background({ "auth/state": () => signedOut });
+		render(<App />);
+		await screen.findByLabelText("Adresse email");
+
+		const header = screen.getByRole("banner");
+		expect(
+			within(header).getByRole("heading", { name: "Radarnaque" }),
+		).toBeTruthy();
+		const logo = header.querySelector("svg");
+		expect(logo?.getAttribute("aria-hidden")).toBe("true");
+		expect(logo?.getAttribute("width")).toBe("22");
+		expect(header.querySelector("img")).toBeNull();
+		expect(
+			within(header)
+				.getByRole("button", { name: "FR" })
+				.getAttribute("aria-pressed"),
+		).toBe("true");
+		expect(
+			within(header)
+				.getByRole("button", { name: "NL" })
+				.getAttribute("aria-pressed"),
+		).toBe("false");
+		expect(within(header).getByRole("group", { name: "Langue" })).toBeTruthy();
+	});
+
+	test("chargement : squelette visible, « Chargement… » lisible par les lecteurs d'écran seulement", async () => {
+		// L'état n'arrive jamais : la popup reste sur le chargement.
+		sendToBackground.mockImplementation(() => new Promise(() => {}));
+		render(<App />);
+
+		const text = await screen.findByText("Chargement…");
+		expect(text.classList.contains("sr-only")).toBe(true);
+		const bones = document.querySelectorAll(".rq-skeleton");
+		expect(bones).toHaveLength(3);
+		for (const bone of bones) {
+			expect(bone.className).toContain("bg-bg-3");
+			expect(bone.closest("[aria-hidden='true']")).not.toBeNull();
+		}
+	});
+
+	test("déconnecté : titre signin.title, phrase signin.lead, note signin.note, pilule « Recevoir mon lien de connexion », liens Confidentialité et Formules", async () => {
+		background({ "auth/state": () => signedOut });
+		render(<App />);
+		await screen.findByLabelText("Adresse email");
+
+		expect(
+			screen.getByRole("heading", {
+				level: 2,
+				name: "Repérez les arnaques avant de payer",
+			}),
+		).toBeTruthy();
+		expect(
+			screen.getByText(
+				"Connectez-vous pour analyser les annonces de 2ememain, 2dehands et Marketplace.",
+			),
+		).toBeTruthy();
+		expect(
+			screen.getByText(
+				"Un lien et un code vous sont envoyés par email. Pas de mot de passe.",
+			),
+		).toBeTruthy();
+		const pill = screen.getByRole("button", {
+			name: "Recevoir mon lien de connexion",
+		});
+		expect(pill.className).toContain("bg-white");
+		expect(pill.className).toContain("w-full");
+		const footer = screen.getByRole("contentinfo");
+		const privacy = within(footer).getByRole("link", {
+			name: "Confidentialité",
+		});
+		expect(privacy.getAttribute("href")).toBe(`${PUBLIC_URL}/privacy/?lang=fr`);
+		const pricing = within(footer).getByRole("link", { name: "Formules" });
+		expect(pricing.getAttribute("href")).toBe(`${PUBLIC_URL}/pricing/?lang=fr`);
+		for (const link of [privacy, pricing]) {
+			expect(link.getAttribute("target")).toBe("_blank");
+			expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+		}
+	});
+
+	test("déconnecté en NL : textes flamands du spec et liens en ?lang=nl", async () => {
+		await localePref.setValue("nl");
+		background({ "auth/state": () => signedOut });
+		render(<App />);
+		await screen.findByLabelText("E-mailadres");
+
+		expect(
+			screen.getByRole("heading", {
+				level: 2,
+				name: "Herken oplichting vóór je betaalt",
+			}),
+		).toBeTruthy();
+		const footer = screen.getByRole("contentinfo");
+		expect(
+			within(footer)
+				.getByRole("link", { name: "Formules" })
+				.getAttribute("href"),
+		).toBe(`${PUBLIC_URL}/pricing/?lang=nl`);
+		expect(
+			within(footer)
+				.getByRole("link", { name: "Privacy" })
+				.getAttribute("href"),
+		).toBe(`${PUBLIC_URL}/privacy/?lang=nl`);
+	});
+
+	test("code envoyé : titre code.title, un seul champ de saisie, six cases aria-hidden qui reflètent « 482 »", async () => {
+		background({ "auth/state": () => signedOut, "auth/start": () => ok(null) });
+		const user = userEvent.setup();
+		render(<App />);
+		const code = await toCodeStep(user);
+
+		expect(
+			screen.getByRole("heading", { level: 2, name: "Vérifiez vos emails" }),
+		).toBeTruthy();
+		expect(screen.getAllByRole("textbox")).toEqual([code]);
+		expect(code.getAttribute("inputmode")).toBe("numeric");
+		expect(code.getAttribute("autocomplete")).toBe("one-time-code");
+
+		await user.type(code, "482");
+
+		const cells = codeCells();
+		expect(cells).toHaveLength(6);
+		expect(cells.map((cell) => cell.textContent)).toEqual([
+			"4",
+			"8",
+			"2",
+			"",
+			"",
+			"",
+		]);
+		for (const cell of cells)
+			expect(cell.closest("[aria-hidden='true']")).not.toBeNull();
+		// Le champ a le focus : la case courante (la 4e) porte l'anneau de focus.
+		expect(document.activeElement).toBe(code);
+		expect(cells[3]?.className).toContain("--focus-ring");
+		expect(cells[2]?.className).not.toContain("--focus-ring");
+	});
+
+	test("code envoyé : l'anneau de la case courante suit le focus du champ", async () => {
+		background({ "auth/state": () => signedOut, "auth/start": () => ok(null) });
+		const user = userEvent.setup();
+		render(<App />);
+		const code = await toCodeStep(user);
+
+		expect(codeCells()[0]?.className).toContain("--focus-ring");
+		await user.tab();
+		expect(document.activeElement).not.toBe(code);
+		expect(
+			codeCells().some((cell) => cell.className.includes("--focus-ring")),
+		).toBe(false);
+	});
+
+	test("code collé « 123 456 » : une seule vérification avec « 123456 »", async () => {
+		background({
+			"auth/state": () => signedOut,
+			"auth/start": () => ok(null),
+			"auth/verify-otp": () => fail("invalid_otp"),
+		});
+		const user = userEvent.setup();
+		render(<App />);
+		await user.click(await toCodeStep(user));
+
+		await user.paste("123 456");
+
+		await waitFor(() =>
+			expect(requestsOf("auth/verify-otp")).toEqual([
+				{ type: "auth/verify-otp", email: "a@b.be", otp: "123456" },
+			]),
+		);
+		await screen.findByText(
+			"Code incorrect ou expiré. Vérifiez-le ou demandez un nouvel email.",
+		);
+		expect(requestsOf("auth/verify-otp")).toHaveLength(1);
+		// Le champ garde son étiquette ; vidé après l'échec, les cases aussi.
+		expect(screen.getByLabelText("Code à 6 chiffres")).toBeTruthy();
+		expect(codeCells().map((cell) => cell.textContent)).toEqual(
+			Array(6).fill(""),
+		);
+	});
+
+	/** Colle `pasted` dans le champ du code ; la vérification reste en attente. */
+	async function pasteCode(pasted: string) {
+		background({
+			"auth/state": () => signedOut,
+			"auth/start": () => ok(null),
+		});
+		const verify = vi.fn();
+		const base = sendToBackground.getMockImplementation();
+		sendToBackground.mockImplementation((req) => {
+			if (req.type === "auth/verify-otp") {
+				verify(req);
+				return new Promise(() => {});
+			}
+			return base ? base(req) : Promise.reject(new Error("inattendu"));
+		});
+		const user = userEvent.setup();
+		render(<App />);
+		const code = await toCodeStep(user);
+		await user.click(code);
+		await user.paste(pasted);
+		return { code, verify };
+	}
+
+	/** Une seule vérification avec `otp` ; les cases reflètent le champ pendant l'envoi. */
+	async function expectSingleVerify(
+		code: HTMLInputElement,
+		verify: ReturnType<typeof vi.fn>,
+		otp: string,
+	) {
+		await waitFor(() => expect(verify).toHaveBeenCalledTimes(1));
+		expect(verify).toHaveBeenCalledWith({
+			type: "auth/verify-otp",
+			email: "a@b.be",
+			otp,
+		});
+		expect(code.value).toBe(otp);
+		expect(codeCells().map((cell) => cell.textContent)).toEqual([...otp]);
+		expect(await screen.findByText("Vérification…")).toBeTruthy();
+		expect(screen.getByLabelText("Code à 6 chiffres")).toBe(code);
+	}
+
+	test("7 chiffres collés : les 6 premiers", async () => {
+		const { code, verify } = await pasteCode("1234567");
+		await expectSingleVerify(code, verify, "123456");
+	});
+
+	test.each([["123-456"], ["code : 12a34b56"]])(
+		"code collé « %s » : une seule vérification avec « 123456 »",
+		async (pasted) => {
+			const { code, verify } = await pasteCode(pasted);
+			await expectSingleVerify(code, verify, "123456");
+		},
+	);
+
+	test("injoignable : titre app.unavailableTitle, phrase app.unavailableText, pilule « Réessayer »", async () => {
+		background({ "auth/state": () => fail("network") });
+		render(<App />);
+
+		expect(
+			await screen.findByRole("heading", {
+				level: 2,
+				name: "Service injoignable",
+			}),
+		).toBeTruthy();
+		expect(
+			screen.getByText(
+				"Impossible de joindre Radarnaque. Vérifiez votre connexion, puis réessayez.",
+			),
+		).toBeTruthy();
+		const retry = screen.getByRole("button", { name: "Réessayer" });
+		expect(retry.className).toContain("bg-white");
+		expect(retry.className).toContain("w-full");
+	});
+
+	test("zone de messages : erreur sur bg-danger-soft, confirmation sur bg-success-soft, région aria-live", async () => {
+		background({ "auth/state": () => signedOut, "auth/start": () => ok(null) });
+		const user = userEvent.setup();
+		render(<App />);
+
+		await user.type(await screen.findByLabelText("Adresse email"), "x");
+		await user.click(
+			screen.getByRole("button", { name: "Recevoir mon lien de connexion" }),
+		);
+		const error = await screen.findByText("Adresse email invalide.");
+		expect(error.className).toContain("bg-danger-soft");
+		expect(error.closest("[aria-live='polite']")).not.toBeNull();
+
+		await user.clear(screen.getByLabelText("Adresse email"));
+		await toCodeStep(user);
+		await user.click(screen.getByRole("button", { name: "Renvoyer l'email" }));
+		const resent = await screen.findByText("Email renvoyé.");
+		expect(resent.className).toContain("bg-success-soft");
+		expect(resent.closest("[aria-live='polite']")).not.toBeNull();
+	});
+});
+
 describe("i18n", () => {
 	test("fr and nl dictionaries have identical keys", () => {
 		expect(Object.keys(dictionaries.nl).sort()).toEqual(
@@ -948,6 +1248,34 @@ describe("i18n", () => {
 			for (const value of Object.values(dictionaries[locale])) {
 				expect(value.trim()).not.toBe("");
 			}
+		}
+	});
+
+	test("parité FR/NL des nouvelles clés de la popup (spec popup §4)", () => {
+		const expected: Record<string, [string, string]> = {
+			"signin.title": [
+				"Repérez les arnaques avant de payer",
+				"Herken oplichting vóór je betaalt",
+			],
+			"signin.lead": [
+				"Connectez-vous pour analyser les annonces de 2ememain, 2dehands et Marketplace.",
+				"Meld je aan om advertenties op 2dehands, 2ememain en Marketplace te analyseren.",
+			],
+			"signin.note": [
+				"Un lien et un code vous sont envoyés par email. Pas de mot de passe.",
+				"Je krijgt een link en een code per e-mail. Geen wachtwoord.",
+			],
+			"code.title": ["Vérifiez vos emails", "Controleer je e-mail"],
+			"footer.pricing": ["Formules", "Formules"],
+			"app.unavailableTitle": ["Service injoignable", "Dienst onbereikbaar"],
+			"app.unavailableText": [
+				"Impossible de joindre Radarnaque. Vérifiez votre connexion, puis réessayez.",
+				"Radarnaque is niet bereikbaar. Controleer je verbinding en probeer opnieuw.",
+			],
+		};
+		for (const [key, [fr, nl]] of Object.entries(expected)) {
+			expect(dictionaries.fr[key as MessageKey], key).toBe(fr);
+			expect(dictionaries.nl[key as MessageKey], key).toBe(nl);
 		}
 	});
 

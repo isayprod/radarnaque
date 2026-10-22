@@ -61,6 +61,15 @@ describe("motion.css", () => {
 		expect(motion).toContain("2.2s");
 	});
 
+	it("définit le squelette de chargement : --bg-3, reflet lent de 1,6 s", () => {
+		const start = motion.indexOf(".rq-skeleton {");
+		expect(start).toBeGreaterThan(-1);
+		const rule = motion.slice(start, motion.indexOf("}", start));
+		expect(rule).toContain("background-color: var(--bg-3)");
+		expect(rule).toContain("rq-skeleton 1.6s");
+		expect(motion).toMatch(/@keyframes rq-skeleton/);
+	});
+
 	it("centre la rotation sur le groupe", () => {
 		expect(motion).toContain("transform-box: view-box");
 		expect(motion).toContain("transform-origin: 16px 16px");
@@ -74,6 +83,7 @@ describe("motion.css", () => {
 		expect(block).toContain(".rq-logo--loading .rq-logo-arc");
 		expect(block).toContain(".rq-logo--loading .rq-logo-spin");
 		expect(block).toContain(".rq-shimmer");
+		expect(block).toContain(".rq-skeleton");
 		expect(block).toContain("animation: none");
 		expect(block).toContain("color: inherit");
 		expect(block).toContain("background: none");
