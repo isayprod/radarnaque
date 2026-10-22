@@ -9,6 +9,16 @@ import { describe, expect, test } from "vitest";
  * `text-text-2`…), jamais une valeur en dur ni une couleur de la palette
  * Tailwind, et son `z-index` est 2 147 483 000, plus jamais le maximum.
  * La popup (`entrypoints/popup`) suit la même règle.
+ *
+ * Tailles de police en `px` : admises dans l'extension, par convention (écart
+ * assumé avec la spec du socle §5, qui les refuse partout ; le site, lui, les
+ * refuse). Les valeurs sont celles de DESIGN.md §2.3 (`text-[11px]`,
+ * `text-[13px]`, `text-[22px]`, `text-[28px]`, `text-[48px]`…), écrites en `px`
+ * exprès : l'UI injectée vit dans un Shadow DOM, et un `rem` y suivrait la taille
+ * de police de l'`html` de la page hôte (2dehands, Facebook…), que nous ne
+ * maîtrisons pas ; la popup, page à part, reprend les mêmes valeurs en `px` :
+ * une seule échelle dans toute l'extension. Les couleurs, elles, restent
+ * interdites hors tokens.
  */
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -113,6 +123,9 @@ describe("garde-fou des tokens", () => {
 		"z-[2147483000]",
 		'href="#main"',
 		"var(--gradient-hairline)",
+		// Convention de l'extension (voir l'en-tête) : police en px admise.
+		"text-[13px] leading-[1.45]",
+		"font-display text-[48px]",
 	])("laisse passer %s", (sample) => {
 		expect(violations(sample)).toEqual([]);
 	});
