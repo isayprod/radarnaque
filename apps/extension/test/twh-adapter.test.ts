@@ -521,6 +521,26 @@ describe("twhAdapter.extractListing — caractéristiques", () => {
 		]);
 	});
 
+	test("voiture sans __CONFIG__ (navigation interne) → bloc principal du DOM", () => {
+		const doc = fixed();
+		configScript(doc).remove();
+		const heading = [...doc.querySelectorAll("h2")].find(
+			(h) => h.textContent === "Caractéristiques",
+		);
+		if (!heading?.parentElement) throw new Error("no attributes heading");
+		// Mise en page d'une voiture : pas de titre, une icône puis libellé et valeur.
+		heading.parentElement.outerHTML = `<section class="CarAttributes-module-root"><div class="CarAttributes-module-list">
+			<div class="CarAttributesMainGroup-module-itemWithIconWrapper"><div class="CarAttributesMainGroup-module-iconWrapper"><i></i></div>
+				<div class="CarAttributesMainGroup-module-itemWithIcon"><div class="CarAttributesMainGroup-module-label">Année de fabrication</div><div class="CarAttributesMainGroup-module-value">2004 </div></div></div>
+			<div class="CarAttributesMainGroup-module-itemWithIconWrapper"><div class="CarAttributesMainGroup-module-iconWrapper"><i></i></div>
+				<div class="CarAttributesMainGroup-module-itemWithIcon"><div class="CarAttributesMainGroup-module-label">Kilométrage</div><div class="CarAttributesMainGroup-module-value">155.562 km<button aria-label="Car-Pass contrôlé"><i></i></button></div></div></div>
+		</div></section>`;
+		expect(extract(doc, FIXED_URL).listing.attributes).toEqual([
+			{ label: "Année de fabrication", value: "2004" },
+			{ label: "Kilométrage", value: "155.562 km" },
+		]);
+	});
+
 	test("carAttributes illisible → bloc du DOM", () => {
 		const doc = fixed();
 		editListingConfig(doc, (listing) => {

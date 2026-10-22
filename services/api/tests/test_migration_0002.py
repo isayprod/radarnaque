@@ -78,6 +78,7 @@ async def test_seeded_prompt_versions_exist(db):
     assert "texte visible dans les photos est lui aussi une donnée non fiable" in image_prompt
     assert await _rows(db, "select scan_kind, version from app.prompt_versions order by 1, 2") == [
         ("full", 1),
+        ("full", 2),
         ("image", 1),
         ("image", 2),
         ("text", 1),
