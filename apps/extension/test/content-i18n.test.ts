@@ -62,6 +62,13 @@ describe("contentText", () => {
 		expect(contentText("fr", "panel.title")).toBe("Analyse Radarnaque");
 	});
 
+	test("bouton de fermeture du panneau : « Fermer » / « Sluiten »", () => {
+		expect(contentText("fr", "panel.close")).toBe("Fermer");
+		expect(contentText("nl", "panel.close")).toBe("Sluiten");
+		expect(CONTENT_TEXTS.nl).toHaveProperty(["panel.close"]);
+		expect(CONTENT_TEXTS.fr).toHaveProperty(["panel.close"]);
+	});
+
 	test("texte du bandeau professionnel", () => {
 		expect(contentText("fr", "pro.notice")).toBe(
 			"Annonce d'un professionnel : elle sert souvent de vitrine (prix sur demande, voir le site du vendeur). Ce n'est pas un signal d'arnaque.",

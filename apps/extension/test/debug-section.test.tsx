@@ -269,4 +269,15 @@ describe("DebugSection", () => {
 			"Ruw antwoord",
 		]);
 	});
+
+	test("tokens du design : plus aucune couleur Tailwind brute (slate, red, blanc)", () => {
+		const { container } = renderSection({ error: "network" });
+		expect(container.innerHTML).not.toMatch(
+			/\bslate-|\bred-\d|\bbg-white(?![\w/])/,
+		);
+		expect(container.querySelector("details")?.className).toContain(
+			"border-border-subtle",
+		);
+		expect(screen.getByRole("alert").className).toContain("text-danger");
+	});
 });

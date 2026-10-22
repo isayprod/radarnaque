@@ -44,3 +44,10 @@ export const SEVERITY_STYLE: Record<Severity, string> = {
 	warning: "bg-warning-soft text-warning",
 	info: "bg-info-soft text-info",
 };
+
+/**
+ * Style `label` (DESIGN.md) : 11 px, majuscules, interlettrage 0,06 em, poids 500.
+ * Titre du panneau, « Conseil » et « Pourquoi ».
+ */
+export const LABEL_CLASS =
+	"m-0 text-[11px] leading-[1.3] font-medium tracking-[0.06em] text-text-2 uppercase";

@@ -26,7 +26,7 @@ export class AiErrorBoundary extends Component<Props, { failed: boolean }> {
 	override render() {
 		if (!this.state.failed) return this.props.children;
 		return (
-			<p className="m-0 mt-3 border-t border-slate-200 pt-2 text-red-700">
+			<p className="m-0 text-danger">
 				{aiErrorText(this.props.locale, "default")}
 			</p>
 		);

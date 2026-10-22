@@ -475,3 +475,212 @@ describe("AiSection : résultat IA affiché", () => {
 		expect(screen.queryByText("Chargement…")).toBeNull();
 	});
 });
+
+describe("AiSection : design du panneau", () => {
+	/** Classes d'un élément, pour des assertions lisibles. */
+	const classesOf = (el: Element | null | undefined) =>
+		new Set((el?.getAttribute("class") ?? "").split(/\s+/));
+	const WHITE_PILL = ["bg-white", "text-text-on-light", "rounded-pill"];
+	const expectWhitePill = (el: Element) => {
+		for (const name of WHITE_PILL)
+			expect(classesOf(el).has(name), name).toBe(true);
+		expect(el.getAttribute("class")).toContain("shadow-[var(--shadow-pill)]");
+	};
+
+	test("le titre « Analyse IA » est réservé aux lecteurs d'écran (sr-only)", () => {
+		setup();
+		const heading = screen.getByRole("heading", { name: "Analyse IA" });
+		expect(classesOf(heading).has("sr-only")).toBe(true);
+	});
+
+	test("résultat high 82 : « 82 » et « /100 » dans le bloc du score, badge « Risque élevé », barre à 82 %", () => {
+		const { container } = setup({ ai: done() });
+		const score = screen.getByText("82");
+		for (const name of ["font-serif", "text-[44px]", "tabular-nums"])
+			expect(classesOf(score).has(name), name).toBe(true);
+		const outOf = score.nextElementSibling;
+		expect(outOf?.textContent).toBe("/100");
+		expect(classesOf(outOf).has("text-text-3")).toBe(true);
+
+		const verdict = screen.getByText("Risque élevé").closest("[data-verdict]");
+		if (!verdict) throw new Error("badge de verdict attendu");
+		expect(classesOf(verdict).has("bg-danger-soft")).toBe(true);
+		expect(classesOf(verdict).has("text-danger")).toBe(true);
+		const dot = verdict.querySelector("[aria-hidden='true']");
+		expect(classesOf(dot).has("bg-danger")).toBe(true);
+		expect(classesOf(dot).has("rounded-full")).toBe(true);
+		// Lu avant le score (comme la pilule), affiché à droite du nombre.
+		expect(
+			verdict.compareDocumentPosition(score) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(classesOf(verdict.parentElement).has("flex-row-reverse")).toBe(true);
+
+		const bar = container.querySelector("[role='presentation']");
+		if (!bar) throw new Error("barre du score attendue");
+		expect(classesOf(bar).has("h-1")).toBe(true);
+		const fill = bar.firstElementChild as HTMLElement | null;
+		expect(fill?.style.width).toBe("82%");
+		expect(classesOf(fill).has("bg-danger")).toBe(true);
+	});
+
+	test("niveaux faible et moyen : badge et barre prennent LEVEL_STYLE", () => {
+		const { container, rerender, props } = setup({
+			ai: done({ ...result, level: "low", score: 12 }),
+		});
+		const verdictOf = (text: string) =>
+			screen.getByText(text).closest("[data-verdict]");
+		expect(classesOf(verdictOf("Risque faible")).has("bg-success-soft")).toBe(
+			true,
+		);
+		const fill = () =>
+			container.querySelector("[role='presentation']")
+				?.firstElementChild as HTMLElement | null;
+		expect(fill()?.style.width).toBe("12%");
+		expect(classesOf(fill()).has("bg-success")).toBe(true);
+		rerender(
+			<AiSection
+				{...props}
+				ai={done({ ...result, level: "medium", score: 55 })}
+			/>,
+		);
+		expect(classesOf(verdictOf("Risque moyen")).has("text-warning")).toBe(true);
+		expect(classesOf(fill()).has("bg-warning")).toBe(true);
+	});
+
+	test("« Conseil » et « Pourquoi » en style label ; résumé en text-text-1", () => {
+		setup({ ai: done() });
+		for (const label of ["Conseil", "Pourquoi"]) {
+			const el = screen.getByText(label);
+			for (const name of ["uppercase", "text-[11px]", "tracking-[0.06em]"])
+				expect(classesOf(el).has(name), `${label} ${name}`).toBe(true);
+		}
+		expect(
+			classesOf(screen.getByText(result.summary.fr)).has("text-text-1"),
+		).toBe(true);
+	});
+
+	test("raisons : chaque badge de gravité garde son texte et prend SEVERITY_STYLE", () => {
+		setup({
+			ai: done({
+				...result,
+				reasons: [
+					{ severity: "danger", text: { fr: "Grave.", nl: "x" } },
+					{ severity: "warning", text: { fr: "Attention.", nl: "x" } },
+					{ severity: "info", text: { fr: "Info.", nl: "x" } },
+				],
+			}),
+		});
+		const items = screen.getAllByRole("listitem");
+		const expected = [
+			["Grave", "bg-danger-soft", "text-danger"],
+			["Attention", "bg-warning-soft", "text-warning"],
+			["Info", "bg-info-soft", "text-info"],
+		] as const;
+		expect(items).toHaveLength(expected.length);
+		expected.forEach(([text, soft, color], index) => {
+			const item = items[index];
+			if (!item) throw new Error("raison attendue");
+			const badge = within(item).getByText(text);
+			expect(classesOf(badge).has(soft), soft).toBe(true);
+			expect(classesOf(badge).has(color), color).toBe(true);
+			expect(classesOf(badge).has("rounded-pill")).toBe(true);
+		});
+	});
+
+	test("pied : séparateur border-subtle, analyses restantes à gauche, déroulé replié à droite", () => {
+		const progress = addEvent(
+			startProgress(0),
+			{ type: "stage", stage: "writing" },
+			2_000,
+		);
+		const { container } = setup({ ai: { status: "done", result, progress } });
+		const footer = container.querySelector("footer");
+		if (!footer) throw new Error("pied attendu");
+		expect(classesOf(footer).has("border-t")).toBe(true);
+		expect(classesOf(footer).has("border-border-subtle")).toBe(true);
+		const remaining = within(footer).getByText("Analyses restantes : 11");
+		const details = footer.querySelector("details");
+		if (!details) throw new Error("déroulé attendu dans le pied");
+		// Même rangée : les analyses restantes puis le déroulé, poussé à droite.
+		expect(remaining.parentElement).toBe(details.parentElement);
+		expect(remaining.nextElementSibling).toBe(details);
+		expect(classesOf(details).has("ml-auto")).toBe(true);
+	});
+
+	test("mentions cache, partiel, sans photo : dans le pied, en 12 px text-text-3", () => {
+		const { container } = setup({
+			ai: done({
+				...result,
+				fromCache: true,
+				partial: true,
+				imagesAnalyzed: 0,
+			}),
+		});
+		const footer = container.querySelector("footer");
+		for (const key of ["ai.fromCache", "ai.partial", "ai.noPhoto"] as const) {
+			const el = screen.getByText(contentText("fr", key));
+			expect(footer?.contains(el), key).toBe(true);
+			expect(classesOf(el).has("text-text-3"), key).toBe(true);
+			expect(classesOf(el).has("text-[12px]"), key).toBe(true);
+		}
+	});
+
+	test("illimité, sans déroulé ni mention : aucun pied vide", () => {
+		const { container } = setup({
+			ai: done({ ...result, remaining: { scans: null } }),
+		});
+		expect(container.querySelector("footer")).toBeNull();
+	});
+
+	test("déconnecté : phrase ai.loginHint en titre serif, bouton « Se connecter » en pilule blanche", () => {
+		setup({ access: { status: "signedOut" } });
+		const hint = screen.getByText(contentText("fr", "ai.loginHint"));
+		for (const name of ["font-serif", "text-[22px]", "text-text-1"])
+			expect(classesOf(hint).has(name), name).toBe(true);
+		const login = button("Se connecter");
+		expectWhitePill(login);
+		// La phrase, puis l'action.
+		expect(
+			hint.compareDocumentPosition(login) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+	});
+
+	test("sans abonnement : message en titre serif, lien vers les formules en pilule blanche", () => {
+		setup({ access: { status: "noSubscription" } });
+		const message = screen.getByRole("alert");
+		expect(classesOf(message).has("font-serif")).toBe(true);
+		expect(classesOf(message).has("text-[22px]")).toBe(true);
+		expectWhitePill(screen.getByRole("link", { name: "Voir les formules" }));
+	});
+
+	test("analyse interrompue : message en titre serif, puis « Relancer » en pilule blanche", () => {
+		setup({ ai: { status: "error", code: "timeout" } });
+		const message = screen.getByRole("alert");
+		expect(classesOf(message).has("font-serif")).toBe(true);
+		const retry = button("Relancer");
+		expectWhitePill(retry);
+		expect(
+			message.compareDocumentPosition(retry) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+	});
+
+	test("accès actif au repos : « Lancer une analyse IA » en pilule blanche", () => {
+		setup();
+		expectWhitePill(button("Lancer une analyse IA"));
+	});
+
+	test("plus aucune couleur Tailwind brute (slate, red) dans la section", () => {
+		for (const ai of [
+			idle,
+			done(),
+			loading,
+			{ status: "error", code: "session_expired" } as ScanState,
+		]) {
+			const { container, unmount } = setup({ ai, loginUnavailable: true });
+			expect(container.innerHTML).not.toMatch(
+				/\bslate-|\bred-\d|\btext-white\b/,
+			);
+			unmount();
+		}
+	});
+});

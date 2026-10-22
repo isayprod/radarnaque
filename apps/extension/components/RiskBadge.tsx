@@ -20,6 +20,9 @@ import { AiErrorBoundary } from "./AiErrorBoundary";
 import { AiSection } from "./AiSection";
 import { BadgePill, useLaunch } from "./BadgePill";
 import { DebugBoundary, DebugSection } from "./DebugSection";
+import { Icon } from "./Icon";
+import { Logo } from "./Logo";
+import { LABEL_CLASS } from "./risk-styles";
 
 /** Ferme le panneau sur Escape et sur tout clic hors de `ref`, tant qu'il est ouvert. */
 function useDismiss(
@@ -59,19 +62,32 @@ function useDismiss(
 }
 
 /**
- * Bandeau des annonces professionnelles : une information neutre (ardoise),
- * jamais une alerte. Il s'ajoute au résultat IA, il ne le remplace pas.
+ * Bandeau des annonces professionnelles : une information neutre (encadré
+ * `--info-soft`), jamais une alerte. Il s'ajoute au résultat IA, il ne le
+ * remplace pas.
  */
 function ProNotice({ locale }: { locale: Locale }) {
 	return (
 		<p
 			role="note"
-			className="m-0 mb-2 rounded-[6px] border border-slate-300 bg-slate-50 px-2 py-1.5 text-[12px] leading-[1.4] text-slate-700"
+			className="m-0 mb-4 rounded-s bg-info-soft px-3 py-2 text-[12px] leading-[1.4] text-text-1"
 		>
 			{contentText(locale, "pro.notice")}
 		</p>
 	);
 }
+
+/**
+ * Carte du panneau (spec §3) : verre sombre et flou si disponible, bordure,
+ * `--r-m`, ombre des couches flottantes, filet `--gradient-hairline` de 2 px en
+ * haut (pseudo-élément : `content` explicite, `@property` étant ignoré dans le
+ * shadow root). 340 px, au plus 90 % de la fenêtre.
+ */
+const PANEL_CLASS =
+	"absolute top-full left-0 z-[2147483000] mt-1.5 w-[340px] max-w-[90vw] overflow-hidden rounded-m border border-border-default bg-glass-strong p-4 text-[13px] leading-[1.45] font-normal text-text-2 shadow-[var(--shadow-float)] supports-[backdrop-filter]:backdrop-blur-[18px] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:bg-[image:var(--gradient-hairline)] before:content-['']";
+
+const CLOSE_CLASS =
+	"-my-1 -mr-1.5 inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-pill text-text-2 hover:bg-white/8 hover:text-text-1 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
 
 export function RiskBadge({
 	report,
@@ -97,7 +113,14 @@ export function RiskBadge({
 }) {
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
+	const pillRef = useRef<HTMLSpanElement>(null);
 	const close = useCallback(() => setOpen(false), []);
+	// Bouton « Fermer » : le focus revient à la pilule (le bouton, ou l'action de
+	// la pilule d'erreur), avant que le panneau, qui le contient, ne disparaisse.
+	const closeToPill = useCallback(() => {
+		pillRef.current?.querySelector<HTMLElement>("button, a[href]")?.focus();
+		setOpen(false);
+	}, []);
 	const openPanel = useCallback(() => setOpen(true), []);
 	useDismiss(open, rootRef, close);
 	// L'état IA vit ici, pas dans le panneau : il survit à sa fermeture.
@@ -165,15 +188,25 @@ export function RiskBadge({
 				open={open}
 				onToggle={toggle}
 				onLaunch={launch}
+				pillRef={pillRef}
 			/>
 			{open && (
-				<div
-					role="dialog"
-					aria-label={title}
-					className="absolute top-full left-0 z-[2147483647] mt-1.5 w-[320px] max-w-[90vw] rounded-[8px] border border-slate-300 bg-white p-3 text-[13px] leading-[1.4] text-slate-900 shadow-lg"
-				>
+				<div role="dialog" aria-label={title} className={PANEL_CLASS}>
+					<div className="mb-4 flex items-center gap-2">
+						<Logo size={14} className="shrink-0 text-text-1" />
+						<h2 className={`${LABEL_CLASS} min-w-0 flex-1 truncate`}>
+							{title}
+						</h2>
+						<button
+							type="button"
+							aria-label={contentText(locale, "panel.close")}
+							onClick={closeToPill}
+							className={CLOSE_CLASS}
+						>
+							<Icon name="close" size={16} />
+						</button>
+					</div>
 					{professional && <ProNotice locale={locale} />}
-					<h2 className="m-0 mb-2 text-[14px] font-bold">{title}</h2>
 					<AiErrorBoundary
 						key={`${listing.site}|${listing.externalId}`}
 						locale={locale}

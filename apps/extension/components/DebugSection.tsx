@@ -18,8 +18,9 @@ const COPIED_MS = 2_000;
 /** Longueur affichée d'une empreinte ; la valeur complète est dans `title`. */
 const HASH_CHARS = 12;
 
+// Bouton secondaire (DESIGN.md) : transparent, bordure forte, texte blanc.
 const BUTTON_CLASS =
-	"inline-flex cursor-pointer items-center justify-center rounded-[6px] border border-slate-300 bg-white px-2 py-1 font-sans text-[12px] leading-[1.4] font-semibold text-slate-900 shadow-sm hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700 disabled:cursor-default disabled:bg-slate-100 disabled:text-slate-500";
+	"inline-flex cursor-pointer items-center justify-center rounded-s border border-border-strong bg-transparent px-2 py-1 font-sans text-[12px] leading-[1.4] font-medium text-text-1 hover:bg-white/8 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-40";
 
 const ms = (value: number | null) => (value === null ? "—" : `${value} ms`);
 
@@ -74,10 +75,10 @@ function searchesText(debug: ScanDebug): string {
 function Block({ title, text }: { title: string; text: string }) {
 	return (
 		<details className="mt-2">
-			<summary className="cursor-pointer font-sans font-semibold text-slate-700">
+			<summary className="cursor-pointer font-sans font-medium text-text-2">
 				{title}
 			</summary>
-			<pre className="m-0 mt-1 max-h-[160px] overflow-auto rounded-[4px] bg-slate-50 p-1.5 font-mono text-[11px] leading-[1.4] break-words whitespace-pre-wrap">
+			<pre className="m-0 mt-1 max-h-[160px] overflow-auto rounded-xs bg-white/5 p-1.5 font-mono text-[11px] leading-[1.4] break-words whitespace-pre-wrap">
 				{text}
 			</pre>
 		</details>
@@ -141,14 +142,14 @@ export function DebugSection({
 		.join("\n\n");
 
 	return (
-		<details className="mt-3 border-t border-slate-200 pt-2 font-mono text-[11px] leading-[1.4] text-slate-800">
-			<summary className="cursor-pointer font-sans text-[12px] font-semibold text-slate-700">
+		<details className="mt-4 border-t border-border-subtle pt-3 font-mono text-[11px] leading-[1.4] text-text-2">
+			<summary className="cursor-pointer font-sans text-[12px] font-medium text-text-2">
 				{contentText(locale, "debug.title")}
 			</summary>
 			<dl className="m-0 mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
 				{linesOf(debug).map(({ label, value, title }) => (
 					<Fragment key={label}>
-						<dt className="text-slate-500">{label}</dt>
+						<dt className="text-text-3">{label}</dt>
 						<dd className="m-0 break-all" title={title}>
 							{value}
 						</dd>
@@ -173,7 +174,7 @@ export function DebugSection({
 				text={debug.rawResponse ?? "—"}
 			/>
 			{error !== undefined && (
-				<p role="alert" className="m-0 mt-2 font-sans text-[12px] text-red-800">
+				<p role="alert" className="m-0 mt-2 font-sans text-[12px] text-danger">
 					{aiErrorText(locale, error)}
 				</p>
 			)}

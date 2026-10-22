@@ -10,6 +10,7 @@ export type ContentKey =
 	| "level.medium"
 	| "level.high"
 	| "panel.title"
+	| "panel.close"
 	| "badge.aria"
 	| "pro.notice"
 	| "card.aria"
@@ -99,6 +100,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"level.medium": "Risque moyen",
 		"level.high": "Risque élevé",
 		"panel.title": "Analyse Radarnaque",
+		"panel.close": "Fermer",
 		"badge.aria": "Ouvrir l'analyse Radarnaque",
 		"pro.notice":
 			"Annonce d'un professionnel : elle sert souvent de vitrine (prix sur demande, voir le site du vendeur). Ce n'est pas un signal d'arnaque.",
@@ -180,6 +182,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"level.medium": "Gemiddeld risico",
 		"level.high": "Hoog risico",
 		"panel.title": "Radarnaque-analyse",
+		"panel.close": "Sluiten",
 		"badge.aria": "Radarnaque-analyse openen",
 		"pro.notice":
 			"Advertentie van een professional: ze dient vaak als etalage (prijs op aanvraag, zie de website van de verkoper). Dat is geen teken van oplichting.",
