@@ -11,8 +11,13 @@ const CELLS = 6;
 const CELL_CLASS =
 	"flex h-13 w-11 items-center justify-center rounded-sm border border-border-default bg-bg-1 font-serif text-[28px] leading-none text-text-1 tabular-nums";
 
-/** Case courante quand le champ a le focus : anneau de focus des tokens. */
-const CURRENT_CELL_CLASS = "border-transparent shadow-[var(--focus-ring)]";
+/**
+ * Case courante quand le champ a le focus : anneau de focus des tokens. En mode de
+ * contraste forcé, l'ombre disparaît et le champ est invisible : un contour plein
+ * (couleur du système) marque alors la case courante.
+ */
+const CURRENT_CELL_CLASS =
+	"border-transparent shadow-[var(--focus-ring)] forced-colors:outline-2 forced-colors:outline-offset-2 forced-colors:outline-solid";
 
 /**
  * Le champ étant invisible, un clic ou une flèche pourrait placer le curseur au
