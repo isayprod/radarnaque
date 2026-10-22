@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Locale } from "@radarnaque/shared";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { escapeHtml } from "../src/h";
 import { renderHead } from "../src/landing/head";
 import { LANDING_TEXT } from "../src/landing/i18n";
@@ -381,6 +381,69 @@ describe("renderHead", () => {
 	});
 });
 
+/** Script en ligne du <head> des gabarits (classe js, retirée sans js-ready au bout de 3 s). */
+const SCRIPT_EN_LIGNE = (() => {
+	const html = readFileSync(resolve(SITE, "index.html"), "utf8");
+	const m = /<script>([^<]*)<\/script>/.exec(html);
+	if (!m?.[1]) throw new Error("script en ligne absent de index.html");
+	return m[1];
+})();
+
+describe("script en ligne du <head> (classe js)", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		document.documentElement.className = "";
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+		document.documentElement.className = "";
+	});
+
+	it("est le même dans les deux gabarits", () => {
+		const nl = readFileSync(resolve(SITE, "nl/index.html"), "utf8");
+		expect(nl).toContain(`<script>${SCRIPT_EN_LIGNE}</script>`);
+	});
+
+	it("pose js tout de suite, la retire au bout de 3 s si main.ts n'a pas posé js-ready", () => {
+		new Function(SCRIPT_EN_LIGNE)();
+		const html = document.documentElement;
+		expect(html.classList.contains("js")).toBe(true);
+		vi.advanceTimersByTime(2999);
+		expect(html.classList.contains("js")).toBe(true);
+		vi.advanceTimersByTime(1);
+		expect(html.classList.contains("js")).toBe(false);
+	});
+
+	it("garde js si main.ts a posé js-ready", () => {
+		new Function(SCRIPT_EN_LIGNE)();
+		const html = document.documentElement;
+		html.classList.add("js-ready");
+		vi.advanceTimersByTime(5000);
+		expect(html.classList.contains("js")).toBe(true);
+	});
+
+	it("navigateur sans modules : ne pose pas js (main.ts ne tournerait pas)", () => {
+		const proto: object = HTMLScriptElement.prototype;
+		// Retire noModule de la chaîne le temps du test.
+		const descripteurs: [object, PropertyDescriptor][] = [];
+		for (let o: object | null = proto; o; o = Object.getPrototypeOf(o)) {
+			const d = Object.getOwnPropertyDescriptor(o, "noModule");
+			if (d) {
+				descripteurs.push([o, d]);
+				delete (o as Record<string, unknown>).noModule;
+			}
+		}
+		try {
+			new Function(SCRIPT_EN_LIGNE)();
+			expect(document.documentElement.classList.contains("js")).toBe(false);
+		} finally {
+			for (const [o, d] of descripteurs)
+				Object.defineProperty(o, "noModule", d);
+		}
+		expect(descripteurs.length).toBeGreaterThan(0);
+	});
+});
+
 describe("landingPlugin", () => {
 	/** Applique le hook transformIndexHtml du plugin à un gabarit du site. */
 	async function transformer(
@@ -437,9 +500,7 @@ describe("landingPlugin", () => {
 			expect(script).toBeGreaterThan(html.indexOf('class="site-footer'));
 			// html.js posée par un script en ligne dans <head>, avant la feuille de
 			// style et le corps : les blocs visibles au chargement ne clignotent pas.
-			const enLigne = html.indexOf(
-				'<script>"noModule" in HTMLScriptElement.prototype && document.documentElement.classList.add("js");</script>',
-			);
+			const enLigne = html.indexOf(`<script>${SCRIPT_EN_LIGNE}</script>`);
 			expect(enLigne).toBeGreaterThan(-1);
 			expect(enLigne).toBeLessThan(html.indexOf("</head>"));
 			expect(enLigne).toBeLessThan(html.indexOf("/src/landing/landing.css"));

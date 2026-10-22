@@ -211,7 +211,7 @@ describe("apparitions et fonds : CSS", () => {
 		expect(corps).toMatch(/translate:\s*none/);
 	});
 
-	it("sans JavaScript : sections sur --bg-0 et hero sur son dégradé ; transparents seulement sous html.js", () => {
+	it("sans JavaScript ou script en échec : sections sur --bg-0 et hero sur son dégradé ; transparents seulement sous html.js-ready", () => {
 		const transparents = toutes.filter((r) =>
 			/background(?:-color|-image)?:\s*(?:transparent|none)/.test(r.body),
 		);
@@ -222,7 +222,8 @@ describe("apparitions et fonds : CSS", () => {
 			".landing-hero",
 		]) {
 			const regle = transparents.find((r) => r.selector.includes(sel));
-			expect(regle?.selector, sel).toMatch(/^html\.js\b/);
+			for (const s of regle?.selector.split(",") ?? [""])
+				expect(s.trim(), sel).toMatch(/^html\.js-ready /);
 		}
 		const main = toutes.find((r) => r.selector === ".landing-main");
 		expect(main?.body).toMatch(/background-color:\s*var\(--bg-0\)/);
@@ -230,30 +231,27 @@ describe("apparitions et fonds : CSS", () => {
 		expect(hero?.body).toMatch(/var\(--grad-1\)/);
 	});
 
-	it("sous le hero, tant que --sky-mix < 1 : un fond où --text-2 garde 4,5:1 (fenêtres hautes)", () => {
+	it("sous le hero : --sky-below est le --bg-0 (4,5:1 pour --text-2), dernier arrêt, après un fondu court", () => {
 		const sky = toutes.find((r) => r.selector === ".sky");
 		const corps = (sky?.body ?? "").replace(/\s+/g, " ");
 		// Fond sous le hero : --sky-below, résolu jusqu'au token.
 		const below = /--sky-below:\s*var\((--[\w-]+)\)/.exec(corps)?.[1];
 		expect(below).toBe("--bg-0");
-		const couleur = token(below ?? "");
-		expect(contrastRatio(token("--text-2"), couleur)).toBeGreaterThanOrEqual(
-			4.5,
-		);
-		// Dernier arrêt du dégradé : rien n'est peint après lui (tout le bas en --sky-below).
+		expect(
+			contrastRatio(token("--text-2"), token(below ?? "")),
+		).toBeGreaterThanOrEqual(4.5);
+		// Sept arrêts aux positions écrites par le script (skyStops) ; --sky-below en dernier.
 		const degrade = /linear-gradient\((.*)\);/.exec(corps)?.[1] ?? "";
 		const arrets = degrade.split(/,(?![^(]*\))/).map((a) => a.trim());
-		const dernier = arrets.at(-1) ?? "";
-		expect(dernier).toMatch(/^var\(--sky-below\)/);
-		// Atteint --sky-fade sous le bas du hero à --sky-mix = 0, repoussé au bas de la fenêtre à 1.
-		expect(dernier).toContain(
-			"(var(--hero-h) + var(--sky-fade)) * (1 - var(--sky-mix))",
-		);
-		expect(dernier).toMatch(/100% \* var\(--sky-mix\)/);
-		// L'arrêt orange (--s5) finit au bas du hero : --sky-below n'est jamais l'orange.
-		expect(arrets.at(-2)).toMatch(
-			/^var\(--s5\) calc\(var\(--hero-h\) \* \(1 - var\(--sky-mix\)\)/,
-		);
+		expect(arrets.slice(1)).toEqual([
+			"var(--s1) var(--k1)",
+			"var(--s1) var(--k2)",
+			"var(--s2) var(--k3)",
+			"var(--s3) var(--k4)",
+			"var(--s4) var(--k5)",
+			"var(--s5) var(--k6)",
+			"var(--sky-below) var(--k7)",
+		]);
 		// Fondu court : il reste sous la maquette, avant le premier texte.
 		const fondu = /--sky-fade:\s*(\d+)px/.exec(corps)?.[1];
 		expect(Number(fondu)).toBeGreaterThan(0);
@@ -342,7 +340,48 @@ describe("startLanding", () => {
 		expect(fetchImpl).toHaveBeenCalledWith("/api/offer");
 		expect(champ(doc, "standard", "price")).toBe(formatCents(349, "fr"));
 		const sky = doc.querySelector<HTMLElement>(".sky");
-		expect(sky).not.toBeNull();
+		expect(sky?.style.getPropertyValue("--s1")).toBe("#0649b8");
+		expect(sky?.style.getPropertyValue("--k7")).toMatch(/px$/);
+		// Calque et apparitions lancés : js-ready.
+		expect(doc.documentElement.classList.contains("js-ready")).toBe(true);
+	});
+
+	it("exception au démarrage des apparitions : js retirée tout de suite, pas de js-ready, page lisible", async () => {
+		const doc = monter();
+		vi.stubGlobal(
+			"IntersectionObserver",
+			class {
+				constructor() {
+					throw new Error("observateur en panne");
+				}
+			},
+		);
+		const erreur = vi.spyOn(console, "error").mockImplementation(() => {});
+		await startLanding(
+			window,
+			vi.fn(async () => new Response("", { status: 503 })),
+		);
+		expect(doc.documentElement.classList.contains("js")).toBe(false);
+		expect(doc.documentElement.classList.contains("js-ready")).toBe(false);
+		expect(erreur).toHaveBeenCalled();
+	});
+
+	it("exception dans le calque (avant les apparitions) : les apparitions sont quand même armées, js retirée, pas de js-ready", async () => {
+		const doc = monter();
+		const sky = doc.querySelector<HTMLElement>(".sky");
+		if (!sky) throw new Error("calque absent");
+		vi.spyOn(sky.style, "setProperty").mockImplementation(() => {
+			throw new Error("calque en panne");
+		});
+		const erreur = vi.spyOn(console, "error").mockImplementation(() => {});
+		await startLanding(
+			window,
+			vi.fn(async () => new Response("", { status: 503 })),
+		);
+		expect(FauxObservateur.derniers).toHaveLength(1);
+		expect(doc.documentElement.classList.contains("js")).toBe(false);
+		expect(doc.documentElement.classList.contains("js-ready")).toBe(false);
+		expect(erreur).toHaveBeenCalled();
 	});
 
 	it("API en panne : valeurs de secours gardées", async () => {

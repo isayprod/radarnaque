@@ -3,8 +3,8 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<!-- Classe js posée avant le rendu (apparitions sans éclair), seulement si les modules sont pris en charge : sinon main.ts ne tournerait pas et les blocs resteraient cachés. -->
-		<script>"noModule" in HTMLScriptElement.prototype && document.documentElement.classList.add("js");</script>
+		<!-- Classe js posée avant le rendu (apparitions sans éclair), seulement si les modules sont pris en charge (un navigateur trop ancien pour les fonctions fléchées n'exécute rien) ; retirée au bout de 3 s si main.ts n'a pas posé js-ready (script absent, bloqué ou en échec) : la page redevient celle sans JavaScript. -->
+		<script>(() => { if (!("noModule" in HTMLScriptElement.prototype)) return; const r = document.documentElement; r.classList.add("js"); setTimeout(() => { if (!r.classList.contains("js-ready")) r.classList.remove("js"); }, 3000); })();</script>
 		<!--landing:head-->
 		<link rel="stylesheet" href="/src/landing/landing.css" />
 	</head>
