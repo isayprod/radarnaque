@@ -62,20 +62,43 @@ export function fillOffer(
 }
 
 /**
- * Démarre la landing : `html.js` en premier, puis le calque du dégradé, les
- * apparitions et la lecture de l'offre (résolue quand les formules sont à jour).
+ * Démarre la landing : `html.js` en premier (déjà posée en ligne dans `<head>`,
+ * sans effet si elle y est), puis le calque du dégradé et les apparitions, chacun
+ * protégé. Les deux lancés : `html.js-ready` (la page devient transparente sur le
+ * calque, et le script en ligne ne retire plus `js`). L'un des deux en échec :
+ * `js` est retirée tout de suite, la page reste celle sans JavaScript, lisible.
+ * Enfin la lecture de l'offre (résolue quand les formules sont à jour).
  */
 export async function startLanding(
 	win: Window,
 	fetchImpl?: typeof fetch,
 ): Promise<void> {
 	const doc = win.document;
-	doc.documentElement.classList.add("js");
-	const sky = doc.querySelector<HTMLElement>(".sky");
-	if (sky) startSky(win, sky);
-	startReveal(doc);
-	const locale: Locale = doc.documentElement.lang === "nl" ? "nl" : "fr";
-	fillOffer(doc, locale, await fetchOffer(fetchImpl));
+	const root = doc.documentElement;
+	root.classList.add("js");
+	const armed = [
+		() => {
+			const sky = doc.querySelector<HTMLElement>(".sky");
+			if (sky) startSky(win, sky);
+		},
+		() => startReveal(doc),
+	].map((start) => {
+		try {
+			start();
+			return true;
+		} catch (error) {
+			console.error(error);
+			return false;
+		}
+	});
+	if (armed.every(Boolean)) root.classList.add("js-ready");
+	else root.classList.remove("js");
+	const locale: Locale = root.lang === "nl" ? "nl" : "fr";
+	try {
+		fillOffer(doc, locale, await fetchOffer(fetchImpl));
+	} catch (error) {
+		console.error(error);
+	}
 }
 
 // Démarrage seulement sur la landing (calque présent), pas à l'import des tests.

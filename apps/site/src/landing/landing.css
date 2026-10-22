@@ -1,9 +1,10 @@
 /*
  * Landing (spec landing §3 et §5, DESIGN.md §4.1) : formules en panneaux opaques.
  * Sans JavaScript, le hero peint son dégradé et les sections sont sur --bg-0. Avec
- * JavaScript (html.js, posée en ligne dans <head> puis par main.ts), un calque fixe (.sky) porte le dégradé
- * qui suit le scroll, la page devient transparente au-dessus, et les blocs
- * data-reveal apparaissent en entrant dans la fenêtre.
+ * JavaScript, html.js (posée en ligne dans <head>, retirée au bout de 3 s si le
+ * script n'a pas démarré) cache les blocs data-reveal, qui apparaissent en entrant
+ * dans la fenêtre ; html.js-ready (posée par main.ts) rend la page transparente
+ * au-dessus du calque fixe (.sky) qui porte le dégradé suivant le scroll.
  * Aucune valeur brute : couleurs, rayons et ombres viennent des tokens ; tailles
  * de police de DESIGN.md §2.3 en rem (display-xl 48-104 px, display-l 36-64,
  * text-l 16, text-m 14, text-s 13, text-xs 12, label 11).
@@ -57,14 +58,16 @@
 /* --- Calque du dégradé qui suit le scroll (spec landing §5.1) --- */
 
 /*
- * Cinq arrêts --s1 à --s5 écrits par gradient.ts (startSky), au plus une fois par
- * image ; par défaut, la palette 0 (le hero). --sky-mix glisse les positions des
- * arrêts de celles du hero (0, en haut de page, --hero-h relu par le script) à un
- * espacement régulier sur la fenêtre (1, dès la fin du hero).
- * Sous le hero, le dernier arrêt (--sky-below, le --bg-0 de la page sans
- * JavaScript) garde au --text-2 son contraste tant que le dégradé n'a pas quitté
- * les couleurs claires du hero ; à --sky-mix = 1, il est repoussé au bas de la
- * fenêtre et disparaît.
+ * Cinq couleurs --s1 à --s5 et sept positions d'arrêts --k1 à --k7, écrites par
+ * gradient.ts (startSky, skyStops) au plus une fois par image. En haut de page,
+ * les positions sont celles du hero (mêmes formules que .landing-hero) ; elles
+ * glissent vers un espacement régulier en descendant. Le dernier arrêt,
+ * --sky-below (le --bg-0 de la page sans JavaScript, atteint --sky-fade sous la
+ * dernière couleur), garde au --text-2 son contraste sous le hero tant que les
+ * couleurs claires du hero sont en jeu, puis est repoussé au bas de la fenêtre.
+ * Valeurs par défaut : palette 0 aux positions du hero, la fenêtre faisant office
+ * de hero (le calque n'est visible que sous html.js-ready, après la première
+ * écriture du script).
  */
 .sky {
 	--s1: var(--grad-1);
@@ -72,12 +75,15 @@
 	--s3: var(--grad-3);
 	--s4: var(--grad-4);
 	--s5: var(--grad-5);
-	--hero-h: 100%;
-	--sky-mix: 0;
-	/* Sous le hero, tant que --sky-mix < 1 : le fond de la page sans JavaScript,
-	   atteint --sky-fade sous le bas du hero (sous la maquette, avant tout texte). */
 	--sky-below: var(--bg-0);
 	--sky-fade: 120px;
+	--k1: 0%;
+	--k2: calc(100% - var(--hero-tail));
+	--k3: calc(100% - var(--hero-tail) * 0.62);
+	--k4: calc(100% - var(--hero-tail) * 0.36);
+	--k5: calc(100% - var(--hero-tail) * 0.16);
+	--k6: 100%;
+	--k7: 100%;
 	position: fixed;
 	inset: 0;
 	z-index: -1;
@@ -85,37 +91,13 @@
 	background-color: var(--s1);
 	background-image: linear-gradient(
 		180deg,
-		var(--s1) 0%,
-		var(--s1) calc((var(--hero-h) - var(--hero-tail)) * (1 - var(--sky-mix))),
-		var(--s2)
-			calc(
-				(var(--hero-h) - var(--hero-tail) * 0.62) *
-				(1 - var(--sky-mix)) +
-				25% *
-				var(--sky-mix)
-			),
-		var(--s3)
-			calc(
-				(var(--hero-h) - var(--hero-tail) * 0.36) *
-				(1 - var(--sky-mix)) +
-				50% *
-				var(--sky-mix)
-			),
-		var(--s4)
-			calc(
-				(var(--hero-h) - var(--hero-tail) * 0.16) *
-				(1 - var(--sky-mix)) +
-				75% *
-				var(--sky-mix)
-			),
-		var(--s5) calc(var(--hero-h) * (1 - var(--sky-mix)) + 100% * var(--sky-mix)),
-		var(--sky-below)
-			calc(
-				(var(--hero-h) + var(--sky-fade)) *
-				(1 - var(--sky-mix)) +
-				100% *
-				var(--sky-mix)
-			)
+		var(--s1) var(--k1),
+		var(--s1) var(--k2),
+		var(--s2) var(--k3),
+		var(--s3) var(--k4),
+		var(--s4) var(--k5),
+		var(--s5) var(--k6),
+		var(--sky-below) var(--k7)
 	);
 }
 
@@ -543,25 +525,27 @@ a.landing-pill:hover {
 	background-color: var(--bg-0);
 }
 
-/* --- Avec JavaScript : la page transparente au-dessus du calque --- */
+/* --- Calque prêt : la page transparente au-dessus --- */
 
 /*
- * Avec JavaScript seulement : la page laisse voir le calque. Sans JavaScript, le
- * hero garde son dégradé et les sections leur fond --bg-0 (le calque, derrière le
- * fond du corps, n'est pas peint).
+ * Seulement quand le calque est écrit (html.js-ready, posée par main.ts une fois le
+ * calque et les apparitions lancés) : la page laisse voir le calque. Sans
+ * JavaScript, script pas encore chargé ou en échec, le hero garde son dégradé et
+ * les sections leur fond --bg-0 (le calque, derrière le fond du corps, n'est pas
+ * peint).
  */
-html.js body.landing {
+html.js-ready body.landing {
 	background-color: transparent;
 }
 
-html.js .landing-hero {
+html.js-ready .landing-hero {
 	background-color: transparent;
 	background-image: none;
 }
 
-html.js .landing-main,
-html.js .landing-install,
-html.js .landing .site-footer {
+html.js-ready .landing-main,
+html.js-ready .landing-install,
+html.js-ready .landing .site-footer {
 	background-color: transparent;
 }
 

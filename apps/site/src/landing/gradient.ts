@@ -168,9 +168,9 @@ export function contrastRatio(foreground: string, background: string): number {
 
 /**
  * Progression du scroll, de 0 (haut) à 1 (bas, `max` = hauteur défilable).
- * `anchor` est la position où le hero s'achève (le contenu qui suit entre dans
- * la fenêtre) : elle vaut `HERO_END`, pour que le contraste soit garanti dès que
- * le texte des sections est visible, quelle que soit la hauteur de la fenêtre.
+ * `anchor` (`heroAnchor`) est la position où le hero s'achève : elle vaut
+ * `HERO_END`, fin de la rampe des couleurs claires du hero (au moins `RAMP_MIN`
+ * px). Le texte visible pendant la rampe reste sur --sky-below (`skyStops`).
  * Linéaire par morceaux de part et d'autre ; `smoothstep` à la clé efface le coude.
  */
 export function scrollProgress(
@@ -185,13 +185,26 @@ export function scrollProgress(
 	return a >= max ? 1 : HERO_END + ((y - a) / (max - a)) * (1 - HERO_END);
 }
 
+/** Rampe minimale du hero au crépuscule, en pixels de scroll (règle 10 : douce sur toutes les fenêtres). */
+export const RAMP_MIN = 240;
+
+/**
+ * Progression où le fond sous le hero (--sky-below) a fini de céder la place au
+ * dégradé : de `HERO_END` à `OPEN_END`, toutes les couleurs en jeu (palettes
+ * après le hero, --bg-0) gardent le contraste.
+ */
+export const OPEN_END = 0.25;
+
+/** Écart entre le haut du premier texte et le fond sous le hero qui le protège. */
+const TEXT_MARGIN = 16;
+
 /**
  * Repère de fin du hero, en pixels de scroll : le haut du premier texte qui suit
  * la maquette (`firstTextTop`, position dans la page) arrive en bas de la
- * fenêtre. Au moins 1 px : sur une fenêtre haute où ce texte est déjà visible en
- * haut de page, la palette passe au crépuscule dès le premier pixel (en haut de
- * page, le fond sous le hero du calque, --sky-below, garde le contraste). Au plus
- * le hero entier (fenêtre basse) et la moitié de la hauteur défilable.
+ * fenêtre, au plus le hero entier ; au moins `RAMP_MIN`, pour une rampe douce même
+ * sur une fenêtre haute où ce texte est visible en haut de page (il reste alors
+ * sur --sky-below, voir `skyStops`). Jamais plus de la moitié du scroll, 1 px au
+ * moins.
  */
 export function heroAnchor(m: {
 	heroHeight: number;
@@ -199,74 +212,150 @@ export function heroAnchor(m: {
 	viewport: number;
 	max: number;
 }): number {
-	const anchor = Math.min(m.firstTextTop - m.viewport, m.heroHeight, m.max / 2);
-	return Math.max(anchor, 1);
+	const anchor = Math.max(
+		Math.min(m.firstTextTop - m.viewport, m.heroHeight),
+		RAMP_MIN,
+	);
+	return Math.max(Math.min(anchor, m.max / 2), 1);
 }
 
-/** Mesures du repère dans la page ; sans hero ni texte après lui : `HERO_END` du scroll. */
-function measureAnchor(win: Window, max: number): number {
+/** Mesures du calque, relues au redimensionnement (pixels, fenêtre ou page). */
+export interface SkyMetrics {
+	/** Hauteur du hero. */
+	heroHeight: number;
+	/** Queue colorée du hero (--hero-tail). */
+	tail: number;
+	/** Fondu du dernier arrêt vers --sky-below (--sky-fade). */
+	fade: number;
+	/** Hauteur de la fenêtre (= celle du calque). */
+	viewport: number;
+}
+
+/**
+ * Positions des sept arrêts du calque (pixels depuis le haut de la fenêtre) : 0,
+ * fin du cobalt, --s2 à --s5, puis --sky-below.
+ *
+ * - `mix` (0 → 1 de p = 0 à `HERO_END`) glisse les arrêts des positions du hero
+ *   (identiques au hero rendu sans JavaScript) à un espacement régulier.
+ * - Tant que les couleurs ne sont pas sûres (p < `HERO_END`), --sky-below (--bg-0)
+ *   commence au plus `TEXT_MARGIN` au-dessus du premier texte (`textTop`, dans la
+ *   fenêtre) : tout texte visible est sur --bg-0, et le dégradé se resserre au-dessus.
+ * - `open` (0 → 1 de `HERO_END` à `OPEN_END`) repousse ensuite --sky-below au bas
+ *   de la fenêtre ; les couleurs traversées sont alors toutes sûres.
+ */
+export function skyStops(m: SkyMetrics, p: number, textTop: number): number[] {
+	const { heroHeight: H, tail, fade, viewport: V } = m;
+	const mix = smoothstep(clamp01(p / HERO_END));
+	const open = smoothstep(clamp01((p - HERO_END) / (OPEN_END - HERO_END)));
+	const lerp = (a: number, b: number) => a * (1 - mix) + b * mix;
+	const guarded = Math.min(lerp(H + fade, V), textTop - TEXT_MARGIN);
+	const below = guarded * (1 - open) + V * open;
+	const cap = below - fade * (1 - open);
+	const stops = [
+		0,
+		lerp(H - tail, 0),
+		lerp(H - tail * 0.62, V * 0.25),
+		lerp(H - tail * 0.36, V * 0.5),
+		lerp(H - tail * 0.16, V * 0.75),
+		lerp(H, V),
+	].map((y) => Math.max(0, Math.min(y, cap)));
+	stops.push(below);
+	// Comme le navigateur : un arrêt n'est jamais avant le précédent.
+	for (let i = 1; i < stops.length; i++)
+		stops[i] = Math.max(stops[i] ?? 0, stops[i - 1] ?? 0);
+	return stops;
+}
+
+/** Repère et position du premier texte dans la page ; sans hero ni texte : `HERO_END` du scroll. */
+function measurePage(
+	win: Window,
+	max: number,
+): { anchor: number; firstTextTop: number } {
 	const doc = win.document;
 	const hero = doc.querySelector<HTMLElement>(".landing-hero");
 	const text = doc.querySelector<HTMLElement>(".landing-main [data-reveal]");
-	if (!hero || !text) return HERO_END * max;
-	return heroAnchor({
-		heroHeight: hero.offsetHeight,
-		firstTextTop: text.getBoundingClientRect().top + win.scrollY,
-		viewport: win.innerHeight,
-		max,
-	});
+	if (!hero || !text)
+		return { anchor: HERO_END * max, firstTextTop: Number.POSITIVE_INFINITY };
+	const firstTextTop = text.getBoundingClientRect().top + win.scrollY;
+	return {
+		anchor: heroAnchor({
+			heroHeight: hero.offsetHeight,
+			firstTextTop,
+			viewport: win.innerHeight,
+			max,
+		}),
+		firstTextTop,
+	};
+}
+
+/** Longueur d'une variable CSS de longueur, mesurée par une sonde dans le calque (0 si absente). */
+function cssLength(layer: HTMLElement, name: string): number {
+	const probe = layer.ownerDocument.createElement("div");
+	probe.style.height = `var(${name})`;
+	layer.append(probe);
+	const length = probe.offsetHeight;
+	probe.remove();
+	return length;
 }
 
 /**
  * Pilote le calque : écouteur `scroll` passif, au plus une écriture par image
- * (`requestAnimationFrame`) des cinq couleurs et du mélange des positions
- * d'arrêts (`--sky-mix`, 0 au hero, 1 dès sa fin). La hauteur de la page et
- * celle du hero (`--hero-h`) sont relues au redimensionnement de la fenêtre ou
- * de la page, pas à chaque image. Renvoie l'arrêt.
+ * (`requestAnimationFrame`) des cinq couleurs et des sept positions d'arrêts
+ * (`--k1` à `--k7`, `skyStops`). Les mesures (hauteur de la page, du hero, du
+ * premier texte, --hero-tail, --sky-fade) sont relues au redimensionnement de la
+ * fenêtre ou de la page, pas à chaque image. Première écriture tout de suite, pour
+ * que le calque soit juste dès qu'il devient visible. Renvoie l'arrêt.
  */
 export function startSky(win: Window, layer: HTMLElement): () => void {
 	let max = 0;
 	let anchor = 0;
+	let firstTextTop = Number.POSITIVE_INFINITY;
+	let metrics: SkyMetrics = { heroHeight: 0, tail: 0, fade: 0, viewport: 0 };
 	let frame = 0;
 
 	const paint = () => {
 		frame = 0;
 		const p = scrollProgress(win.scrollY, max, anchor);
-		const colors = paletteAt(p);
-		colors.forEach((color, i) => {
+		paletteAt(p).forEach((color, i) => {
 			layer.style.setProperty(`--s${i + 1}`, color);
 		});
-		layer.style.setProperty(
-			"--sky-mix",
-			smoothstep(clamp01(p / HERO_END)).toFixed(4),
-		);
+		skyStops(metrics, p, firstTextTop - win.scrollY).forEach((y, i) => {
+			layer.style.setProperty(`--k${i + 1}`, `${y.toFixed(1)}px`);
+		});
 	};
 	const schedule = () => {
 		if (!frame) frame = win.requestAnimationFrame(paint);
 	};
 	const measure = () => {
-		max = Math.max(
-			0,
-			win.document.documentElement.scrollHeight - win.innerHeight,
-		);
-		anchor = measureAnchor(win, max);
+		const viewport = win.innerHeight;
+		max = Math.max(0, win.document.documentElement.scrollHeight - viewport);
+		({ anchor, firstTextTop } = measurePage(win, max));
 		const hero = win.document.querySelector<HTMLElement>(".landing-hero");
-		if (hero) layer.style.setProperty("--hero-h", `${hero.offsetHeight}px`);
+		metrics = {
+			heroHeight: hero ? hero.offsetHeight : viewport,
+			tail: cssLength(layer, "--hero-tail"),
+			fade: cssLength(layer, "--sky-fade"),
+			viewport,
+		};
+	};
+	const remeasure = () => {
+		measure();
 		schedule();
 	};
 
 	win.addEventListener("scroll", schedule, { passive: true });
-	win.addEventListener("resize", measure);
+	win.addEventListener("resize", remeasure);
 	// La page change de hauteur sans que la fenêtre bouge (polices, offre).
 	const Observer = (win as Window & { ResizeObserver?: typeof ResizeObserver })
 		.ResizeObserver;
-	const observer = Observer ? new Observer(measure) : null;
+	const observer = Observer ? new Observer(remeasure) : null;
 	if (observer && win.document.body) observer.observe(win.document.body);
 	measure();
+	paint();
 
 	return () => {
 		win.removeEventListener("scroll", schedule);
-		win.removeEventListener("resize", measure);
+		win.removeEventListener("resize", remeasure);
 		observer?.disconnect();
 		if (frame) win.cancelAnimationFrame(frame);
 		frame = 0;

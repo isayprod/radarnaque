@@ -4,9 +4,12 @@ import {
 	contrastRatio,
 	HERO_END,
 	heroAnchor,
+	OPEN_END,
 	PALETTE_KEYS,
 	paletteAt,
+	RAMP_MIN,
 	scrollProgress,
+	skyStops,
 	startSky,
 } from "../src/landing/gradient";
 
@@ -153,17 +156,18 @@ describe("heroAnchor", () => {
 		).toBe(541);
 	});
 
-	it("fenêtre haute : texte déjà visible en haut de page → 1 px, sans borne d'un tiers du hero", () => {
-		// 1080 × 1800 : le premier texte est à 1500 px, dans la fenêtre dès y = 0.
+	it("fenêtre haute (texte visible en haut de page) : rampe de RAMP_MIN px au moins, pas de saut au premier pixel", () => {
+		expect(RAMP_MIN).toBeGreaterThanOrEqual(200);
+		// 1080 × 1800 : le premier texte est à 1430 px, dans la fenêtre dès y = 0.
 		expect(
 			heroAnchor({
-				heroHeight: 900,
-				firstTextTop: 1500,
+				heroHeight: 815,
+				firstTextTop: 1430,
 				viewport: 1800,
-				max: 1900,
+				max: 1500,
 			}),
-		).toBe(1);
-		// Le premier texte juste sous la fenêtre : le repère le suit, même sous un tiers du hero.
+		).toBe(RAMP_MIN);
+		// Premier texte juste sous la fenêtre : rampe minimale aussi.
 		expect(
 			heroAnchor({
 				heroHeight: 900,
@@ -171,10 +175,10 @@ describe("heroAnchor", () => {
 				viewport: 1800,
 				max: 1900,
 			}),
-		).toBe(100);
+		).toBe(RAMP_MIN);
 	});
 
-	it("au plus le hero entier et la moitié du scroll", () => {
+	it("au plus le hero entier et la moitié du scroll, 1 px au moins", () => {
 		expect(
 			heroAnchor({
 				heroHeight: 700,
@@ -191,9 +195,17 @@ describe("heroAnchor", () => {
 				max: 600,
 			}),
 		).toBe(300);
+		expect(
+			heroAnchor({
+				heroHeight: 900,
+				firstTextTop: 1700,
+				viewport: 900,
+				max: 0,
+			}),
+		).toBe(1);
 	});
 
-	it("avec le repère, p atteint 0,15 dès que le premier texte entre dans la fenêtre", () => {
+	it("fenêtre basse : p atteint 0,15 dès que le premier texte entre dans la fenêtre", () => {
 		const m = {
 			heroHeight: 900,
 			firstTextTop: 1950,
@@ -206,6 +218,108 @@ describe("heroAnchor", () => {
 			HERO_END,
 		);
 	});
+});
+
+/** Canaux 0-255 d'une couleur `#rrggbb`. */
+const rgb = (c: string) => canaux(c);
+
+/** Couleur peinte par le calque à `y` (pixels dans la fenêtre), interpolée en sRGB comme le navigateur. */
+function couleurA(stops: number[], couleurs: string[], y: number): string {
+	const k = couleurs.map(rgb);
+	const premier = stops[0] ?? 0;
+	if (y <= premier) return couleurs[0] ?? "";
+	for (let i = 1; i < stops.length; i++) {
+		const a = stops[i - 1] ?? 0;
+		const b = stops[i] ?? 0;
+		if (y <= b) {
+			const t = b === a ? 1 : (y - a) / (b - a);
+			const c = (k[i - 1] ?? []).map((v, n) => v + ((k[i]?.[n] ?? v) - v) * t);
+			return `rgb(${c.join(", ")})`;
+		}
+	}
+	return couleurs.at(-1) ?? "";
+}
+
+/** --bg-0 des tokens. */
+const BG_0 = "#020b2d";
+
+/** Fenêtres mesurées dans le navigateur (hero, queue, premier texte, scroll). */
+const FENETRES = [
+	{ nom: "1080 × 1800", H: 815, tail: 343, V: 1800, text: 1430, max: 1500 },
+	{ nom: "2560 × 1500", H: 891, tail: 384, V: 1500, text: 1465, max: 1775 },
+	{ nom: "1024 × 1366", H: 700, tail: 330, V: 1366, text: 1250, max: 1750 },
+	{ nom: "1440 × 900", H: 867, tail: 384, V: 900, text: 1449, max: 2351 },
+	{ nom: "390 × 844", H: 578, tail: 204, V: 844, text: 1012, max: 3045 },
+];
+
+describe("skyStops", () => {
+	const m = { heroHeight: 867, tail: 384, fade: 120, viewport: 900 };
+
+	it("p = 0, texte loin : positions du hero (mêmes formules que .landing-hero), --sky-below --sky-fade plus bas", () => {
+		expect(skyStops(m, 0, 1449)).toEqual([
+			0,
+			867 - 384,
+			867 - 384 * 0.62,
+			867 - 384 * 0.36,
+			867 - 384 * 0.16,
+			867,
+			867 + 120,
+		]);
+	});
+
+	it("après OPEN_END : espacement régulier sur la fenêtre, --sky-below au bas (invisible)", () => {
+		expect(OPEN_END).toBeGreaterThan(HERO_END);
+		expect(skyStops(m, OPEN_END, 100)).toEqual([0, 0, 225, 450, 675, 900, 900]);
+	});
+
+	it("tant que p < HERO_END, --sky-below commence au-dessus du premier texte visible", () => {
+		for (const p of [0.02, 0.07, 0.12, 0.149]) {
+			const stops = skyStops(m, p, 500);
+			expect(stops.at(-1), String(p)).toBeLessThanOrEqual(500);
+		}
+	});
+
+	it("positions croissantes, jamais négatives", () => {
+		for (let p = 0; p <= 1; p += 0.01)
+			for (const textTop of [-400, 0, 300, 2000]) {
+				const stops = skyStops(m, p, textTop);
+				stops.forEach((y, i) => {
+					expect(y).toBeGreaterThanOrEqual(i === 0 ? 0 : (stops[i - 1] ?? 0));
+				});
+			}
+	});
+
+	it.each(FENETRES)(
+		"$nom : rampe d'au moins 200 px, et à toute position du scroll, le texte sous le premier bloc est sur une couleur à 4,5:1",
+		({ H, tail, V, text, max }) => {
+			const metrics = { heroHeight: H, tail, fade: 120, viewport: V };
+			const anchor = heroAnchor({
+				heroHeight: H,
+				firstTextTop: text,
+				viewport: V,
+				max,
+			});
+			expect(anchor).toBeGreaterThanOrEqual(200);
+			let minimum = Number.POSITIVE_INFINITY;
+			for (let y = 0; y <= max; y += 4) {
+				const p = scrollProgress(y, max, anchor);
+				const textTop = text - y;
+				if (textTop >= V) continue;
+				const stops = skyStops(metrics, p, textTop);
+				const [s1, s2, s3, s4, s5] = paletteAt(p);
+				const couleurs = [s1, s1, s2, s3, s4, s5, BG_0];
+				for (let ty = Math.max(0, textTop); ty <= V; ty += 6) {
+					const ratio = contrastRatio(TEXT_2, couleurA(stops, couleurs, ty));
+					minimum = Math.min(minimum, ratio);
+					if (ratio < 4.5)
+						throw new Error(
+							`y = ${y}, texte à ${ty} px : ${ratio.toFixed(2)}:1`,
+						);
+				}
+			}
+			expect(minimum).toBeGreaterThanOrEqual(4.5);
+		},
+	);
 });
 
 /** Fenêtre factice : écouteurs, images (`requestAnimationFrame`) et hauteurs contrôlés. */
