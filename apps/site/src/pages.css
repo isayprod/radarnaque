@@ -1,42 +1,302 @@
+/*
+ * Pages /pricing et /privacy (spec landing §6) : fond --bg-0, titres en serif,
+ * navigation et pied de page partagés avec la landing (layout.ts).
+ * Aucune valeur brute : couleurs, rayons et ombres viennent des tokens ; les
+ * tailles de police sont l'échelle de DESIGN.md §2.3 exprimée en rem
+ * (display-l 36-64 px, display-s 22, text-l 16, text-m 14, text-s 13, text-xs 12, label 11).
+ */
+@import "@radarnaque/design/tokens.css";
+@import "@radarnaque/design/fonts.css";
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html {
+	background-color: var(--bg-0);
+}
+
 body {
-	font-family: system-ui, sans-serif;
-	line-height: 1.5;
 	margin: 0;
-	padding: 16px;
-	color: #1a1a1a;
-	background: #fff;
+	background-color: var(--bg-0);
+	color: var(--text-2);
+	font-family: var(--font-sans);
+	font-size: 1rem;
+	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
 }
-main {
-	max-width: 60rem;
+
+.page {
+	display: flex;
+	flex-direction: column;
+	min-height: 100vh;
+}
+
+/* Liens : --text-2 souligné, plus clair au survol (DESIGN.md §3). */
+a {
+	color: var(--text-2);
+	text-decoration: underline;
+	text-decoration-thickness: 1px;
+	text-underline-offset: 3px;
+	border-radius: var(--r-xs);
+	transition: color var(--dur-fast) var(--ease-enter);
+}
+
+a:hover {
+	color: var(--text-1);
+}
+
+/* L'anneau de focus ; le contour transparent reste visible en mode contraste forcé. */
+a:focus-visible {
+	outline: 2px solid transparent;
+	box-shadow: var(--focus-ring);
+}
+
+/* Sans JavaScript : le message de repli reste lisible. */
+noscript p {
+	max-width: 1120px;
 	margin: 0 auto;
+	padding: 24px 24px 0;
 }
-.lang {
-	text-align: right;
+
+/* --- Navigation partagée --- */
+
+.site-header {
+	border-bottom: 1px solid var(--border-subtle);
 }
-section h2 {
-	font-size: 1.125rem;
+
+.site-nav {
+	display: flex;
+	align-items: center;
+	gap: 24px;
+	max-width: 1120px;
+	margin: 0 auto;
+	padding: 16px 24px;
 }
+
+.site-nav a {
+	text-decoration: none;
+}
+
+.site-nav__brand {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	margin-right: auto;
+	color: var(--text-1);
+	font-family: var(--font-serif);
+	font-size: 1.25rem;
+	line-height: 1;
+	letter-spacing: -0.01em;
+}
+
+.site-nav__brand svg {
+	flex: none;
+}
+
+.site-nav__brand:hover {
+	color: var(--text-1);
+}
+
+.site-nav__links {
+	display: flex;
+	gap: 24px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+/* Texte blanc à 78 % (spec landing §3.1), dérivé de --text-1. */
+.site-nav__links a {
+	color: color-mix(in srgb, var(--text-1) 78%, transparent);
+	font-size: 0.875rem;
+	font-weight: 500;
+}
+
+.site-nav__links a:hover,
+.site-nav__links a[aria-current="page"] {
+	color: var(--text-1);
+}
+
+.site-nav__lang {
+	display: inline-flex;
+	align-items: center;
+	min-height: 32px;
+	padding: 0 14px;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--r-pill);
+	color: var(--text-1);
+	font-size: 0.75rem;
+	font-weight: 500;
+	letter-spacing: 0.06em;
+}
+
+.site-nav__lang:hover {
+	background-color: var(--bg-3);
+}
+
+/* Sous 768 px : seuls le logo et le lien de langue restent (spec landing §3.1). */
+@media (max-width: 767px) {
+	.site-nav__links {
+		display: none;
+	}
+}
+
+/* --- Contenu --- */
+
+.page-main {
+	flex: 1;
+	width: 100%;
+	max-width: 1120px;
+	margin: 0 auto;
+	padding: 56px 24px 80px;
+}
+
+h1,
+h2 {
+	color: var(--text-1);
+	font-weight: 400;
+}
+
+h1 {
+	margin: 0 0 16px;
+	font-family: var(--font-serif);
+	font-size: clamp(2.25rem, 5vw, 4rem);
+	line-height: 1.05;
+	letter-spacing: -0.02em;
+}
+
+.intro {
+	max-width: 60ch;
+	margin: 0;
+}
+
+/* /privacy : colonne de lecture d'environ 65 caractères. */
+.page-main--prose {
+	max-width: calc(65ch + 48px);
+}
+
+.page-main--prose h2 {
+	margin: 40px 0 8px;
+	font-family: var(--font-serif);
+	font-size: 1.5rem;
+	line-height: 1.15;
+	letter-spacing: -0.01em;
+}
+
+.page-main--prose section > p {
+	margin: 0;
+}
+
+/* --- /pricing : formules en panneaux (spec landing §3.6) --- */
+
 .plans {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
 	gap: 16px;
+	margin-top: 40px;
 }
+
 .plan {
-	border: 1px solid #ccc;
-	border-radius: 8px;
-	padding: 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	padding: 24px;
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--r-m);
+	background-color: var(--bg-2);
 }
+
+/* Standard mis en avant : bordure --accent à 45 % et léger voile bleu. */
+.plan--featured {
+	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+	background-image: linear-gradient(
+		180deg,
+		var(--accent-soft),
+		transparent 70%
+	);
+}
+
 .plan h2 {
-	margin-top: 0;
+	margin: 0;
+	font-family: var(--font-sans);
+	font-size: 1rem;
+	font-weight: 600;
+	line-height: 1.3;
 }
+
 .tagline {
-	color: #555;
+	margin: -12px 0 0;
+	font-size: 0.875rem;
 }
+
+.prices {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-height: 5rem;
+}
+
 .price {
-	font-weight: 600;
-	margin: 0.25rem 0;
+	margin: 0;
+	font-size: 0.8125rem;
+	font-variant-numeric: tabular-nums;
 }
+
+/* Première ligne : le prix (ou « Gratuit ») en serif. */
+.price:first-child {
+	color: var(--text-1);
+	font-family: var(--font-serif);
+	font-size: 2rem;
+	line-height: 1.1;
+}
+
+.plan ul {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	font-size: 0.875rem;
+}
+
+.plan li {
+	padding: 10px 0;
+	border-top: 1px solid var(--border-subtle);
+}
+
 .soon {
-	margin-top: 24px;
-	font-weight: 600;
+	margin: 24px 0 0;
+	color: var(--text-1);
+	font-size: 0.875rem;
+	font-weight: 500;
+}
+
+/* --- Pied de page partagé (spec landing §3.8) --- */
+
+.site-footer {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	align-items: flex-start;
+	gap: 16px 48px;
+	/* Filet sur toute la largeur, contenu aligné sur la navigation (1120 px au plus). */
+	padding: 32px max(24px, calc((100% - 1072px) / 2)) 40px;
+	border-top: 1px solid var(--border-subtle);
+	font-size: 0.75rem;
+	line-height: 1.4;
+}
+
+.site-footer__data {
+	max-width: 60ch;
+	margin: 0;
+}
+
+.site-footer__links {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px 20px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
 }

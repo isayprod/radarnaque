@@ -1,4 +1,6 @@
 import type { Locale } from "@radarnaque/shared";
+import { toDom } from "./h";
+import { footerNode, navNode, type SitePage } from "./layout";
 import type { Offer, OfferPlan } from "./offer";
 import {
 	fill,
@@ -27,16 +29,20 @@ function el<K extends keyof HTMLElementTagNameMap>(
 	return node;
 }
 
-function langSwitch(doc: Document, locale: Locale, label: string): HTMLElement {
-	const other: Locale = locale === "fr" ? "nl" : "fr";
-	const nav = el(doc, "nav", undefined, "lang");
-	const a = el(doc, "a", label);
-	a.setAttribute("href", `?lang=${other}`);
-	a.setAttribute("hreflang", other);
-	a.setAttribute("lang", other);
-	a.dataset.langSwitch = "";
-	nav.append(a);
-	return nav;
+/**
+ * Remplace le contenu de `root` par la navigation partagée, le contenu de la page
+ * dans `<main>` et le pied de page partagé (rendus par `toDom`).
+ */
+function layout(
+	doc: Document,
+	root: HTMLElement,
+	locale: Locale,
+	page: SitePage,
+	main: HTMLElement,
+): void {
+	const header = el(doc, "header", undefined, "site-header");
+	header.append(toDom(doc, navNode(locale, page)));
+	root.replaceChildren(header, main, toDom(doc, footerNode(locale)));
 }
 
 /** Lignes d'une carte : quota, photos, bouton, puis icônes seulement si le plan les a. */
@@ -64,16 +70,25 @@ function featureLines(
 
 function planCard(
 	doc: Document,
+	key: keyof Offer,
 	text: PlanText,
 	lines: string[],
 	priceLines: string[],
 ): HTMLElement {
-	const card = el(doc, "article", undefined, "plan");
+	// Standard est mis en avant (spec landing §3.6).
+	const card = el(
+		doc,
+		"article",
+		undefined,
+		key === "standard" ? "plan plan--featured" : "plan",
+	);
+	card.dataset.plan = key;
 	card.append(el(doc, "h2", text.name), el(doc, "p", text.tagline, "tagline"));
-	for (const line of priceLines) card.append(el(doc, "p", line, "price"));
+	const prices = el(doc, "div", undefined, "prices");
+	for (const line of priceLines) prices.append(el(doc, "p", line, "price"));
 	const ul = el(doc, "ul");
 	for (const line of lines) ul.append(el(doc, "li", line));
-	card.append(ul);
+	card.append(prices, ul);
 	return card;
 }
 
@@ -109,37 +124,35 @@ export function renderPricing(
 	plans.append(
 		planCard(
 			doc,
+			"trial",
 			t.plans.trial,
 			featureLines(t.plans.trial, trial, locale, "scansTotal"),
 			[t.free],
 		),
 		planCard(
 			doc,
+			"standard",
 			t.plans.standard,
 			featureLines(t.plans.standard, standard, locale, "scansMonth"),
 			priceLines(standard),
 		),
 		planCard(
 			doc,
+			"premium",
 			t.plans.premium,
 			featureLines(t.plans.premium, premium, locale, "scansMonth"),
 			priceLines(premium),
 		),
 	);
 
-	const privacy = el(doc, "a", t.privacyLink);
-	privacy.setAttribute("href", `/privacy/?lang=${locale}`);
-	const footer = el(doc, "p", undefined, "footer");
-	footer.append(privacy);
-
-	root.replaceChildren(
-		langSwitch(doc, locale, t.switchLang),
+	const main = el(doc, "main", undefined, "page-main");
+	main.append(
 		el(doc, "h1", t.title),
-		el(doc, "p", t.intro),
+		el(doc, "p", t.intro, "intro"),
 		plans,
 		el(doc, "p", t.paymentSoon, "soon"),
-		footer,
 	);
+	layout(doc, root, locale, "pricing", main);
 }
 
 function bodyWithEmail(doc: Document, template: string): HTMLElement {
@@ -166,15 +179,11 @@ export function renderPrivacy(
 	doc.documentElement.lang = locale;
 	doc.title = `${t.title} – Radarnaque`;
 
-	const pricing = el(doc, "a", t.backToPricing);
-	pricing.setAttribute("href", `/pricing/?lang=${locale}`);
-	const footer = el(doc, "p", undefined, "footer");
-	footer.append(pricing);
-
-	root.replaceChildren(
-		langSwitch(doc, locale, t.switchLang),
+	// Largeur de lecture de 45 à 70 caractères (pages.css).
+	const main = el(doc, "main", undefined, "page-main page-main--prose");
+	main.append(
 		el(doc, "h1", t.title),
-		el(doc, "p", t.intro),
+		el(doc, "p", t.intro, "intro"),
 		...PRIVACY_ORDER.map((key) => {
 			const section = el(doc, "section");
 			section.append(
@@ -183,6 +192,6 @@ export function renderPrivacy(
 			);
 			return section;
 		}),
-		footer,
 	);
+	layout(doc, root, locale, "privacy", main);
 }

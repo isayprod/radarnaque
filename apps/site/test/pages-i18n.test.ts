@@ -159,7 +159,7 @@ describe("renderPricing", () => {
 				const link = root.querySelector<HTMLAnchorElement>(
 					"a[data-lang-switch]",
 				);
-				expect(link?.getAttribute("href")).toBe(`?lang=${other}`);
+				expect(link?.getAttribute("href")).toBe(`/pricing/?lang=${other}`);
 				expect(link?.getAttribute("hreflang")).toBe(other);
 			});
 

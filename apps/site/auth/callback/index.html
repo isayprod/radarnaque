@@ -5,27 +5,16 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="robots" content="noindex" />
 		<meta name="referrer" content="no-referrer" />
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 		<title>Radarnaque</title>
-		<style>
-			body {
-				font-family: system-ui, sans-serif;
-				display: grid;
-				place-items: center;
-				min-height: 100vh;
-				margin: 0;
-				padding: 16px;
-				box-sizing: border-box;
-				text-align: center;
-			}
-			p {
-				max-width: 32rem;
-				font-size: 1.125rem;
-				line-height: 1.5;
-			}
-		</style>
 	</head>
-	<body>
-		<p id="status" role="status" aria-live="polite">Connexion en cours…</p>
+	<body class="callback">
+		<main class="callback-panel">
+			<span class="callback-logo" data-logo></span>
+			<p id="status" role="status" aria-live="polite">Connexion en cours…</p>
+		</main>
 		<script type="module" src="/src/callback.ts"></script>
 	</body>
 </html>
