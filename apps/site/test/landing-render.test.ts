@@ -435,6 +435,14 @@ describe("landingPlugin", () => {
 			expect(sky).toBeGreaterThan(-1);
 			expect(sky).toBeLessThan(hero);
 			expect(script).toBeGreaterThan(html.indexOf('class="site-footer'));
+			// html.js posée par un script en ligne dans <head>, avant la feuille de
+			// style et le corps : les blocs visibles au chargement ne clignotent pas.
+			const enLigne = html.indexOf(
+				'<script>"noModule" in HTMLScriptElement.prototype && document.documentElement.classList.add("js");</script>',
+			);
+			expect(enLigne).toBeGreaterThan(-1);
+			expect(enLigne).toBeLessThan(html.indexOf("</head>"));
+			expect(enLigne).toBeLessThan(html.indexOf("/src/landing/landing.css"));
 		}
 	});
 

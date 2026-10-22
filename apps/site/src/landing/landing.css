@@ -1,7 +1,7 @@
 /*
  * Landing (spec landing §3 et §5, DESIGN.md §4.1) : formules en panneaux opaques.
  * Sans JavaScript, le hero peint son dégradé et les sections sont sur --bg-0. Avec
- * JavaScript (html.js, posée par main.ts), un calque fixe (.sky) porte le dégradé
+ * JavaScript (html.js, posée en ligne dans <head> puis par main.ts), un calque fixe (.sky) porte le dégradé
  * qui suit le scroll, la page devient transparente au-dessus, et les blocs
  * data-reveal apparaissent en entrant dans la fenêtre.
  * Aucune valeur brute : couleurs, rayons et ombres viennent des tokens ; tailles
@@ -61,6 +61,10 @@
  * image ; par défaut, la palette 0 (le hero). --sky-mix glisse les positions des
  * arrêts de celles du hero (0, en haut de page, --hero-h relu par le script) à un
  * espacement régulier sur la fenêtre (1, dès la fin du hero).
+ * Sous le hero, le dernier arrêt (--sky-below, le --bg-0 de la page sans
+ * JavaScript) garde au --text-2 son contraste tant que le dégradé n'a pas quitté
+ * les couleurs claires du hero ; à --sky-mix = 1, il est repoussé au bas de la
+ * fenêtre et disparaît.
  */
 .sky {
 	--s1: var(--grad-1);
@@ -70,6 +74,10 @@
 	--s5: var(--grad-5);
 	--hero-h: 100%;
 	--sky-mix: 0;
+	/* Sous le hero, tant que --sky-mix < 1 : le fond de la page sans JavaScript,
+	   atteint --sky-fade sous le bas du hero (sous la maquette, avant tout texte). */
+	--sky-below: var(--bg-0);
+	--sky-fade: 120px;
 	position: fixed;
 	inset: 0;
 	z-index: -1;
@@ -100,7 +108,14 @@
 				75% *
 				var(--sky-mix)
 			),
-		var(--s5) calc(var(--hero-h) * (1 - var(--sky-mix)) + 100% * var(--sky-mix))
+		var(--s5) calc(var(--hero-h) * (1 - var(--sky-mix)) + 100% * var(--sky-mix)),
+		var(--sky-below)
+			calc(
+				(var(--hero-h) + var(--sky-fade)) *
+				(1 - var(--sky-mix)) +
+				100% *
+				var(--sky-mix)
+			)
 	);
 }
 

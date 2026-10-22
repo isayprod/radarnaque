@@ -186,22 +186,35 @@ export function scrollProgress(
 }
 
 /**
- * Repère de fin du hero : le haut de `.landing-main` entre dans la fenêtre, au
- * moins un tiers du hero, au plus le hero entier et la moitié de la page. Sans
- * hero : `HERO_END` de la hauteur défilable.
+ * Repère de fin du hero, en pixels de scroll : le haut du premier texte qui suit
+ * la maquette (`firstTextTop`, position dans la page) arrive en bas de la
+ * fenêtre. Au moins 1 px : sur une fenêtre haute où ce texte est déjà visible en
+ * haut de page, la palette passe au crépuscule dès le premier pixel (en haut de
+ * page, le fond sous le hero du calque, --sky-below, garde le contraste). Au plus
+ * le hero entier (fenêtre basse) et la moitié de la hauteur défilable.
  */
-function heroAnchor(win: Window, max: number): number {
+export function heroAnchor(m: {
+	heroHeight: number;
+	firstTextTop: number;
+	viewport: number;
+	max: number;
+}): number {
+	const anchor = Math.min(m.firstTextTop - m.viewport, m.heroHeight, m.max / 2);
+	return Math.max(anchor, 1);
+}
+
+/** Mesures du repère dans la page ; sans hero ni texte après lui : `HERO_END` du scroll. */
+function measureAnchor(win: Window, max: number): number {
 	const doc = win.document;
 	const hero = doc.querySelector<HTMLElement>(".landing-hero");
-	const main = doc.querySelector<HTMLElement>(".landing-main");
-	if (!hero || !main) return HERO_END * max;
-	const heroHeight = hero.offsetHeight;
-	const mainTop = main.getBoundingClientRect().top + win.scrollY;
-	const anchor = Math.min(
-		Math.max(mainTop - win.innerHeight, heroHeight / 3),
-		heroHeight,
-	);
-	return Math.min(anchor, max / 2);
+	const text = doc.querySelector<HTMLElement>(".landing-main [data-reveal]");
+	if (!hero || !text) return HERO_END * max;
+	return heroAnchor({
+		heroHeight: hero.offsetHeight,
+		firstTextTop: text.getBoundingClientRect().top + win.scrollY,
+		viewport: win.innerHeight,
+		max,
+	});
 }
 
 /**
@@ -236,7 +249,7 @@ export function startSky(win: Window, layer: HTMLElement): () => void {
 			0,
 			win.document.documentElement.scrollHeight - win.innerHeight,
 		);
-		anchor = heroAnchor(win, max);
+		anchor = measureAnchor(win, max);
 		const hero = win.document.querySelector<HTMLElement>(".landing-hero");
 		if (hero) layer.style.setProperty("--hero-h", `${hero.offsetHeight}px`);
 		schedule();
