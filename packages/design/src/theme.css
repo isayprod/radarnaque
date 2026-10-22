@@ -1,0 +1,40 @@
+/* Relie les tokens de tokens.css aux utilités Tailwind 4. À importer après "tailwindcss". */
+@theme inline {
+	--color-bg-0: var(--bg-0);
+	--color-bg-1: var(--bg-1);
+	--color-bg-2: var(--bg-2);
+	--color-bg-3: var(--bg-3);
+
+	--color-text-1: var(--text-1);
+	--color-text-2: var(--text-2);
+	--color-text-3: var(--text-3);
+	--color-text-on-light: var(--text-on-light);
+
+	--color-border-subtle: var(--border-subtle);
+	--color-border-default: var(--border-default);
+	--color-border-strong: var(--border-strong);
+
+	--color-accent: var(--accent);
+	--color-accent-soft: var(--accent-soft);
+
+	--color-success: var(--success);
+	--color-success-soft: var(--success-soft);
+	--color-warning: var(--warning);
+	--color-warning-soft: var(--warning-soft);
+	--color-danger: var(--danger);
+	--color-danger-soft: var(--danger-soft);
+	--color-info: var(--info);
+	--color-info-soft: var(--info-soft);
+
+	--color-glass: var(--glass-bg);
+	--color-glass-strong: var(--glass-bg-strong);
+
+	--radius-xs: var(--r-xs);
+	--radius-s: var(--r-s);
+	--radius-m: var(--r-m);
+	--radius-l: var(--r-l);
+	--radius-pill: var(--r-pill);
+
+	--font-sans: var(--font-sans);
+	--font-serif: var(--font-serif);
+}
