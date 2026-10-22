@@ -485,6 +485,46 @@ describe("RiskBadge : panneau", () => {
 		expect(dialog.style.left).toBe("-168px");
 	});
 
+	test("panneau ouvert pendant l'analyse, la pilule change de largeur et de place : le décalage suit", async () => {
+		vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(
+			1280,
+		);
+		let x = 1100;
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+			function (this: HTMLElement) {
+				const shift = Number.parseFloat(this.style.left || "0");
+				return DOMRect.fromRect({ x: x + shift, y: 0, width: 340 });
+			},
+		);
+		let finish!: (response: BgResponse<AnalysisResult>) => void;
+		scanReply.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				}),
+		);
+		const user = userEvent.setup();
+		render(
+			<RiskBadge
+				report={medium}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={cached(active)}
+			/>,
+		);
+		await user.click(launch());
+		await user.click(await findToggle());
+		const dialog = screen.getByRole("dialog");
+		expect(dialog.style.left).toBe("-168px");
+		// Le résultat arrive : la pilule rétrécit, la racine passe à la ligne, à gauche.
+		x = 40;
+		await act(async () => {
+			finish({ ok: true, data: aiHigh });
+		});
+		expect(screen.getByRole("dialog").style.left).toBe("");
+	});
+
 	test("contraste : la pilule et le panneau sont en verre opaque des pages tierces (bg-glass-host), jamais bg-glass-strong", async () => {
 		const user = userEvent.setup();
 		const dialog = await openHigh(user);
