@@ -1890,6 +1890,209 @@ describe("RiskBadge : bandeau des annonces professionnelles", () => {
 	});
 });
 
+describe("RiskBadge : focus clavier", () => {
+	const RETRY = contentText("fr", "ai.retry");
+	const retry = () => screen.getByRole("button", { name: RETRY });
+	/** Pastille avec accès actif en cache, et un bouton de la page hôte à côté. */
+	const renderWithPage = () =>
+		render(
+			<div>
+				<button type="button">page</button>
+				<RiskBadge
+					report={high}
+					listing={listing}
+					locale="fr"
+					ai={ai}
+					accessCache={cached(active)}
+				/>
+			</div>,
+		);
+	/** Analyse suivie à la main : `answer` la termine. */
+	const pendingScan = () => {
+		let answer!: (value: BgResponse<AnalysisResult>) => void;
+		scanReply.mockReturnValueOnce(
+			new Promise((resolve) => {
+				answer = resolve;
+			}),
+		);
+		return (value: BgResponse<AnalysisResult>) =>
+			act(async () => answer(value));
+	};
+
+	test("Échap, focus dans le panneau : le focus revient à la pilule", async () => {
+		const user = userEvent.setup();
+		renderWithPage();
+		await launchToResult(user);
+		await user.click(toggle());
+		screen.getByRole("button", { name: PANEL_CLOSE }).focus();
+		await user.keyboard("{Escape}");
+		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(document.activeElement).toBe(toggle());
+	});
+
+	test("Échap, focus sur la page hôte : le panneau se ferme sans lui voler le focus", async () => {
+		const user = userEvent.setup();
+		renderWithPage();
+		await launchToResult(user);
+		await user.click(toggle());
+		const page = screen.getByRole("button", { name: "page" });
+		page.focus();
+		await user.keyboard("{Escape}");
+		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(document.activeElement).toBe(page);
+	});
+
+	test("dans un Shadow DOM : Échap, focus dans le panneau, le focus revient à la pilule", async () => {
+		const user = userEvent.setup();
+		const host = document.createElement("div");
+		document.body.append(host);
+		const shadow = host.attachShadow({ mode: "open" });
+		const container = document.createElement("div");
+		shadow.append(container);
+		const view = render(
+			<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />,
+			{ container },
+		);
+		await user.click(within(container).getByRole("button", { name: LAUNCH }));
+		const pill = await within(container).findByRole("button", {
+			name: /Radarnaque/,
+		});
+		await vi.waitFor(() => expect(pill.textContent).toContain("/100"));
+		await user.click(pill);
+		within(container).getByRole("button", { name: PANEL_CLOSE }).focus();
+		await user.keyboard("{Escape}");
+		expect(within(container).queryByRole("dialog")).toBeNull();
+		expect(shadow.activeElement).toBe(
+			within(container).getByRole("button", { name: /Radarnaque/ }),
+		);
+		view.unmount();
+		host.remove();
+	});
+
+	test("analyse lancée au clavier puis interrompue : le focus passe à « Relancer »", async () => {
+		const user = userEvent.setup();
+		const finish = pendingScan();
+		renderWithPage();
+		launch().focus();
+		await user.keyboard("{Enter}");
+		expect(document.activeElement).toBe(toggle());
+		await finish({ ok: false, error: { code: "stream_interrupted" } });
+		expect(document.activeElement).toBe(retry());
+	});
+
+	test("analyse lancée au clavier puis en échec : le focus passe à « Analyser » de la pilule d'erreur", async () => {
+		const user = userEvent.setup();
+		const finish = pendingScan();
+		renderWithPage();
+		launch().focus();
+		await user.keyboard("{Enter}");
+		await finish({ ok: false, error: { code: "analysis_failed" } });
+		expect(screen.getByText(aiErrorText("fr", "analysis_failed"))).toBeTruthy();
+		expect(document.activeElement).toBe(launch());
+	});
+
+	test("« Relancer » au clavier : le focus passe à la pilule de l'analyse en cours, puis du résultat", async () => {
+		const user = userEvent.setup();
+		const first = pendingScan();
+		renderWithPage();
+		launch().focus();
+		await user.keyboard("{Enter}");
+		await first({ ok: false, error: { code: "timeout" } });
+		const second = pendingScan();
+		retry().focus();
+		await user.keyboard("{Enter}");
+		expect(ai.scan).toHaveBeenCalledTimes(2);
+		expect(toggle().getAttribute("aria-busy")).toBe("true");
+		expect(document.activeElement).toBe(toggle());
+		await second({ ok: true, data: aiHigh });
+		expect(toggle().textContent).toContain("82/100");
+		expect(document.activeElement).toBe(toggle());
+	});
+
+	test("échec arrivé alors que le focus est sur la page hôte : il y reste", async () => {
+		const user = userEvent.setup();
+		const finish = pendingScan();
+		renderWithPage();
+		launch().focus();
+		await user.keyboard("{Enter}");
+		const page = screen.getByRole("button", { name: "page" });
+		page.focus();
+		await finish({ ok: false, error: { code: "stream_interrupted" } });
+		expect(retry()).toBeTruthy();
+		expect(document.activeElement).toBe(page);
+	});
+
+	test("lancée au clavier, quota relu à 0 après l'échec : le focus reste sur la pilule d'erreur, hors de l'ordre de tabulation", async () => {
+		const user = userEvent.setup();
+		const finish = pendingScan();
+		renderWithPage();
+		launch().focus();
+		await user.keyboard("{Enter}");
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { ...active, remaining: { scans: 0 } },
+		}));
+		await finish({ ok: false, error: { code: "quota_exhausted" } });
+		await vi.waitFor(() => expect(queryLaunch()).toBeNull());
+		const message = screen.getByText(aiErrorText("fr", "quota_exhausted"));
+		const pill = message.parentElement as HTMLElement;
+		expect(pill.getAttribute("tabindex")).toBe("-1");
+		expect(document.activeElement).toBe(pill);
+	});
+
+	test("panneau ouvert, erreur sans action (quota relu à 0) : « Fermer » rend le focus à la pilule réduite au logo", async () => {
+		const user = userEvent.setup();
+		const finish = pendingScan();
+		renderWithPage();
+		await user.click(launch());
+		await user.click(toggle());
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { ...active, remaining: { scans: 0 } },
+		}));
+		await finish({ ok: false, error: { code: "quota_exhausted" } });
+		const dialog = screen.getByRole("dialog");
+		expect(
+			await within(dialog).findByText(aiErrorText("fr", "quota_exhausted")),
+		).toBeTruthy();
+		await vi.waitFor(() => expect(queryLaunch()).toBeNull());
+		// Pilule réduite au logo : ni message (dans le panneau), ni action.
+		const pill = dialog.parentElement?.firstElementChild?.firstElementChild as
+			| HTMLElement
+			| undefined;
+		expect(pill?.textContent).toBe("");
+		expect(pill?.getAttribute("tabindex")).toBe("-1");
+		await user.click(within(dialog).getByRole("button", { name: PANEL_CLOSE }));
+		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(document.activeElement).toBe(
+			screen.getByText(aiErrorText("fr", "quota_exhausted")).parentElement,
+		);
+	});
+
+	test("pilule d'erreur avec une action : pas de tabindex sur la pilule", async () => {
+		const user = userEvent.setup();
+		const finish = pendingScan();
+		renderWithPage();
+		await user.click(launch());
+		await finish({ ok: false, error: { code: "stream_interrupted" } });
+		expect(retry().parentElement?.hasAttribute("tabindex")).toBe(false);
+	});
+
+	test("le panneau est nommé par son titre (aria-labelledby), sans aria-label", async () => {
+		const user = userEvent.setup();
+		renderWithPage();
+		await launchToResult(user);
+		await user.click(toggle());
+		const dialog = screen.getByRole("dialog", {
+			name: contentText("fr", "panel.title"),
+		});
+		expect(dialog.hasAttribute("aria-label")).toBe(false);
+		const heading = within(dialog).getByRole("heading", { level: 2 });
+		expect(heading.id).not.toBe("");
+		expect(dialog.getAttribute("aria-labelledby")).toBe(heading.id);
+	});
+});
+
 describe("badge.css", () => {
 	const css = readFileSync(
 		resolve(dirname(fileURLToPath(import.meta.url)), "../components/badge.css"),

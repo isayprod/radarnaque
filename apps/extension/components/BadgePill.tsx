@@ -1,10 +1,11 @@
 import type { Locale } from "@radarnaque/shared";
 import {
 	type ReactNode,
-	type Ref,
+	type RefObject,
 	useCallback,
 	useEffect,
 	useId,
+	useLayoutEffect,
 	useRef,
 } from "react";
 import type { ScanState } from "../lib/content/ai-client";
@@ -39,6 +40,67 @@ const ACTION_PILL_CLASS = `${BADGE_PILL_CLASS} cursor-pointer hover:border-borde
 // Action dans la pilule d'erreur : « Relancer » ou « Analyser », soulignée.
 const INLINE_ACTION_CLASS =
 	"shrink-0 cursor-pointer rounded-xs text-text-1 underline underline-offset-2 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
+
+/**
+ * Ce qui reçoit le focus dans la pilule : son bouton ou son lien, l'action de la
+ * pilule d'erreur, sinon la pilule d'erreur elle-même (`tabindex="-1"`).
+ */
+const PILL_FOCUSABLE = "button, a[href], [tabindex]";
+
+/** Donne le focus à la pilule contenue dans `container` ; faux s'il n'y a rien à focaliser. */
+export function focusPill(container: HTMLElement | null): boolean {
+	const target = container?.querySelector<HTMLElement>(PILL_FOCUSABLE);
+	if (!target) return false;
+	target.focus();
+	return true;
+}
+
+/** Élément actif du document ou du shadow root qui contient `element`. */
+export function activeIn(element: Element): Element | null {
+	const root = element.getRootNode();
+	return root instanceof ShadowRoot
+		? root.activeElement
+		: element.ownerDocument.activeElement;
+}
+
+/**
+ * Garde le focus sur la pilule quand elle change d'élément : le bouton devient
+ * une pilule d'erreur (`span`), son action disparaît (accès relu à 0), ou
+ * « Relancer » laisse place au bouton de l'analyse en cours. Le navigateur
+ * mettrait sinon le focus sur `body`. Seulement si la pilule avait le focus :
+ * jamais volé à la page hôte ni au panneau.
+ */
+function useKeepPillFocus(container: RefObject<HTMLSpanElement | null>) {
+	// Vrai tant que le focus est dans la pilule. Un élément retiré du DOM ne
+	// remonte pas son `focusout` jusqu'au conteneur : le drapeau reste vrai.
+	const focusedRef = useRef(false);
+	useEffect(() => {
+		const element = container.current;
+		if (!element) return;
+		const onFocusIn = () => {
+			focusedRef.current = true;
+		};
+		const onFocusOut = (event: FocusEvent) => {
+			const next = event.relatedTarget;
+			if (next instanceof Node && element.contains(next)) return;
+			focusedRef.current = false;
+		};
+		element.addEventListener("focusin", onFocusIn);
+		element.addEventListener("focusout", onFocusOut);
+		return () => {
+			element.removeEventListener("focusin", onFocusIn);
+			element.removeEventListener("focusout", onFocusOut);
+		};
+	}, [container]);
+	// Après chaque rendu : le focus a-t-il quitté une pilule qui l'avait ?
+	useLayoutEffect(() => {
+		const element = container.current;
+		if (!focusedRef.current || !element) return;
+		const active = activeIn(element);
+		if (active && element.contains(active)) return;
+		if (!focusPill(element)) focusedRef.current = false;
+	});
+}
 
 /** Plus aucune analyse d'après l'accès lu (quota du plan ou plafond de l'essai). */
 const noScansLeft = (access: Access) =>
@@ -125,7 +187,9 @@ export function useLaunch(scan: AiScan, key: string, openPanel: () => void) {
  *    les formules sans abonnement ; grisé sans analyse restante, mais focusable,
  *    la raison lue avec lui.
  * Repos, analyse en cours et résultat sont un même `<button>` à la même place :
- * lancée au clavier, l'analyse garde le focus sur la pilule.
+ * lancée au clavier, l'analyse garde le focus sur la pilule. Quand l'élément
+ * change (erreur, action perdue, « Relancer »), `useKeepPillFocus` y remet le
+ * focus si la pilule l'avait.
  * Rien tant que le magasin des résultats IA n'est pas lu (`restoring`) : une
  * fiche déjà analysée affiche directement son résultat, sans « Analyser » avant.
  * L'analyse locale (règles) n'est jamais affichée : elle part seulement avec la
@@ -145,9 +209,12 @@ export function BadgePill({
 	open: boolean;
 	onToggle(): void;
 	onLaunch(): void;
-	/** Conteneur de la pilule : la fermeture du panneau y rend le focus. */
-	pillRef?: Ref<HTMLSpanElement>;
+	/** Conteneur de la pilule : la fermeture du panneau y rend le focus (`focusPill`). */
+	pillRef?: RefObject<HTMLSpanElement | null>;
 }) {
+	const ownRef = useRef<HTMLSpanElement>(null);
+	const containerRef = pillRef ?? ownRef;
+	useKeepPillFocus(containerRef);
 	const levelId = useId();
 	const scoreId = useId();
 	const reasonId = useId();
@@ -252,8 +319,13 @@ export function BadgePill({
 					{launchText}
 				</button>
 			);
+		// Sans action, la pilule elle-même peut recevoir le focus (hors de l'ordre
+		// de tabulation) : la fermeture du panneau ou la perte de l'action l'y met.
 		pill = (
-			<span className={BADGE_PILL_CLASS}>
+			<span
+				tabIndex={action === null ? -1 : undefined}
+				className={BADGE_PILL_CLASS}
+			>
 				<Logo size={16} className="shrink-0 opacity-60" />
 				{error !== null && (
 					<span title={error} className="min-w-0 truncate text-text-2">
@@ -298,7 +370,7 @@ export function BadgePill({
 	return (
 		<>
 			<span
-				ref={pillRef}
+				ref={containerRef}
 				className="inline-flex max-w-full items-center align-middle"
 			>
 				{pill}
