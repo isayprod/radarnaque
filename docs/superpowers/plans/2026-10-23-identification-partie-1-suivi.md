@@ -99,6 +99,23 @@ tourné jusqu'au bout et a écrit dans la base de critères et dans `llm_calls` 
   miroir de `IdentificationOut` et des nouveaux événements dans `packages/shared/src/stream.ts`.
 - **Partie 3 (admin et site) :** écran « Base de critères », tableau de bord de l'identification,
   identification dans le détail d'une analyse, essai d'une étape, mise à jour de `/privacy`.
-- **Petites remarques de relecture, reportées :** liste tenue dans le journal d'avancement du plan
-  (aucune n'affecte la justesse des chiffres ni la sécurité). Elles sont à traiter, ou à écarter une
-  à une, lors de la relecture finale de la branche, qui en est responsable.
+- **Petites remarques de relecture, reportées après la fusion** (triées par la relecture finale :
+  aucune n'affecte la justesse des chiffres ni la sécurité) :
+  - un nom de domaine écrit par le vendeur peut encore apparaître dans le texte des recherches
+    affichées (`searches[].query`) : `clean_query` ne refuse pas les domaines ; à durcir ;
+  - libellé d'objet vide quand la catégorie et tous les candidats sont refusés : la partie 2 affiche
+    « Objet » ;
+  - partie 3 : la fusion des critères lors d'une relance renumérote les critères, perd
+    `edited_by_admin` et repousse `refreshed_at` ; à revoir avant l'édition des critères dans l'admin ;
+  - partie 3 : le détail d'une analyse n'a pas de lien vers son identification (prévoir
+    `analyses.identification_id`) ; `images_analyzed` vaut 0 côté analyse quand `scam_sends_photos`
+    est à non ;
+  - spécification : une référence lue en entier mais absente des extraits donne « Incertain 40 % »
+    sans étape de critères ; envisager un plancher modéré ou lancer les critères quand même, à décider
+    avec `pnpm eval:identify` ;
+  - tests à compléter : plafonds 70 et 85 de la confiance, déconnexion du client sur
+    `/api/identify/stream`, échec de `identify` (`LLMError`, `ProviderError`), annulation au milieu
+    des recherches ;
+  - nettoyage : `eval_cli` importe des fonctions privées ; corps de `identify_input_hash` dupliqué
+    depuis `input_hash` ; `pipeline.py` (environ 860 lignes) pourrait sortir le code des critères
+    dans son propre module ; `analyses=0` affiché pour les prompts d'étape.
