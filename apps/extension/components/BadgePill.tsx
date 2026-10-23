@@ -32,12 +32,12 @@ export const PILL_CLASS =
 
 // Pilule de la fiche : 28 px de haut, au plus 340 px de large (seule la ligne
 // d'état ou le message se tronquent), texte 13 px.
-const BADGE_PILL_CLASS = `${PILL_CLASS} h-7 max-w-[340px] min-w-0 gap-2 px-3 text-[13px] leading-none`;
+export const BADGE_PILL_CLASS = `${PILL_CLASS} h-7 max-w-[340px] min-w-0 gap-2 px-3 text-[13px] leading-none`;
 
 // Pilule cliquable : repos, analyse en cours, résultat.
-const ACTION_PILL_CLASS = `${BADGE_PILL_CLASS} cursor-pointer hover:border-border-strong aria-disabled:cursor-default aria-disabled:text-text-3 aria-disabled:hover:border-white/12`;
+export const ACTION_PILL_CLASS = `${BADGE_PILL_CLASS} cursor-pointer hover:border-border-strong aria-disabled:cursor-default aria-disabled:text-text-3 aria-disabled:hover:border-white/12`;
 
-// Action dans la pilule d'erreur : « Relancer » ou « Analyser », soulignée.
+// Action dans la pilule d'erreur : « Relancer », « Analyser » ou « Identifier », soulignée.
 const INLINE_ACTION_CLASS =
 	"shrink-0 cursor-pointer rounded-xs text-text-1 underline underline-offset-2 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
 
@@ -107,7 +107,7 @@ function focusLost(element: Element): boolean {
  * la micro-tâche suivante, pour qu'une suppression bien plus tard (fenêtre
  * quittée, où Chromium n'émet plus rien) ne reprenne pas le focus.
  */
-function useKeepPillFocus(container: RefObject<HTMLSpanElement | null>) {
+export function useKeepPillFocus(container: RefObject<HTMLSpanElement | null>) {
 	// Vrai tant que le focus est dans la pilule (et après une suppression sans
 	// événement, comme dans Firefox).
 	const focusedRef = useRef(false);
@@ -156,7 +156,7 @@ function useKeepPillFocus(container: RefObject<HTMLSpanElement | null>) {
 }
 
 /** Plus aucune analyse d'après l'accès lu (quota du plan ou plafond de l'essai). */
-const noScansLeft = (access: Access) =>
+export const noScansLeft = (access: Access) =>
 	access !== "loading" &&
 	!("error" in access) &&
 	access.status === "active" &&
@@ -168,16 +168,23 @@ export function badgeError(ai: ScanState, locale: Locale): string | null {
 }
 
 /**
- * Clic sur « Analyser » : l'analyse si le compte en a encore, la connexion s'il
- * est déconnecté. Accès inconnu ou déconnecté (R8 : toujours relu), l'accès est
+ * Clic sur « Analyser » ou « Identifier » : l'action `start` (`scan.scan` ou
+ * `scan.identify`) si le compte a encore une analyse, la connexion s'il est
+ * déconnecté. `included` : l'action ne compte pas dans le quota (l'analyse
+ * incluse avec l'identification, acceptée à 0 analyse restante). Accès inconnu ou déconnecté (R8 : toujours relu), l'accès est
  * d'abord lu, puis l'action suit la réponse. Un accès en erreur, ou sans
  * abonnement d'après la lecture, ouvre le panneau, qui dit pourquoi. La popup de
  * connexion impossible à ouvrir (`loginUnavailable`) ouvre aussi le panneau, qui
  * montre le texte de repli.
  */
-export function useLaunch(scan: AiScan, key: string, openPanel: () => void) {
+export function useLaunch(
+	scan: AiScan,
+	key: string,
+	openPanel: () => void,
+	start: () => void,
+	included = false,
+) {
 	const { access, loadAccess, login, loginUnavailable } = scan;
-	const start = scan.scan;
 	// Accès vu au clic, en attente d'une nouvelle lecture ; null sans clic en attente.
 	// Chaque lecture donne un objet neuf (clone du message du service worker) : un
 	// accès différent de `from` est la réponse attendue. Sans clic, rien n'est lu.
@@ -194,9 +201,9 @@ export function useLaunch(scan: AiScan, key: string, openPanel: () => void) {
 				login();
 				// Déjà su impossible : le texte de repli tout de suite.
 				if (loginUnavailable) openPanel();
-			} else if (reading.remaining.scans !== 0) start();
+			} else if (reading.remaining.scans !== 0 || included) start();
 		},
-		[openPanel, login, loginUnavailable, start],
+		[openPanel, login, loginUnavailable, start, included],
 	);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: `key` oublie le clic en attente d'une annonce quittée
 	useEffect(() => {
@@ -215,7 +222,7 @@ export function useLaunch(scan: AiScan, key: string, openPanel: () => void) {
 		openPanel();
 	}, [loginUnavailable, openPanel]);
 	return useCallback(() => {
-		if (noScansLeft(access)) return;
+		if (noScansLeft(access) && !included) return;
 		if (
 			access === "loading" ||
 			(!("error" in access) && access.status === "signedOut")
@@ -225,24 +232,180 @@ export function useLaunch(scan: AiScan, key: string, openPanel: () => void) {
 			return;
 		}
 		act(access);
-	}, [access, act, loadAccess]);
+	}, [access, act, loadAccess, included]);
+}
+
+/** Lien vers les formules, à la place de l'action sans abonnement. */
+export function PricingLink({
+	href,
+	label,
+	className,
+	children,
+}: {
+	href: string;
+	/** Nom accessible : celui de l'action qu'il remplace. */
+	label: string;
+	className: string;
+	children: ReactNode;
+}) {
+	return (
+		<a
+			href={href}
+			target="_blank"
+			rel="noopener"
+			aria-label={label}
+			className={className}
+		>
+			{children}
+		</a>
+	);
 }
 
 /**
- * La pilule de la fiche, seule à porter un résultat, et toujours celui de l'IA.
- * Selon l'état, dans cet ordre :
+ * Action de la pilule d'erreur : « Relancer » après une requête coupée en route,
+ * le lien vers les formules sans abonnement, sinon l'action de repos (« Analyser »,
+ * « Identifier »). Aucune si l'accès relu ne laisse plus d'analyse (`empty`) :
+ * jamais un bouton qui ne ferait rien.
+ */
+export function errorAction({
+	code,
+	empty,
+	noSubscription,
+	onLaunch,
+	pricingUrl,
+	launchLabel,
+	launchText,
+	locale,
+	describedBy,
+}: {
+	code: string;
+	empty: boolean;
+	noSubscription: boolean;
+	onLaunch(): void;
+	pricingUrl: string;
+	launchLabel: string;
+	launchText: string;
+	locale: Locale;
+	describedBy?: string;
+}): ReactNode {
+	if (RELAUNCH_CODES.has(code) && !empty)
+		return (
+			<button type="button" onClick={onLaunch} className={INLINE_ACTION_CLASS}>
+				{contentText(locale, "ai.retry")}
+			</button>
+		);
+	if (noSubscription)
+		return (
+			<PricingLink
+				href={pricingUrl}
+				label={launchLabel}
+				className={INLINE_ACTION_CLASS}
+			>
+				{launchText}
+			</PricingLink>
+		);
+	if (empty) return null;
+	return (
+		<button
+			type="button"
+			aria-label={launchLabel}
+			aria-describedby={describedBy}
+			onClick={onLaunch}
+			className={INLINE_ACTION_CLASS}
+		>
+			{launchText}
+		</button>
+	);
+}
+
+/**
+ * Pilule d'erreur : le logo atténué, le message (`error`, null panneau ouvert),
+ * un séparateur et l'action. Sans action, elle peut recevoir le focus elle-même
+ * (hors de l'ordre de tabulation) : la fermeture du panneau ou la perte de
+ * l'action l'y met. Jamais vide : le logo reste.
+ */
+export function ErrorPill({
+	error,
+	action,
+}: {
+	error: string | null;
+	action: ReactNode;
+}) {
+	return (
+		<span
+			tabIndex={action === null ? -1 : undefined}
+			className={BADGE_PILL_CLASS}
+		>
+			<Logo size={16} className="shrink-0 opacity-60" />
+			{error !== null && (
+				<span title={error} className="min-w-0 truncate text-text-2">
+					{error}
+				</span>
+			)}
+			{error !== null && action !== null && (
+				<span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-white/12" />
+			)}
+			{action}
+		</span>
+	);
+}
+
+/**
+ * Cadre d'une pilule de la fiche : le conteneur (où `focusPill` cherche quoi
+ * focaliser), ses descriptions masquées (`hidden`), puis la région annoncée de
+ * sa ligne d'état, au plus une annonce toutes les 2 s (`announced`). `name`
+ * (`data-pill`) distingue les deux pilules pour la galerie.
+ */
+export function PillFrame({
+	name,
+	containerRef,
+	children,
+	hidden,
+	announced,
+}: {
+	name: "identify" | "analyze";
+	containerRef: RefObject<HTMLSpanElement | null>;
+	children: ReactNode;
+	hidden?: ReactNode;
+	announced: string;
+}) {
+	return (
+		<>
+			<span
+				ref={containerRef}
+				data-pill={name}
+				className="inline-flex max-w-full items-center align-middle"
+			>
+				{children}
+				{hidden}
+			</span>
+			<span role="status" aria-live="polite" className="sr-only">
+				{announced}
+			</span>
+		</>
+	);
+}
+
+/**
+ * La pilule « Analyser » de la fiche, seule à porter le résultat de l'analyse,
+ * et toujours celui de l'IA. Selon l'état, dans cet ordre :
  * 1. résultat IA : point, niveau, score ; le clic ouvre ou ferme le panneau ;
  * 2. analyse en cours : le logo animé et la ligne d'état, même clic ;
- * 3. erreur : le logo atténué, son texte (sauf panneau ouvert, qui l'affiche
+ * 3. analyse en file derrière l'identification (`queued`) : le logo et « En
+ *    attente de l'identification… », même clic ;
+ * 4. erreur : le logo atténué, son texte (sauf panneau ouvert, qui l'affiche
  *    déjà), puis « Relancer » (analyse coupée en route) ou « Analyser », ni l'un
  *    ni l'autre si l'accès relu ne laisse plus d'analyse ;
- * 4. repos : le logo et « Analyser », nommé « Analyser avec l'IA » ; un lien vers
+ * 5. repos : le logo et « Analyser », nommé « Analyser avec l'IA » ; un lien vers
  *    les formules sans abonnement ; grisé sans analyse restante, mais focusable,
- *    la raison lue avec lui.
+ *    la raison lue avec lui. Après une identification de l'utilisateur, décrit
+ *    par « Inclus avec l'identification », et jamais grisé : l'analyse incluse
+ *    est acceptée à 0 analyse restante.
  * Repos, analyse en cours et résultat sont un même `<button>` à la même place :
  * lancée au clavier, l'analyse garde le focus sur la pilule. Quand l'élément
  * change (erreur, action perdue, « Relancer »), `useKeepPillFocus` y remet le
- * focus si la pilule l'avait.
+ * focus si la pilule l'avait. Une erreur de l'identification ne s'affiche
+ * jamais ici : elle est sur la pilule « Identifier ».
  * Rien tant que le magasin des résultats IA n'est pas lu (`restoring`) : une
  * fiche déjà analysée affiche directement son résultat, sans « Analyser » avant.
  * L'analyse locale (règles) n'est jamais affichée : elle part seulement avec la
@@ -271,11 +434,14 @@ export function BadgePill({
 	const levelId = useId();
 	const scoreId = useId();
 	const reasonId = useId();
-	const { ai, access } = scan;
+	const includedId = useId();
+	const { ai, access, queued, analysisIncluded } = scan;
 	const shown = shownResult(ai);
 	// Analyse en cours : le logo animé et la ligne d'état du dernier événement.
 	const progress = ai.status === "loading" ? ai.progress : null;
-	const line = progress ? statusLine(progress, locale) : "";
+	const waitingLine =
+		!progress && queued ? contentText(locale, "identify.queued") : "";
+	const line = progress ? statusLine(progress, locale) : waitingLine;
 	const waiting = useWaiting(progress?.lastAt ?? 0, progress !== null);
 	// Analyse en échec : son texte dans la pilule et dans la région annoncée,
 	// sauf panneau ouvert, qui l'affiche et l'annonce déjà (`role="alert"`).
@@ -284,28 +450,19 @@ export function BadgePill({
 	const ariaLabel = contentText(locale, "badge.aria");
 	const launchLabel = contentText(locale, "ai.launch");
 	const launchText = contentText(locale, "ai.launchShort");
-	const empty = noScansLeft(access);
+	const empty = noScansLeft(access) && !analysisIncluded;
 	const reason = contentText(locale, "ai.noScansLeft");
+	const includedText = contentText(locale, "identify.included");
 	const noSubscription =
 		access !== "loading" &&
 		!("error" in access) &&
 		access.status === "noSubscription";
-	// Sans abonnement, « Analyser » est un lien vers les formules.
-	const pricingLink = (className: string, children: ReactNode) => (
-		<a
-			href={scan.pricingUrl}
-			target="_blank"
-			rel="noopener"
-			aria-label={launchLabel}
-			className={className}
-		>
-			{children}
-		</a>
-	);
 
 	let pill: ReactNode = null;
 	// Pilule de repos grisée : la raison, lue avec elle.
 	let disabledReason = false;
+	// « Analyser » décrit par « Inclus avec l'identification ».
+	let included = false;
 	if (scan.restoring) {
 		// Lecture du magasin en cours : rien à cliquer.
 	} else if (shown) {
@@ -330,7 +487,8 @@ export function BadgePill({
 				</span>
 			</button>
 		);
-	} else if (progress) {
+	} else if (progress || queued) {
+		// En file, rien ne tourne encore : le logo reste immobile.
 		pill = (
 			<button
 				type="button"
@@ -340,77 +498,53 @@ export function BadgePill({
 				onClick={onToggle}
 				className={ACTION_PILL_CLASS}
 			>
-				<Logo size={16} animated className="shrink-0" />
+				<Logo size={16} animated={progress !== null} className="shrink-0" />
 				<LiveLine text={line} waiting={waiting} />
 			</button>
 		);
 	} else if (ai.status === "error") {
-		// Après un échec, plus aucune analyse d'après l'accès relu : le message
-		// suffit, jamais un bouton qui ne ferait rien. Panneau ouvert, sans message
-		// ni action, il reste le logo atténué : jamais une pilule vide.
-		let action: ReactNode = null;
-		if (RELAUNCH_CODES.has(ai.code) && !empty)
-			action = (
-				<button
-					type="button"
-					onClick={onLaunch}
-					className={INLINE_ACTION_CLASS}
-				>
-					{contentText(locale, "ai.retry")}
-				</button>
-			);
-		else if (noSubscription)
-			action = pricingLink(INLINE_ACTION_CLASS, launchText);
-		else if (!empty)
-			action = (
-				<button
-					type="button"
-					aria-label={launchLabel}
-					onClick={onLaunch}
-					className={INLINE_ACTION_CLASS}
-				>
-					{launchText}
-				</button>
-			);
-		// Sans action, la pilule elle-même peut recevoir le focus (hors de l'ordre
-		// de tabulation) : la fermeture du panneau ou la perte de l'action l'y met.
+		included = analysisIncluded;
 		pill = (
-			<span
-				tabIndex={action === null ? -1 : undefined}
-				className={BADGE_PILL_CLASS}
-			>
-				<Logo size={16} className="shrink-0 opacity-60" />
-				{error !== null && (
-					<span title={error} className="min-w-0 truncate text-text-2">
-						{error}
-					</span>
-				)}
-				{error !== null && action !== null && (
-					<span
-						aria-hidden="true"
-						className="h-3.5 w-px shrink-0 bg-white/12"
-					/>
-				)}
-				{action}
-			</span>
+			<ErrorPill
+				error={error}
+				action={errorAction({
+					code: ai.code,
+					empty,
+					noSubscription,
+					onLaunch,
+					pricingUrl: scan.pricingUrl,
+					launchLabel,
+					launchText,
+					locale,
+					describedBy: included ? includedId : undefined,
+				})}
+			/>
 		);
 	} else if (noSubscription) {
-		pill = pricingLink(
-			ACTION_PILL_CLASS,
-			<>
+		pill = (
+			<PricingLink
+				href={scan.pricingUrl}
+				label={launchLabel}
+				className={ACTION_PILL_CLASS}
+			>
 				<Logo size={16} className="shrink-0" />
 				{launchText}
-			</>,
+			</PricingLink>
 		);
 	} else {
 		disabledReason = empty;
+		included = analysisIncluded;
+		const describedBy = [
+			empty ? reasonId : null,
+			included ? includedId : null,
+		].filter((id) => id !== null);
 		pill = (
 			<button
 				type="button"
 				aria-label={launchLabel}
 				aria-disabled={empty ? true : undefined}
-				aria-describedby={empty ? reasonId : undefined}
-				title={empty ? reason : undefined}
+				aria-describedby={describedBy.join(" ") || undefined}
+				title={empty ? reason : included ? includedText : undefined}
 				onClick={onLaunch}
 				className={ACTION_PILL_CLASS}
 			>
@@ -421,22 +555,26 @@ export function BadgePill({
 	}
 
 	return (
-		<>
-			<span
-				ref={containerRef}
-				className="inline-flex max-w-full items-center align-middle"
-			>
-				{pill}
-				{disabledReason && (
-					<span id={reasonId} className="sr-only">
-						{reason}
-					</span>
-				)}
-			</span>
-			{/* Annonces de la ligne d'état : au plus une toutes les 2 s. */}
-			<span role="status" aria-live="polite" className="sr-only">
-				{announced}
-			</span>
-		</>
+		<PillFrame
+			name="analyze"
+			containerRef={containerRef}
+			announced={announced}
+			hidden={
+				<>
+					{disabledReason && (
+						<span id={reasonId} className="sr-only">
+							{reason}
+						</span>
+					)}
+					{included && (
+						<span id={includedId} className="sr-only">
+							{includedText}
+						</span>
+					)}
+				</>
+			}
+		>
+			{pill}
+		</PillFrame>
 	);
 }

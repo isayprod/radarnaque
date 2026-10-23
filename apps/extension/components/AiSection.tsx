@@ -1,5 +1,5 @@
 import type { AnalysisResult, Locale } from "@radarnaque/shared";
-import { useId } from "react";
+import { type ReactNode, useId } from "react";
 // Erreurs qui demandent une reconnexion (RELOGIN_CODES) : on propose le bouton « Se connecter ».
 import { RELOGIN_CODES } from "../lib/content/access-policy";
 import type { ScanState } from "../lib/content/ai-client";
@@ -30,7 +30,7 @@ const PILL_BASE_CLASS =
  * primaire (DESIGN.md, boutons « Primary »), soulevée de 1 px au survol (sauf
  * mouvement réduit). Grisée à 40 % une fois désactivée.
  */
-const WHITE_PILL_CLASS = `${PILL_BASE_CLASS} bg-white text-text-on-light shadow-[var(--shadow-pill)] hover:-translate-y-px disabled:hover:translate-y-0 motion-reduce:hover:translate-y-0`;
+export const WHITE_PILL_CLASS = `${PILL_BASE_CLASS} bg-white text-text-on-light shadow-[var(--shadow-pill)] hover:-translate-y-px disabled:hover:translate-y-0 motion-reduce:hover:translate-y-0`;
 
 /**
  * Action secondaire (DESIGN.md, boutons « Secondary ») : transparente, bordure
@@ -38,10 +38,10 @@ const WHITE_PILL_CLASS = `${PILL_BASE_CLASS} bg-white text-text-on-light shadow-
  * l'erreur a sa propre action (formules, connexion), « Lancer une analyse IA »
  * passe en secondaire.
  */
-const SECONDARY_PILL_CLASS = `${PILL_BASE_CLASS} border border-border-strong bg-transparent text-text-1 hover:bg-white/8`;
+export const SECONDARY_PILL_CLASS = `${PILL_BASE_CLASS} border border-border-strong bg-transparent text-text-1 hover:bg-white/8`;
 
 /** Phrase d'un état sans résultat (déconnecté, sans abonnement, erreur) : titre serif. */
-const STATE_TITLE_CLASS =
+export const STATE_TITLE_CLASS =
 	"m-0 font-serif text-[22px] leading-[1.15] font-normal text-text-1";
 
 /**
@@ -71,6 +71,15 @@ export interface AiSectionProps {
 }
 
 /**
+ * Ce dont les états d'accès ont besoin (connexion, formules) : partagé avec le
+ * panneau Identification.
+ */
+export type AccessActionsProps = Pick<
+	AiSectionProps,
+	"locale" | "access" | "onLogin" | "loginUnavailable" | "pricingUrl"
+>;
+
+/**
  * Section IA du panneau. Composant contrôlé : il n'a aucun état réseau propre,
  * l'accès et l'état des analyses viennent du parent. Tout texte de l'IA est rendu
  * en nœuds texte, jamais en HTML.
@@ -96,13 +105,25 @@ export function AiSection(props: AiSectionProps) {
  */
 function SectionBody(props: AiSectionProps) {
 	const { locale, ai } = props;
-	if (ai.status !== "done") return <AccessBody {...props} />;
+	if (ai.status !== "done")
+		return (
+			<AccessBody {...props}>
+				<ScanBlock {...props} />
+			</AccessBody>
+		);
 	return (
 		<ResultView locale={locale} result={ai.result} progress={ai.progress} />
 	);
 }
 
-function AccessBody(props: AiSectionProps) {
+/**
+ * Les états d'accès sans résultat : chargement, erreur, déconnecté (phrase et
+ * « Se connecter »), sans abonnement (lien vers les formules). Accès actif :
+ * `children`, l'action du panneau.
+ */
+export function AccessBody(
+	props: AccessActionsProps & { children: ReactNode },
+) {
 	const { locale, access } = props;
 	if (access === "loading") {
 		return (
@@ -127,7 +148,7 @@ function AccessBody(props: AiSectionProps) {
 	if (access.status === "noSubscription") {
 		return <ErrorNotice {...props} code="no_active_subscription" />;
 	}
-	return <ScanBlock {...props} />;
+	return props.children;
 }
 
 /**
@@ -173,14 +194,14 @@ function ScanBlock(props: AiSectionProps) {
 }
 
 /** L'erreur `code` a sa propre action dans `ErrorNotice` (connexion ou formules). */
-const hasOwnAction = (code: string) =>
+export const hasOwnAction = (code: string) =>
 	RELOGIN_CODES.has(code) || PRICING_CODES.has(code);
 
 /**
  * Message d'une erreur en titre serif, suivi du bouton de connexion ou du lien
  * vers les formules (pilule blanche) selon le code.
  */
-function ErrorNotice(props: AiSectionProps & { code: string }) {
+export function ErrorNotice(props: AccessActionsProps & { code: string }) {
 	const { locale, code } = props;
 	return (
 		<div className="flex flex-col items-start gap-3">
@@ -202,7 +223,7 @@ function ErrorNotice(props: AiSectionProps & { code: string }) {
 	);
 }
 
-function LoginButton(props: AiSectionProps) {
+function LoginButton(props: AccessActionsProps) {
 	const { locale } = props;
 	return (
 		<>
