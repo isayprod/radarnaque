@@ -267,7 +267,16 @@ class StageEventOut(CamelModel):
     """Étape du scan. `count` : photos à télécharger (`photos`) ou envoyées (`analyzing`),
     absent pour `cache` et `writing`."""
 
-    stage: Literal["cache", "photos", "analyzing", "writing"]
+    stage: Literal[
+        "cache",
+        "photos",
+        "analyzing",
+        "reading_photos",
+        "criteria",
+        "identifying",
+        "retrying",
+        "writing",
+    ]
     count: int | None = None
 
 

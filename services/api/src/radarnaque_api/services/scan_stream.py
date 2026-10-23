@@ -41,7 +41,9 @@ _TASKS: set[asyncio.Task[AnalysisResultOut]] = set()
 class Stage:
     """Étape du service. `count` : photos à télécharger (`photos`) ou envoyées (`analyzing`)."""
 
-    stage: Literal["cache", "photos", "analyzing"]
+    stage: Literal[
+        "cache", "photos", "analyzing", "reading_photos", "criteria", "identifying", "retrying"
+    ]
     count: int | None = None
 
 
