@@ -45,12 +45,16 @@ def input_hash(
     Invariant (règle R12) : tout champ envoyé au LLM (`llm.payload.build_messages`) est couvert
     par `content_hash` ou par cette empreinte, sinon une annonce forgée (signaux, catégorie…)
     empoisonnerait le cache de tous les utilisateurs. `imagesSent` l'est par `images_requested`.
-    Seule exception : `today`, la date du jour, change chaque jour sans que l'annonce change ; la
+    Exception : `today`, la date du jour, change chaque jour sans que l'annonce change ; la
     durée du cache (en heures) borne l'écart. Vérifié par tests/test_hashing.py.
 
     `identification_digest` (`identify.store.identification_digest`) : l'identification qui
     nourrit l'analyse (bloc `<identification>`) ; une autre identification, une autre analyse.
-    Sans identification, l'empreinte reste celle d'avant l'identification (clé absente)."""
+    Sans identification, l'empreinte reste celle d'avant l'identification (clé absente).
+    Seconde exception à l'invariant (règle R11, acceptée) : les résultats de la requête « prix »
+    du bloc ne sont pas enregistrés et n'entrent dans aucune empreinte ; une analyse en cache a
+    pu voir d'autres prix que ceux d'un bloc recalculé (la clé suit l'identification, le moteur
+    garde ses réponses 24 h)."""
     listing = scan.listing
     signals = [s.model_dump(mode="json", by_alias=True) for s in scan.rules.signals]
     facts = {

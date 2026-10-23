@@ -244,3 +244,27 @@ async def test_identify_is_in_the_history_with_its_listing(client, bearer, user,
         None,
     )
     assert (failed["purpose"], failed["failed"], failed["site"]) == ("identify", True, None)
+
+
+async def test_scan_stream_emits_identification_then_result_carrying_it(client, bearer, user, llm):
+    """`POST /api/scans/stream` avec l'identification active : ses événements, `identification`,
+    puis ceux de l'arnaque et `result`, qui porte la même identification."""
+    uid = await user()
+
+    async with client.stream("POST", "/api/scans/stream", json=_body(), headers=bearer(uid)) as r:
+        assert r.status_code == 200
+        raw = "".join([chunk async for chunk in r.aiter_text()])
+    events = [(name, data) for name, data in _parse(raw) if name != ":"]
+
+    names = [f"stage {d['stage']}" if n == "stage" else n for n, d in events]  # type: ignore[index]
+    assert names[0] == "stage reading_photos" and names[-1] == "result"
+    assert names.index("identification") < names.index("stage analyzing")
+    assert "identification_error" not in names and "error" not in names
+    identification = dict(events)["identification"]
+    result = events[-1][1]
+    assert result["identification"]["identificationId"] == identification["identificationId"]  # type: ignore[index]
+    assert result["identification"]["status"] == identification["status"]  # type: ignore[index]
+    assert (
+        len(llm.calls) == 1
+        and "<identification>" in llm.calls[0]["messages"][0]["content"][0]["text"]
+    )

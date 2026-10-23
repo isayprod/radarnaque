@@ -117,7 +117,8 @@ async def create_scan(
     return await run_scan(
         **_scan_args(scan, request, user),
         timeout_s=state.analysis_timeout_s,
-        identify_timeout_s=state.identify_timeout_s,
+        identify_timeout_s=state.scan_identify_budget_s,
+        total_s=state.scan_total_budget_s,
     )
 
 
@@ -132,14 +133,19 @@ async def create_scan_stream(
     await session.close()  # comme `create_scan`
     admitted = await admit_scan(**_scan_args(scan, request, user))
     timeout_s = request.app.state.analysis_timeout_s
-    identify_timeout_s = request.app.state.identify_timeout_s
+    identify_timeout_s = request.app.state.scan_identify_budget_s
+    total_s = request.app.state.scan_total_budget_s
     served = False
 
     async def serve(sink: ScanEventSink) -> AnalysisResultOut:
         nonlocal served
         served = True  # dès lors, `serve_admitted` rend le scan s'il est annulé
         return await serve_admitted(
-            admitted, sink, timeout_s=timeout_s, identify_timeout_s=identify_timeout_s
+            admitted,
+            sink,
+            timeout_s=timeout_s,
+            identify_timeout_s=identify_timeout_s,
+            total_s=total_s,
         )
 
     async def give_back_if_unserved() -> None:

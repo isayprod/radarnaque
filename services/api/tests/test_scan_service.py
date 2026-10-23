@@ -1836,3 +1836,85 @@ async def test_linked_identify_is_never_given_back(engine, http, clock, llm, ide
     assert await _record_failure_unless_linked(maker, pending.admission.event_id, "timeout", T0)
     failures = await _scalar(engine, select(func.array_agg(ScanFailure.scan_event_id)))
     assert failures == [pending.admission.event_id]
+
+
+async def test_scan_budget_cuts_identification_then_gives_scam_the_rest(
+    engine, http, clock, llm, identification
+):
+    """R17 : sur le scan, l'identification est coupée à son budget (`timeout`, l'analyse
+    continue sans elle) ; l'analyse a ensuite le reste du budget total, pas `ANALYSIS_TIMEOUT_S`.
+    Budgets réduits ; chaque appel du faux client dure 0,3 s."""
+    llm.delay = 0.3
+    kw = identification.kw()
+
+    ok = await _scan_once(
+        engine,
+        await _user(engine),
+        _photo_scan(),
+        llm,
+        http,
+        clock,
+        identify_timeout_s=0.1,
+        total_s=0.9,
+        **kw,
+    )
+    assert ok.identification is None
+    assert IdentificationFailed("timeout") in identification.events
+    assert _sent_images(llm) == 2  # l'analyse comme sans identification
+
+    late = await _user(engine)
+    with pytest.raises(ScanError) as info:
+        await _scan_once(
+            engine,
+            late,
+            _photo_scan(description="autre annonce"),
+            llm,
+            http,
+            clock,
+            identify_timeout_s=0.1,
+            total_s=0.35,  # reste ~0,25 s < 0,3 s, alors que `timeout_s` vaut 180
+            **kw,
+        )
+    assert (info.value.status, info.value.details) == (502, {"reason": "timeout"})
+    assert await _count(engine, ScanFailure, ScanFailure.error_code == "timeout") == 1
+
+
+async def test_cached_price_hits_failure_or_delay_gives_no_prices(
+    engine, http, clock, llm, identification
+):
+    """R11 : les résultats « prix » d'une identification en cache sont relancés dans le budget
+    de l'identification ; un échec ou un dépassement donne une liste vide, jamais un échec."""
+    user = await _user(engine)
+    await _scan_once(engine, user, _photo_scan(), llm, http, clock, **identification.kw())
+    backend = identification.backend
+
+    async def broken(query: str, *, fresh: bool = False):
+        raise RuntimeError("moteur cassé")
+
+    backend.search = broken  # type: ignore[method-assign]
+    other_rules = [{"id": "other", "weight": 10, "severity": "info"}]  # une autre analyse
+    clock.advance(minutes=1)
+    failed = await _scan_once(
+        engine, user, _photo_scan(signals=other_rules), llm, http, clock, **identification.kw()
+    )
+    assert failed.identification is not None and failed.identification.from_cache is True
+    assert "Résultats de la requête « prix » : aucun" in _analysis_text(llm, 1)
+
+    slow = FakeBackend(delay=1.0)
+    identification.backend = slow
+    clock.advance(minutes=1)
+    late = await _scan_once(
+        engine,
+        user,
+        _photo_scan(signals=[]),
+        llm,
+        http,
+        clock,
+        identify_timeout_s=0.3,
+        **identification.kw(),
+    )
+    assert late.identification is not None
+    assert not any(isinstance(e, IdentificationFailed) for e in identification.events)
+    assert slow.queries == [Q_PRICE]
+    assert "Résultats de la requête « prix » : aucun" in _analysis_text(llm, 2)
+    assert await _count(engine, ScanFailure) == 0

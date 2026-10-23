@@ -111,7 +111,7 @@ def failure_code(exc: Exception) -> str:
     (`identify_read_photos`, `identify_resolve`), sinon celui du scan (`timeout`,
     `configuration`, `image_*`, `internal`)."""
     if isinstance(exc, StepError) and exc.code != "configuration":
-        return _STEP_FAILURES[exc.step]
+        return _STEP_FAILURES.get(exc.step, "identify_resolve")
     if isinstance(exc, LLMError) and exc.code != "configuration":
         return _STEP_FAILURES["identify"]
     return _failure_code(exc)
@@ -277,24 +277,23 @@ async def _stored_price_hits(
 ) -> list[SearchHit]:
     """Résultats de la requête « prix » d'une identification en cache : ils ne sont pas
     enregistrés (règle R11), la requête l'est ; elle est relancée (le moteur garde 24 h ses
-    réponses en cache). Un moteur absent ou en échec donne une liste vide, jamais un échec."""
+    réponses en cache). Un moteur absent ou en échec, comme une lecture de la base en échec,
+    donne une liste vide, jamais un échec."""
     if search is None:
         return []
-    async with maker() as session:
-        query = await session.scalar(
-            select(IdentificationSearch.query)
-            .where(
-                IdentificationSearch.identification_id == identification_id,
-                IdentificationSearch.kind == "price",
-            )
-            .order_by(IdentificationSearch.position)
-            .limit(1)
-        )
-    if query is None:
-        return []
     try:
-        return await search.search(query)
-    except Exception as exc:  # `SearchUnavailable`, ou tout autre échec : sans prix
+        async with maker() as session:
+            query = await session.scalar(
+                select(IdentificationSearch.query)
+                .where(
+                    IdentificationSearch.identification_id == identification_id,
+                    IdentificationSearch.kind == "price",
+                )
+                .order_by(IdentificationSearch.position)
+                .limit(1)
+            )
+        return [] if query is None else await search.search(query)
+    except Exception as exc:  # `SearchUnavailable`, base, ou tout autre échec : sans prix
         logger.warning("identification : requête « prix » en échec (%s)", type(exc).__name__)
         return []
 
@@ -305,14 +304,17 @@ async def identify_for_scan(
     *,
     timeout_s: float = IDENTIFY_TIMEOUT_S,
 ) -> ScanIdentification | None:
-    """Identification qui précède l'analyse d'un scan, en `timeout_s` secondes au plus. Émet
-    `identification` (le résultat), ou `identification_error` (son code) si elle échoue : toute
-    erreur, délai compris, donne `None` sans faire échouer le scan, qui n'est pas rendu pour
-    autant. `None` aussi, sans événement, si les étapes ne sont pas configurées. Une annulation
-    est propagée."""
+    """Identification qui précède l'analyse d'un scan, en `timeout_s` secondes au plus (le
+    scan y passe `SCAN_IDENTIFY_BUDGET_S`). Émet `identification` (le résultat), ou
+    `identification_error` (son code) si elle échoue : toute erreur, délai compris, donne `None`
+    sans faire échouer le scan, qui n'est pas rendu pour autant. `None` aussi, sans événement,
+    si les étapes ne sont pas configurées. Une annulation est propagée.
+
+    Les résultats « prix » d'une identification en cache sont relancés dans le reste du même
+    délai : un dépassement ou un échec donne une liste vide, jamais un échec."""
     admission = admitted.admission
     try:
-        async with asyncio.timeout(timeout_s):
+        async with asyncio.timeout(timeout_s) as budget:
             identified = await ensure_identification(
                 admitted.maker,
                 admission,
@@ -341,14 +343,18 @@ async def identify_for_scan(
         }
     )
     await _emit(on_event, IdentificationReady(out))
-    if out.status == "none":  # rien à chercher : l'analyse se fera sans identification
-        prices: list[SearchHit] = []
-    elif identified.run is not None:
+    # Statut `none` : rien à chercher, l'analyse se fera sans identification.
+    prices: list[SearchHit] = []
+    if out.status != "none" and identified.run is not None:
         prices = identified.run.price_hits
-    else:
-        prices = await _stored_price_hits(
-            admitted.maker, identified.identification_id, admitted.search
-        )
+    elif out.status != "none":
+        try:  # même échéance que l'identification
+            async with asyncio.timeout_at(budget.when()):
+                prices = await _stored_price_hits(
+                    admitted.maker, identified.identification_id, admitted.search
+                )
+        except TimeoutError:
+            logger.warning("identification : requête « prix » hors délai")
     return ScanIdentification(identification=out, price_hits=prices)
 
 
