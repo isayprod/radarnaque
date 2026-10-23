@@ -398,6 +398,26 @@ class SearchEventOut(CamelModel):
     aspect: WebSearchAspect
 
 
+class PageReadEventOut(CamelModel):
+    """Une page lue pour l'identification ; `ok` faux : refusée ou en échec."""
+
+    domain: str
+    ok: bool
+
+
+class CriteriaCachedEventOut(CamelModel):
+    """Critères de distinction repris de la base partagée."""
+
+    count: int
+
+
+class IdentificationErrorEventOut(CamelModel):
+    """L'identification a échoué pendant un scan : l'analyse de l'arnaque continue, le flux
+    ne se termine pas (contrairement à `error`)."""
+
+    code: str
+
+
 class SearchDoneEventOut(CamelModel):
     """Résultats renvoyés au modèle (3 domaines au plus) ; `ok` faux : moteur indisponible."""
 

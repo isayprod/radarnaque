@@ -4,12 +4,24 @@
  * terminent le flux et n'en font pas partie.
  */
 
+/** Étapes de `stage` : celles de l'identification (`reading_photos` à `retrying`) s'ajoutent. */
+export type StreamStage =
+	| "cache"
+	| "photos"
+	| "analyzing"
+	| "reading_photos"
+	| "criteria"
+	| "identifying"
+	| "retrying"
+	| "writing";
+
 /** Ce que vérifie une recherche web lancée par le modèle. */
 export type SearchAspect = "model" | "price" | "scam" | "other";
 
 export type ScanProgressEvent =
 	| {
 			type: "stage";
+			/** Étapes que l'extension traite ; `StreamStage` ajoute celles de l'identification. */
 			stage: "cache" | "photos" | "analyzing" | "writing";
 			/** Photos à télécharger (`photos`) ou envoyées au modèle (`analyzing`). */
 			count?: number;
@@ -24,3 +36,25 @@ export type ScanProgressEvent =
 			count: number;
 			domains: string[];
 	  };
+
+/** Page lue pour l'identification ; `ok` faux : refusée ou en échec. */
+export type PageReadEvent = { type: "page_read"; domain: string; ok: boolean };
+
+/** Critères de distinction repris de la base partagée. */
+export type CriteriaCachedEvent = { type: "criteria_cached"; count: number };
+
+/** L'identification a échoué pendant un scan : le flux continue (contrairement à `error`). */
+export type IdentificationErrorEvent = {
+	type: "identification_error";
+	code: string;
+};
+
+/**
+ * Identification terminée : les champs de `IdentificationOut`, à plat (comme l'événement SSE).
+ * Typage complet quand `IdentificationOut` entrera dans le schéma OpenAPI généré.
+ */
+export type IdentificationEvent = {
+	type: "identification";
+	identificationId: number;
+	status: "identified" | "uncertain" | "none";
+} & Record<string, unknown>;

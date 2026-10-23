@@ -16,9 +16,21 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from radarnaque_api.errors import ApiError
-from radarnaque_api.llm.events import LLMEvent, SearchDone, SearchStarted, Thinking, Writing
+from radarnaque_api.llm.events import (
+    CriteriaCached,
+    LLMEvent,
+    PageRead,
+    SearchDone,
+    SearchStarted,
+    Thinking,
+    Writing,
+)
 from radarnaque_api.schemas import (
     AnalysisResultOut,
+    CriteriaCachedEventOut,
+    IdentificationErrorEventOut,
+    IdentificationOut,
+    PageReadEventOut,
     ScanStreamErrorOut,
     SearchDoneEventOut,
     SearchEventOut,
@@ -32,9 +44,11 @@ PING = ": ping\n\n"
 
 logger = logging.getLogger(__name__)
 
+FinalResult = AnalysisResultOut | IdentificationOut  # résultat final : événement `result`
+
 # Tâches d'analyse en cours : la boucle ne garde qu'une référence faible à une tâche ; celle-ci
 # la tient jusqu'à la fin, même si le générateur qui l'a lancée est abandonné.
-_TASKS: set[asyncio.Task[AnalysisResultOut]] = set()
+_TASKS: set[asyncio.Task[FinalResult]] = set()
 
 
 @dataclass(frozen=True)
@@ -47,7 +61,22 @@ class Stage:
     count: int | None = None
 
 
-ScanEvent = Stage | LLMEvent
+@dataclass(frozen=True)
+class IdentificationReady:
+    """Identification terminée pendant un scan : l'arnaque continue, le flux aussi."""
+
+    identification: IdentificationOut
+
+
+@dataclass(frozen=True)
+class IdentificationFailed:
+    """Identification en échec pendant un scan (`code` : celui de l'erreur) ; événement
+    `identification_error`, jamais `error` : ce dernier termine le flux côté extension."""
+
+    code: str
+
+
+ScanEvent = Stage | LLMEvent | IdentificationReady | IdentificationFailed
 ScanEventSink = Callable[[ScanEvent], Awaitable[None]]
 
 
@@ -77,10 +106,22 @@ def sse_of(event: ScanEvent) -> str:
                 "search_done",
                 SearchDoneEventOut(id=search_id, ok=ok, count=count, domains=list(domains)),
             )
+        case PageRead(domain=domain, ok=ok):
+            return _encode("page_read", PageReadEventOut(domain=domain, ok=ok))
+        case CriteriaCached(count=count):
+            return _encode("criteria_cached", CriteriaCachedEventOut(count=count))
+        case IdentificationReady(identification=identification):
+            # Comme `result` : champs nuls conservés ; `debug` n'est là que pour le superuser.
+            data = identification.model_dump(mode="json", by_alias=True)
+            if data["debug"] is None:
+                del data["debug"]
+            return encode_sse("identification", data)
+        case IdentificationFailed(code=code):
+            return _encode("identification_error", IdentificationErrorEventOut(code=code))
     raise TypeError(f"événement inconnu : {type(event).__name__}")
 
 
-def _outcome(task: asyncio.Task[AnalysisResultOut]) -> str:
+def _outcome(task: asyncio.Task[FinalResult]) -> str:
     """Dernier événement : `result`, ou `error` avec le code et les détails de la réponse JSON
     équivalente. Une erreur inattendue donne `analysis_failed`, avec un message neutre : le
     scan a pu être rendu ou non (erreur après l'enregistrement du résultat, remboursement en
@@ -102,7 +143,7 @@ def _outcome(task: asyncio.Task[AnalysisResultOut]) -> str:
 
 
 async def stream_scan(
-    admitted: Callable[[ScanEventSink], Coroutine[Any, Any, AnalysisResultOut]],
+    admitted: Callable[[ScanEventSink], Coroutine[Any, Any, FinalResult]],
     *,
     ping_s: float = PING_S,
     throttle_s: float = THROTTLE_S,
@@ -119,7 +160,7 @@ async def stream_scan(
     async def sink(event: ScanEvent) -> None:
         queue.put_nowait(event)
 
-    def finished(done: asyncio.Task[AnalysisResultOut]) -> None:
+    def finished(done: asyncio.Task[FinalResult]) -> None:
         queue.put_nowait(None)
         if not done.cancelled():
             done.exception()  # lue ici : jamais d'avertissement « exception never retrieved »
