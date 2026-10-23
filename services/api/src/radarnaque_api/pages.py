@@ -242,7 +242,7 @@ async def read_pages(
     ]
 
 
-def _neutralize(value: str) -> str:
+def neutralize(value: str) -> str:
     return _PAGE_TAG.sub("&lt;", value)
 
 
@@ -250,6 +250,6 @@ def wrap_page(n: int, page: PageText) -> str:
     """Page encadrée pour le prompt ; toute fermeture `</page_web>` du contenu est neutralisée."""
     domain = page.domain.replace('"', "")
     return (
-        f'<page_web n="{n}" domaine="{domain}">{_neutralize(page.title)}\n'
-        f"{_neutralize(page.text)}</page_web>"
+        f'<page_web n="{n}" domaine="{domain}">{neutralize(page.title)}\n'
+        f"{neutralize(page.text)}</page_web>"
     )
