@@ -2924,6 +2924,73 @@ describe("RiskBadge : une seule pilule, identification puis risque", () => {
 		await vi.waitFor(() => expect(ai.scan).toHaveBeenCalledTimes(2));
 	});
 
+	test("erreur d'analyse sans identification, quota à 0 : le bouton du panneau est grisé et ne lance rien", async () => {
+		const user = userEvent.setup();
+		scanReply.mockResolvedValueOnce({
+			ok: false,
+			error: { code: "analysis_failed" },
+		});
+		// Quota à 0 : l'analyse n'est permise que parce qu'elle est incluse
+		// (identification faite par l'utilisateur).
+		const noScans: ContentAccess = { ...active, remaining: { scans: 0 } };
+		ai.access.mockImplementation(async () => ({ ok: true, data: noScans }));
+		const accessCache = cached(noScans);
+		const view = await renderIdentified({ accessCache });
+		await user.click(product());
+		await user.click(
+			within(screen.getByRole("dialog")).getByRole("button", { name: LAUNCH }),
+		);
+		await vi.waitFor(() => expect(ai.scan).toHaveBeenCalledTimes(1));
+		await within(screen.getByRole("dialog")).findByText(
+			aiErrorText("fr", "analysis_failed"),
+		);
+		// Nouvelle version de l'annonce : plus d'identification, donc plus d'inclusion.
+		view.rerender(
+			<RiskBadge
+				report={high}
+				listing={{ ...listing, title: "Vélo (prix baissé)" }}
+				locale="fr"
+				ai={ai}
+				accessCache={accessCache}
+				aiResults={storeWith(identifiedEntry())}
+			/>,
+		);
+		const action = within(screen.getByRole("dialog")).getByRole("button", {
+			name: LAUNCH,
+		});
+		expect(action.getAttribute("aria-disabled")).toBe("true");
+		await user.click(action);
+		expect(ai.scan).toHaveBeenCalledTimes(1);
+	});
+
+	test("analyse reprise du magasin sans identification : le panneau n'a ni « Détail du produit » ni « Analyser le risque »", async () => {
+		const user = userEvent.setup();
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				aiResults={storeWith({
+					[`${listing.site}|${listing.externalId}`]: {
+						result: sampleAnalysis,
+						identification: null,
+						identifiedByUser: false,
+						fingerprint: listingFingerprint(listing),
+						storedAt: 1,
+					},
+				})}
+			/>,
+		);
+		await vi.waitFor(() =>
+			expect(toggle().textContent).toContain(`${sampleAnalysis.score}/100`),
+		);
+		await user.click(toggle());
+		const dialog = screen.getByRole("dialog");
+		expect(within(dialog).queryByText("Détail du produit")).toBeNull();
+		expect(within(dialog).queryByRole("button", { name: LAUNCH })).toBeNull();
+	});
+
 	test("analyse en cours : le bouton du panneau garde le focus, et un clic est ignoré", async () => {
 		const user = userEvent.setup();
 		pendingScan();
