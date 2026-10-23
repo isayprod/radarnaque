@@ -499,6 +499,15 @@ const openResult = async (root: ShadowRoot) =>
 		)
 	).click();
 
+/** Ouvre le panneau par le message de la pilule d'erreur de l'analyse du risque. */
+const openFromError = async (root: ShadowRoot) =>
+	(
+		await waitFor<HTMLElement>(
+			root,
+			"[data-pill] button[data-error-toggle][aria-expanded='false']",
+		)
+	).click();
+
 /** Déplie « Détail du produit » (son `<details>` est celui du panneau, pas ceux du déroulé). */
 const openDetail = (locale: Locale) => async (root: ShadowRoot) => {
 	const name = contentText(locale, "identify.detail");
@@ -866,6 +875,24 @@ const PANELS: Stage[] = [
 				loginFails: true,
 			}),
 			script: clickAction(locale, "identify.launch"),
+		}),
+	},
+	{
+		id: "panel-error-product",
+		label: "panneau ouvert par la pilule d'erreur : l'erreur, puis le produit",
+		kind: "tall",
+		render: (locale) => ({
+			node: badge(
+				"panneau-erreur-produit",
+				locale,
+				{
+					access: active(3),
+					events: SEARCHES.slice(0, 1),
+					outcome: { ok: false, error: { code: "stream_interrupted" } },
+				},
+				IDENTIFIED,
+			),
+			script: steps(clickAction(locale, "ai.analyzeRisk"), openFromError),
 		}),
 	},
 	{

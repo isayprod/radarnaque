@@ -197,14 +197,12 @@ export function RiskAction(
 	return (
 		<AccessBody {...props}>
 			<div className="flex flex-col items-stretch">
-				{/* Région présente avant l'erreur, pour qu'elle soit annoncée. */}
-				<div aria-live="polite" className="w-full">
-					{ai.status === "error" && (
-						<div className="mb-3">
-							<ErrorNotice {...props} code={ai.code} />
-						</div>
-					)}
-				</div>
+				{/* L'erreur s'annonce par son propre `role="alert"`, sans région autour. */}
+				{ai.status === "error" && (
+					<div className="mb-3 w-full">
+						<ErrorNotice {...props} code={ai.code} />
+					</div>
+				)}
 				{/* `aria-disabled` plutôt que `disabled` pendant l'analyse : le bouton garde le focus clavier. */}
 				<button
 					type="button"

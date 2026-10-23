@@ -1559,14 +1559,14 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		expect(logo?.classList.contains("opacity-60")).toBe(true);
 	});
 
-	test("ligne d'état de 200 caractères : tronquée (classe truncate) dans une pilule bornée à 340 px", async () => {
+	test("ligne d'état de 200 caractères : tronquée (classe truncate) dans une pilule bornée à 400 px (référence affichée)", async () => {
 		scanReply.mockImplementation(() => new Promise(() => {}));
 		await renderIdentified({ accessCache: cached(active) });
 		fireEvent.click(launch());
 		const query = "iPhone 18 Pro ".repeat(15).slice(0, 200);
 		emit({ type: "search", id: 2, query, aspect: "price" });
 		const pill = toggle();
-		expect(pill.classList.contains("max-w-[340px]")).toBe(true);
+		expect(pill.classList.contains("max-w-[400px]")).toBe(true);
 		expect(pill.classList.contains("min-w-0")).toBe(true);
 		const text = statusLineEl()?.querySelector(".rq-shimmer");
 		// `statusLine` coupe déjà le texte ; la pilule le tronque encore à l'affichage.
@@ -2229,7 +2229,7 @@ describe("RiskBadge : focus clavier", () => {
 		expect(document.activeElement).toBe(page);
 	});
 
-	test("lancée au clavier, quota relu à 0 après l'échec : le focus reste sur la pilule d'erreur, hors de l'ordre de tabulation", async () => {
+	test("lancée au clavier, quota relu à 0 après l'échec : le focus reste sur la pilule d'erreur, sur son message qui ouvre le panneau", async () => {
 		const user = userEvent.setup();
 		const finish = pendingScan();
 		await renderWithPage();
@@ -2241,13 +2241,15 @@ describe("RiskBadge : focus clavier", () => {
 		}));
 		await finish({ ok: false, error: { code: "quota_exhausted" } });
 		await vi.waitFor(() => expect(queryLaunch()).toBeNull());
-		const message = screen.getByText(aiErrorText("fr", "quota_exhausted"));
-		const pill = message.parentElement as HTMLElement;
-		expect(pill.getAttribute("tabindex")).toBe("-1");
-		expect(document.activeElement).toBe(pill);
+		const message = screen.getByRole("button", {
+			name: aiErrorText("fr", "quota_exhausted"),
+		});
+		expect(message.getAttribute("aria-expanded")).toBe("false");
+		expect(message.parentElement?.hasAttribute("tabindex")).toBe(false);
+		expect(document.activeElement).toBe(message);
 	});
 
-	test("panneau ouvert, erreur sans action (quota relu à 0) : « Fermer » rend le focus à la pilule réduite au logo", async () => {
+	test("panneau ouvert, erreur sans action (quota relu à 0) : « Fermer » rend le focus au bouton de la pilule réduite au logo", async () => {
 		const user = userEvent.setup();
 		const finish = pendingScan();
 		await renderWithPage();
@@ -2263,16 +2265,21 @@ describe("RiskBadge : focus clavier", () => {
 			await within(dialog).findByText(aiErrorText("fr", "quota_exhausted")),
 		).toBeTruthy();
 		await vi.waitFor(() => expect(queryLaunch()).toBeNull());
-		// Pilule réduite au logo : ni message (dans le panneau), ni action. Son
-		// conteneur précède la seule région annoncée.
+		// Pilule réduite au logo : ni message (dans le panneau), ni action ; le
+		// logo est le bouton qui ferme le panneau. Son conteneur précède la seule
+		// région annoncée.
 		const pill = screen.getByRole("status").previousElementSibling
 			?.firstElementChild as HTMLElement | undefined;
 		expect(pill?.textContent).toBe("");
-		expect(pill?.getAttribute("tabindex")).toBe("-1");
+		const opener = toggle();
+		expect(pill?.contains(opener)).toBe(true);
+		expect(opener.getAttribute("aria-expanded")).toBe("true");
 		await user.click(within(dialog).getByRole("button", { name: PANEL_CLOSE }));
 		expect(screen.queryByRole("dialog")).toBeNull();
 		expect(document.activeElement).toBe(
-			screen.getByText(aiErrorText("fr", "quota_exhausted")).parentElement,
+			screen.getByRole("button", {
+				name: aiErrorText("fr", "quota_exhausted"),
+			}),
 		);
 	});
 
@@ -2574,7 +2581,7 @@ describe("RiskBadge : une seule pilule, identification puis risque", () => {
 		},
 	);
 
-	test("une seule région aria-live, à chaque étape", async () => {
+	test("pilule seule (panneau fermé) : une seule région aria-live, à chaque étape", async () => {
 		const user = userEvent.setup();
 		const answerIdentify = pendingIdentify();
 		const answerScan = pendingScan();
@@ -2662,15 +2669,16 @@ describe("RiskBadge : une seule pilule, identification puis risque", () => {
 		expect(dialog.textContent).toContain("Steam Deck OLED");
 		expect(dialog.textContent).toContain("Sûr");
 		expect(dialog.textContent).toContain("95 %");
-		// Une seule section (le produit), sous son en-tête « Produit ».
+		// Une seule section (le produit), nommée par son en-tête « Produit ».
 		const regions = within(dialog).getAllByRole("region");
 		expect(regions).toHaveLength(1);
-		const [label, region] = within(dialog).getAllByRole("heading", {
+		const [label, ...others] = within(dialog).getAllByRole("heading", {
 			level: 3,
 		});
+		expect(others).toHaveLength(0);
 		expect(label?.textContent).toBe(contentText("fr", "identify.product"));
 		expect(label?.className).toContain("uppercase");
-		expect(region?.textContent).toBe(contentText("fr", "identify.title"));
+		expect(regions[0]?.getAttribute("aria-labelledby")).toBe(label?.id);
 		// Puis le bouton pleine largeur, sans l'ancien bouton d'analyse.
 		const action = within(dialog).getByRole("button", { name: LAUNCH });
 		expect(action.className).toContain("w-full");
@@ -2774,9 +2782,13 @@ describe("RiskBadge : une seule pilule, identification puis risque", () => {
 			).toBeTruthy();
 			await user.click(summary);
 			expect(details.open).toBe(true);
+			// Nommée par le résumé, sans titre caché qui le répéterait.
+			expect(within(details).queryAllByRole("heading", { level: 3 })).toEqual(
+				[],
+			);
 			expect(
-				within(details).getAllByRole("heading", { level: 3 })[0]?.textContent,
-			).toBe(contentText(locale, "identify.title"));
+				within(details).getByRole("region", { name: summaryText }),
+			).toBeTruthy();
 			expect(details.textContent).toContain("Steam Deck OLED");
 		},
 	);
@@ -3337,6 +3349,231 @@ describe("RiskBadge : une seule pilule, identification puis risque", () => {
 		await finish({ ok: true, data: sampleAnalysis });
 		expect(toggle().textContent).toContain(`${sampleAnalysis.score}/100`);
 		expect(toggle().textContent).not.toContain(message);
+	});
+
+	test("erreur d'identification, panneau ouvert, quota relu à 0 : « Identifier le produit » du panneau grisé, avec sa raison, et ne lance rien", async () => {
+		const user = userEvent.setup();
+		const answer = pendingIdentify();
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { ...active, remaining: { scans: 0 } },
+		}));
+		renderActive();
+		await user.click(identifyButton());
+		await user.click(toggle());
+		await answer({ ok: false, error: { code: "analysis_failed" } });
+		const dialog = aiDialog() as HTMLElement;
+		expect(
+			await within(dialog).findByText(aiErrorText("fr", "analysis_failed")),
+		).toBeTruthy();
+		await vi.waitFor(() => expect(ai.access).toHaveBeenCalledTimes(1));
+		const button = within(dialog).getByRole("button", { name: IDENTIFY });
+		await vi.waitFor(() =>
+			expect(button.getAttribute("aria-disabled")).toBe("true"),
+		);
+		expect(
+			(button.getAttribute("aria-describedby") ?? "")
+				.split(" ")
+				.map((id) => document.getElementById(id)?.textContent),
+		).toEqual([contentText("fr", "ai.noScansLeft")]);
+		await user.click(button);
+		expect(ai.identify).toHaveBeenCalledTimes(1);
+	});
+
+	test("identification en cours : le bouton du panneau garde le focus, et un clic est ignoré", async () => {
+		const user = userEvent.setup();
+		const answer = pendingIdentify();
+		renderActive();
+		// Première identification en échec, le panneau ouvert pendant qu'elle tourne.
+		await user.click(identifyButton());
+		await user.click(toggle());
+		await answer({ ok: false, error: { code: "analysis_failed" } });
+		const dialog = aiDialog() as HTMLElement;
+		const button = await within(dialog).findByRole("button", {
+			name: IDENTIFY,
+		});
+		const second = pendingIdentify();
+		button.focus();
+		await user.keyboard("{Enter}");
+		expect(ai.identify).toHaveBeenCalledTimes(2);
+		expect(button.getAttribute("aria-busy")).toBe("true");
+		expect(button.getAttribute("aria-disabled")).toBe("true");
+		expect(button.hasAttribute("disabled")).toBe(false);
+		expect(document.activeElement).toBe(button);
+		await user.click(button);
+		expect(ai.identify).toHaveBeenCalledTimes(2);
+		expect(document.activeElement).toBe(button);
+		await second({ ok: true, data: sampleIdentification });
+	});
+
+	test("erreur d'analyse : la pilule ouvre le panneau, qui montre le produit", async () => {
+		const user = userEvent.setup();
+		scanReply.mockResolvedValueOnce({
+			ok: false,
+			error: { code: "analysis_failed" },
+		});
+		await renderIdentified({ accessCache: cached(active) });
+		await user.click(launch());
+		const text = aiErrorText("fr", "analysis_failed");
+		const message = await screen.findByRole("button", { name: text });
+		expect(message.getAttribute("aria-expanded")).toBe("false");
+		// L'action de la pilule d'erreur reste à côté.
+		expect(launchControls()).toHaveLength(1);
+		await user.click(message);
+		const dialog = aiDialog() as HTMLElement;
+		expect(dialog.textContent).toContain("Steam Deck OLED");
+		expect(dialog.textContent).toContain("95 %");
+		expect(within(dialog).getByText(text)).toBeTruthy();
+		// Panneau ouvert : le message est dans le panneau, la pilule garde son bouton.
+		const opener = toggle();
+		expect(opener.getAttribute("aria-expanded")).toBe("true");
+		expect(opener.getAttribute("aria-label")).toBe(
+			contentText("fr", "badge.aria"),
+		);
+		await user.click(opener);
+		expect(aiDialog()).toBeNull();
+		expect(
+			screen.getByRole("button", { name: text }).getAttribute("aria-expanded"),
+		).toBe("false");
+	});
+
+	test("erreur d'analyse : Escape et « Fermer » rendent le focus au bouton qui a ouvert le panneau", async () => {
+		const user = userEvent.setup();
+		scanReply.mockResolvedValueOnce({
+			ok: false,
+			error: { code: "analysis_failed" },
+		});
+		await renderIdentified({ accessCache: cached(active), page: true });
+		await user.click(launch());
+		const text = aiErrorText("fr", "analysis_failed");
+		await user.click(await screen.findByRole("button", { name: text }));
+		within(aiDialog() as HTMLElement)
+			.getByRole("button", { name: PANEL_CLOSE })
+			.focus();
+		await user.keyboard("{Escape}");
+		expect(aiDialog()).toBeNull();
+		expect(document.activeElement).toBe(
+			screen.getByRole("button", { name: text }),
+		);
+		await user.click(screen.getByRole("button", { name: text }));
+		await user.click(
+			within(aiDialog() as HTMLElement).getByRole("button", {
+				name: PANEL_CLOSE,
+			}),
+		);
+		expect(document.activeElement).toBe(
+			screen.getByRole("button", { name: text }),
+		);
+	});
+
+	test("analyse du risque en cours avec une référence : pilule de 400 px, référence bornée qui ne rétrécit pas", async () => {
+		const user = userEvent.setup();
+		pendingScan();
+		await renderIdentified({ accessCache: cached(active) });
+		await user.click(launch());
+		const pill = toggle();
+		expect(pill.classList.contains("max-w-[400px]")).toBe(true);
+		expect(pill.classList.contains("max-w-[340px]")).toBe(false);
+		const reference = pill.querySelector("[data-reference]");
+		expect(reference?.textContent).toBe("Steam Deck OLED");
+		for (const name of ["max-w-[140px]", "shrink-0", "truncate"])
+			expect(reference?.classList.contains(name)).toBe(true);
+		expect(reference?.classList.contains("min-w-0")).toBe(false);
+		// La ligne d'état absorbe le reste.
+		expect(
+			pill.querySelector(".radarnaque-status")?.classList.contains("min-w-0"),
+		).toBe(true);
+	});
+
+	test("analyse du risque en cours sans référence : la pilule reste à 340 px", async () => {
+		const user = userEvent.setup();
+		pendingIdentify();
+		renderActive();
+		await user.click(identifyButton());
+		expect(toggle().classList.contains("max-w-[340px]")).toBe(true);
+		expect(toggle().classList.contains("max-w-[400px]")).toBe(false);
+	});
+
+	test("« Relancer » après une analyse incluse interrompue : décrit par « Inclus avec l'identification »", async () => {
+		const user = userEvent.setup();
+		scanReply.mockResolvedValueOnce({
+			ok: false,
+			error: { code: "stream_interrupted" },
+		});
+		await renderIdentified({ accessCache: cached(active) });
+		await user.click(launch());
+		const retry = await screen.findByRole("button", {
+			name: contentText("fr", "ai.retry"),
+		});
+		expect(
+			(retry.getAttribute("aria-describedby") ?? "")
+				.split(" ")
+				.map((id) => document.getElementById(id)?.textContent),
+		).toEqual([contentText("fr", "identify.included")]);
+	});
+
+	test("panneau ouvert : seulement la région de la pilule, et l'alerte d'une erreur", async () => {
+		const user = userEvent.setup();
+		const answerIdentify = pendingIdentify();
+		const answerScan = pendingScan();
+		const { container } = renderActive();
+		const LIVE =
+			"[aria-live], [role='status'], [role='alert'], [role='log'], [role='marquee'], [role='timer']";
+		const regions = () => Array.from(container.querySelectorAll(LIVE));
+		await user.click(identifyButton());
+		await user.click(toggle());
+		// Identification en cours.
+		expect(aiDialog()).not.toBeNull();
+		expect(regions()).toEqual([screen.getByRole("status")]);
+		// Produit identifié, « Analyser le risque » dans le panneau.
+		await answerIdentify({ ok: true, data: sampleIdentification });
+		expect(regions()).toEqual([screen.getByRole("status")]);
+		// Analyse du risque en cours, puis en échec : l'alerte du panneau en plus.
+		await user.click(
+			within(aiDialog() as HTMLElement).getByRole("button", { name: LAUNCH }),
+		);
+		expect(regions()).toEqual([screen.getByRole("status")]);
+		await answerScan({ ok: false, error: { code: "analysis_failed" } });
+		const alert = within(aiDialog() as HTMLElement).getByRole("alert");
+		expect(regions()).toHaveLength(2);
+		expect(regions()).toContain(alert);
+		expect(regions()).toContain(screen.getByRole("status"));
+	});
+
+	test("titres : la section Produit est nommée par « Produit », puis par « Détail du produit », sans titre caché « Identification »", async () => {
+		const user = userEvent.setup();
+		const answerScan = pendingScan();
+		renderActive();
+		await identifyFirst(user);
+		await user.click(product());
+		let dialog = aiDialog() as HTMLElement;
+		const headings = within(dialog).getAllByRole("heading", { level: 3 });
+		expect(headings.map((h) => h.textContent)).toEqual([
+			contentText("fr", "identify.product"),
+		]);
+		const region = within(dialog).getByRole("region", {
+			name: contentText("fr", "identify.product"),
+		});
+		expect(region.getAttribute("aria-labelledby")).toBe(headings[0]?.id);
+		expect(region.textContent).toContain("Steam Deck OLED");
+		expect(
+			within(dialog).queryByText(contentText("fr", "identify.title")),
+		).toBeNull();
+		// Après l'analyse du risque : « Détail du produit » nomme la section.
+		await user.click(within(dialog).getByRole("button", { name: LAUNCH }));
+		await answerScan({ ok: true, data: aiHigh });
+		dialog = aiDialog() as HTMLElement;
+		const summary = within(dialog).getByText(
+			contentText("fr", "identify.detail"),
+		);
+		await user.click(summary);
+		const detail = within(dialog).getByRole("region", {
+			name: contentText("fr", "identify.detail"),
+		});
+		expect(detail.textContent).toContain("Steam Deck OLED");
+		expect(
+			within(dialog).queryByText(contentText("fr", "identify.title")),
+		).toBeNull();
 	});
 });
 

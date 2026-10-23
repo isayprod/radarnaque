@@ -30,6 +30,18 @@ export interface IdentificationSectionProps extends AccessActionsProps {
 	 * ne répète pas « Analyses restantes », déjà dit par la section du risque.
 	 */
 	hideRemaining?: boolean;
+	/**
+	 * Plus d'analyse restante d'après l'accès lu : « Identifier le produit » est
+	 * grisé (`aria-disabled`, raison lue avec lui). Le clic passe toujours au
+	 * parent, dont `useLaunch` ne lance rien.
+	 */
+	empty?: boolean;
+	/**
+	 * Identifiant du titre visible que le parent donne à la section (« Produit »,
+	 * ou le `<summary>` de « Détail du produit ») : il la nomme, à la place du
+	 * titre caché « Identification », qui le répéterait.
+	 */
+	labelledBy?: string;
 }
 
 type IdentifiedObject = IdentificationResult["objects"][number];
@@ -73,13 +85,15 @@ function safeHref(url: string): string | null {
  */
 export function IdentificationSection(props: IdentificationSectionProps) {
 	const titleId = useId();
-	const { locale, identification } = props;
+	const { locale, identification, labelledBy } = props;
 	return (
-		<section aria-labelledby={titleId}>
-			{/* Le panneau a son en-tête visible : ce titre ne sert qu'aux lecteurs d'écran. */}
-			<h3 id={titleId} className="sr-only">
-				{contentText(locale, "identify.title")}
-			</h3>
+		<section aria-labelledby={labelledBy ?? titleId}>
+			{/* Sans titre visible du parent, celui-ci ne sert qu'aux lecteurs d'écran. */}
+			{labelledBy === undefined && (
+				<h3 id={titleId} className="sr-only">
+					{contentText(locale, "identify.title")}
+				</h3>
+			)}
 			{identification.status === "done" ? (
 				<ResultView
 					locale={locale}
@@ -99,33 +113,50 @@ export function IdentificationSection(props: IdentificationSectionProps) {
 
 /**
  * Accès actif : l'erreur de la dernière identification, le bouton « Identifier
- * le produit », et la ligne d'état pendant l'identification.
+ * le produit », et la ligne d'état pendant l'identification. Comme « Analyser
+ * le risque » (`RiskAction`) : le parent passe l'action par `useLaunch` ;
+ * grisé (`aria-disabled`, focusable, raison lue avec lui) sans analyse
+ * restante ; pendant l'identification, `aria-disabled` et clic ignoré, pour
+ * que le bouton garde le focus clavier. L'erreur s'annonce par son propre
+ * `role="alert"` (`ErrorNotice`), sans région `aria-live` autour.
  */
 function IdentifyBlock(props: IdentificationSectionProps) {
 	const { locale, identification } = props;
+	const reasonId = useId();
+	const empty = props.empty === true;
 	const progress =
 		identification.status === "loading" ? identification.progress : null;
-	const waiting = useWaiting(progress?.lastAt ?? 0, progress !== null);
+	const loading = progress !== null;
+	const waiting = useWaiting(progress?.lastAt ?? 0, loading);
 	// L'erreur affichée a déjà sa pilule blanche (connexion, formules).
 	const errorHasAction =
 		identification.status === "error" && hasOwnAction(identification.code);
+	const reason = contentText(locale, "ai.noScansLeft");
 	return (
 		<div className="flex flex-col items-start gap-3">
-			{/* Région présente avant l'erreur, pour qu'elle soit annoncée. */}
-			<div aria-live="polite" className="w-full">
-				{identification.status === "error" && (
+			{identification.status === "error" && (
+				<div className="w-full">
 					<ErrorNotice {...props} code={identification.code} />
-				)}
-			</div>
+				</div>
+			)}
 			<button
 				type="button"
-				disabled={progress !== null}
-				aria-busy={progress !== null}
-				onClick={() => props.onIdentify()}
-				className={errorHasAction ? SECONDARY_PILL_CLASS : WHITE_PILL_CLASS}
+				aria-busy={loading}
+				aria-disabled={empty || loading ? true : undefined}
+				aria-describedby={empty ? reasonId : undefined}
+				title={empty ? reason : undefined}
+				onClick={() => {
+					if (!loading) props.onIdentify();
+				}}
+				className={`${errorHasAction ? SECONDARY_PILL_CLASS : WHITE_PILL_CLASS} aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:translate-y-0`}
 			>
 				{contentText(locale, "identify.launch")}
 			</button>
+			{empty && (
+				<span id={reasonId} className="sr-only">
+					{reason}
+				</span>
+			)}
 			{progress && (
 				<LiveLine
 					text={statusLine(progress, locale, "identify.start")}
