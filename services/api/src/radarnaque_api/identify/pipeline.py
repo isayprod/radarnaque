@@ -618,9 +618,7 @@ async def _criteria_for(
             await emit(CriteriaCached(len(view.criteria)))
             return _from_view(view)
         await emit(Stage("criteria"))
-        queries = criteria_queries(
-            obj.candidates, read.hint_criteria, ctx.settings.criteria_max_searches
-        )
+        queries = criteria_queries(obj.candidates, ctx.settings.criteria_max_searches)
         first = ids.take(len(queries))
         outcome = await run_searches(
             queries,

@@ -38,14 +38,13 @@ class SearchOutcome:
     )  # requête, kind, domaines lus
 
 
-def criteria_queries(candidates: list[str], hints: list[str], limit: int) -> list[Query]:
-    """Requêtes de distinction entre les deux premiers candidats, tronquées à `limit`."""
+def criteria_queries(candidates: list[str], limit: int) -> list[Query]:
+    """Requêtes de distinction entre les deux premiers candidats, tronquées à `limit`. Elles ne
+    contiennent que des noms de produits : rien de l'annonce, pas même les indices de lecture."""
     if len(candidates) < 2:
         return []
     a, b = candidates[0], candidates[1]
     texts = [f"{a} vs {b} différence", f"how to tell {a} from {b}"]
-    if hints:
-        texts.append(f"{a} {b} {hints[0]}")
     return [Query(t, "criteria") for t in texts[: max(limit, 0)]]
 
 

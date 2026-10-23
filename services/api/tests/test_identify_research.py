@@ -62,13 +62,12 @@ async def run(queries, backend, **kw):
 
 
 def test_criteria_queries_order_and_limit():
-    qs = criteria_queries(["A", "B", "C"], ["bord", "x"], 5)
-    assert [q.text for q in qs] == ["A vs B différence", "how to tell A from B", "A B bord"]
+    # Noms de produits seulement : aucun indice de l'annonce (spec §8.4).
+    qs = criteria_queries(["A", "B", "C"], 5)
+    assert [q.text for q in qs] == ["A vs B différence", "how to tell A from B"]
     assert all(q.kind == "criteria" for q in qs)
-    assert [q.text for q in criteria_queries(["A", "B"], ["h"], 2)] == [
-        "A vs B différence",
-        "how to tell A from B",
-    ]
+    assert [q.text for q in criteria_queries(["A", "B"], 1)] == ["A vs B différence"]
+    assert criteria_queries(["A"], 5) == [] and criteria_queries(["A", "B"], 0) == []
     assert reference_query("A") == Query("A fiche technique", "reference")
     assert price_query("A") == Query("A prix occasion", "price")
 
