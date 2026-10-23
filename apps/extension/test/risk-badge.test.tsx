@@ -2768,16 +2768,13 @@ describe("badge.css", () => {
 	test("animations réduites : ni rotation, ni fondu, ni points animés", () => {
 		// Rotation et reflet : motion.css les coupe (testé dans le paquet design).
 		// Ici, les points d'attente restent affichés, fixes.
-		expect(blockOf("\\.radarnaque-status\\.is-waiting::after")).toContain(
-			"animation:",
-		);
+		expect(
+			blockOf("\\.radarnaque-status\\.is-waiting \\.rq-dots > span"),
+		).toContain("animation:");
+		// L'attente n'anime que l'opacité, jamais la largeur.
+		expect(css).not.toMatch(/animation:\s*radarnaque-dots/);
 		const reduced =
 			css.split("@media (prefers-reduced-motion: reduce)")[1] ?? "";
-		const dots =
-			reduced.match(
-				/\.radarnaque-status\.is-waiting::after\s*\{([^}]*)\}/,
-			)?.[1] ?? "";
-		expect(dots).toMatch(/content:\s*"…"/);
-		expect(dots).toMatch(/animation:\s*none;/);
+		expect(reduced).toMatch(/\.rq-dots > span\s*\{[^}]*animation:\s*none;/);
 	});
 });

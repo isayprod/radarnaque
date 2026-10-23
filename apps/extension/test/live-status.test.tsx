@@ -85,4 +85,44 @@ describe("LiveLine", () => {
 				?.classList.contains("is-waiting"),
 		).toBe(true);
 	});
+
+	test("les points gardent un élément de largeur fixe, en attente ou non", () => {
+		for (const waiting of [false, true]) {
+			const { container, unmount } = render(
+				<LiveLine text="Lecture des photos" waiting={waiting} />,
+			);
+			const dots = container.querySelector(".rq-dots");
+			expect(dots).not.toBeNull();
+			expect(dots?.getAttribute("aria-hidden")).toBe("true");
+			expect(dots?.classList.contains("inline-block")).toBe(true);
+			expect(dots?.classList.contains("w-[1.2em]")).toBe(true);
+			unmount();
+		}
+	});
+
+	test("la ligne est tronquée dans une largeur bornée", () => {
+		const { container } = render(
+			<LiveLine text={"x".repeat(200)} waiting={false} />,
+		);
+		const line = container.querySelector(".radarnaque-status");
+		expect(line?.classList.contains("max-w-[220px]")).toBe(true);
+		expect(
+			line?.querySelector(".rq-shimmer")?.classList.contains("truncate"),
+		).toBe(true);
+	});
+
+	test("l'attente n'anime que l'opacité : même texte, trois points", () => {
+		const idle = render(<LiveLine text="Recherche" waiting={false} />);
+		const idleText = idle.container.textContent;
+		idle.unmount();
+		const { container } = render(<LiveLine text="Recherche" waiting />);
+		expect(container.textContent).toBe(idleText);
+		expect(container.querySelectorAll(".rq-dots > span")).toHaveLength(3);
+	});
+
+	test("animations réduites : aucune classe d'animation en JS, la feuille de style les fige", () => {
+		const { container } = render(<LiveLine text="Recherche" waiting />);
+		expect(container.querySelector("[style]")).toBeNull();
+		expect(container.querySelector("[class*='animate']")).toBeNull();
+	});
 });
