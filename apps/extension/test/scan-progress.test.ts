@@ -120,6 +120,23 @@ describe("thinkingTitle", () => {
 });
 
 describe("statusLine", () => {
+	test("aucun événement, départ de l'identification : « identify.start »", () => {
+		expect(statusLine(progressOf(), "fr", "identify.start")).toBe(
+			"Démarrage de l'identification…",
+		);
+		expect(statusLine(progressOf(), "nl", "identify.start")).toBe(
+			"Identificatie starten…",
+		);
+		// Un événement l'emporte sur le texte de départ.
+		expect(
+			statusLine(
+				progressOf({ type: "stage", stage: "reading_photos" }),
+				"fr",
+				"identify.start",
+			),
+		).toBe("Lecture des photos…");
+	});
+
 	const rows: Array<[string, ScanProgressEvent[], string, string]> = [
 		["aucun événement", [], "Démarrage de l'analyse", "Analyse wordt gestart"],
 		[

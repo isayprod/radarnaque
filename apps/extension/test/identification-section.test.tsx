@@ -164,6 +164,40 @@ describe("IdentificationSection : résultat sûr", () => {
 	});
 });
 
+describe("IdentificationSection : sources en double", () => {
+	test("une même page citée deux fois : deux liens, sans avertissement de clé", () => {
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+		const source = {
+			url: "https://store.example/oled",
+			title: "t",
+			domain: "store.example",
+		};
+		setup(
+			doneState({
+				...sampleIdentification,
+				objects: [
+					{
+						...main,
+						checks: [
+							{
+								observation: "seen_match",
+								photo: null,
+								text: { fr: "Écran OLED", nl: "OLED-scherm" },
+								sources: [source, source],
+							},
+						],
+					},
+				],
+			}),
+		);
+		expect(screen.getAllByRole("link", { name: "store.example" })).toHaveLength(
+			2,
+		);
+		expect(error).not.toHaveBeenCalled();
+		error.mockRestore();
+	});
+});
+
 describe("IdentificationSection : incertain", () => {
 	test("candidats restants et question au vendeur", () => {
 		setup(doneState(uncertain));
@@ -172,6 +206,27 @@ describe("IdentificationSection : incertain", () => {
 		expect(screen.getByText("À demander au vendeur")).not.toBeNull();
 		expect(screen.getByText("Quelle est la capacité ?")).not.toBeNull();
 	});
+
+	test.each([
+		["identified", "sure"],
+		["identified", "probable"],
+	] as const)(
+		"statut %s (%s) : aucun candidat restant affiché",
+		(status, level) => {
+			setup(
+				doneState({
+					...sampleIdentification,
+					status,
+					level,
+					objects: [
+						{ ...main, remaining: ["Modèle A", "Modèle B", "Modèle C"] },
+					],
+				}),
+			);
+			expect(screen.queryByText("Candidats restants")).toBeNull();
+			expect(screen.queryByText("Modèle C")).toBeNull();
+		},
+	);
 
 	test("Copier : writeText appelé, « Copié » pendant 2 s", async () => {
 		const writeText = vi.fn().mockResolvedValue(undefined);

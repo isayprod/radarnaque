@@ -391,7 +391,9 @@ alors la mention « Inclus », même quota à 0). Le résultat s'affiche dans la
 part ; sur une page de résultats, l'infobulle d'une carte analysée ajoute la ligne
 « référence · niveau ». Cliquer sur « Analyser » pendant une identification la met en file
 (« En attente de l'identification »). Le service worker coupe un flux au bout de 310 s
-(`SCAN_TIMEOUT_MS`), pour laisser au scan ses 80 s d'identification puis ses 180 s d'analyse.
+(`SCAN_TIMEOUT_MS`) : l'API plafonne aujourd'hui un scan à 190 s au total, dont 80 s
+d'identification ; la marge laisse la place aux budgets de la spécification (80 s d'identification
+puis 180 s d'analyse) quand l'API y reviendra.
 La galerie (`pnpm --filter extension gallery`, port 3101) montre chacun de ces états.
 
 ### Sur une annonce (2ememain, 2dehands ou Facebook Marketplace)

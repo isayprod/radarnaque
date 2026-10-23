@@ -637,6 +637,13 @@ function fakeStore(initial: Record<string, StoredAiResult> = {}) {
 			entries[`${site}|${id}`] = entry;
 		}),
 		prune: vi.fn<AiResultStore["prune"]>(async () => {}),
+		forgetIdentifiedByUser: vi.fn<AiResultStore["forgetIdentifiedByUser"]>(
+			async (site, id, fingerprint) => {
+				const entry = entries[`${site}|${id}`];
+				if (entry?.fingerprint === fingerprint)
+					entries[`${site}|${id}`] = { ...entry, identifiedByUser: false };
+			},
+		),
 	} satisfies AiResultStore;
 }
 
@@ -1078,6 +1085,18 @@ const readingPhotos: ScanProgressEvent = {
 	stage: "reading_photos",
 };
 const identifying: ScanProgressEvent = { type: "stage", stage: "identifying" };
+const searchDone: ScanProgressEvent = {
+	type: "search_done",
+	id: 1,
+	ok: true,
+	count: 3,
+	domains: ["www.steamdeck.com"],
+};
+const thinking: ScanProgressEvent = {
+	type: "thinking",
+	part: 0,
+	text: "Je compare les photos.",
+};
 const criteriaCached: ScanProgressEvent = { type: "criteria_cached", count: 3 };
 const pageRead: ScanProgressEvent = {
 	type: "page_read",
@@ -1220,10 +1239,8 @@ describe("useAiScan : identification", () => {
 		act(() => t.result.current.scan());
 		t.identifies[0]?.resolve(fail("identification_failed"));
 		await settle();
-		expect(t.result.current.identification).toEqual({
-			status: "error",
-			code: "identification_failed",
-		});
+		// L'analyse partie de la file refait l'identification : de nouveau en cours.
+		expect(t.result.current.identification).toEqual(LOADING);
 		expect(t.client.scan).toHaveBeenCalledTimes(1);
 		expect(t.result.current.queued).toBe(false);
 		expect(t.result.current.ai).toEqual(LOADING);
@@ -1284,6 +1301,10 @@ describe("useAiScan : identification", () => {
 		expect(t.client.identify).not.toHaveBeenCalled();
 		t.scans[0]?.emit(readingPhotos);
 		expect(t.result.current.identification).toEqual(LOADING);
+		// Recherche, résultat et réflexion de la phase d'identification : son déroulé.
+		t.scans[0]?.emit(search);
+		t.scans[0]?.emit(searchDone);
+		t.scans[0]?.emit(thinking);
 		t.scans[0]?.emit(criteriaCached);
 		t.scans[0]?.emit(pageRead);
 		t.scans[0]?.emit(identifying);
@@ -1293,15 +1314,20 @@ describe("useAiScan : identification", () => {
 		);
 		expect(stepsOf(t.result.current.identification)).toEqual([
 			readingPhotos,
+			search,
+			searchDone,
+			thinking,
 			criteriaCached,
 			pageRead,
 			identifying,
 			identificationEvent(),
 		]);
+		expect(stepsOf(t.result.current.ai)).toEqual([]);
 		t.scans[0]?.emit(photos);
 		t.scans[0]?.emit(search);
+		t.scans[0]?.emit(thinking);
 		// Chaque pilule a son propre déroulé.
-		expect(stepsOf(t.result.current.ai)).toEqual([photos, search]);
+		expect(stepsOf(t.result.current.ai)).toEqual([photos, search, thinking]);
 
 		const result = { ...sampleAnalysis, identification: sampleIdentification };
 		t.scans[0]?.resolve(ok(result));
@@ -1507,6 +1533,163 @@ describe("useAiScan : identification", () => {
 		);
 		await settle();
 		expect(t.result.current.identification).toEqual(LOADING);
+	});
+
+	test("« Analyser » met l'identification en cours dès le clic, avec son propre déroulé", async () => {
+		const t = setup();
+		act(() => t.result.current.scan());
+		// Avant tout événement : la pilule « Identifier » est en cours.
+		expect(t.result.current.identification).toEqual(LOADING);
+		expect(stepsOf(t.result.current.identification)).toEqual([]);
+		t.scans[0]?.emit(photos);
+		expect(stepsOf(t.result.current.identification)).toEqual([]);
+		// Identification servie du cache : en cours, puis faite.
+		t.scans[0]?.emit(identificationEvent());
+		expect(t.result.current.identification).toEqual(
+			identifiedWith(sampleIdentification),
+		);
+	});
+
+	test("analyse en échec avant tout événement de l'identification : l'identification revient au repos", async () => {
+		const t = setup();
+		act(() => t.result.current.scan());
+		expect(t.result.current.identification).toEqual(LOADING);
+		t.scans[0]?.emit(photos);
+		t.scans[0]?.resolve(fail("analysis_failed"));
+		await settle();
+		expect(t.result.current.identification).toEqual({ status: "idle" });
+	});
+
+	test("analyse incluse refusée (quota épuisé) : l'identification n'est plus celle de l'utilisateur", async () => {
+		const store = fakeStore();
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		act(() => t.result.current.identify());
+		t.identifies[0]?.resolve(ok(sampleIdentification));
+		await settle();
+		expect(t.result.current.analysisIncluded).toBe(true);
+
+		act(() => t.result.current.scan());
+		t.scans[0]?.resolve(fail("quota_exhausted"));
+		await settle();
+		expect(t.result.current.ai).toEqual({
+			status: "error",
+			code: "quota_exhausted",
+		});
+		// Plus d'« Inclus » : un nouveau clic ne boucle pas sur le refus.
+		expect(t.result.current.analysisIncluded).toBe(false);
+		expect(t.result.current.identification.status).toBe("done");
+		expect(store.forgetIdentifiedByUser).toHaveBeenCalledWith(
+			"2ememain.be",
+			"m1",
+			listingFingerprint(listingOf("m1")),
+		);
+		expect((await store.get("2ememain.be", "m1"))?.identifiedByUser).toBe(
+			false,
+		);
+	});
+
+	test("analyse incluse partie de la file, refusée (quota épuisé) : plus d'« Inclus »", async () => {
+		const store = fakeStore();
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		act(() => t.result.current.identify());
+		act(() => t.result.current.scan());
+		t.identifies[0]?.resolve(ok(sampleIdentification));
+		await settle();
+		expect(t.client.scan).toHaveBeenCalledTimes(1);
+		t.scans[0]?.resolve(fail("quota_exhausted"));
+		await settle();
+		expect(t.result.current.analysisIncluded).toBe(false);
+		expect(store.forgetIdentifiedByUser).toHaveBeenCalledWith(
+			"2ememain.be",
+			"m1",
+			listingFingerprint(listingOf("m1")),
+		);
+	});
+
+	test("autre erreur, ou quota épuisé sans analyse incluse : le drapeau reste", async () => {
+		const store = fakeStore();
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		act(() => t.result.current.identify());
+		t.identifies[0]?.resolve(ok(sampleIdentification));
+		await settle();
+		act(() => t.result.current.scan());
+		t.scans[0]?.resolve(fail("analysis_failed"));
+		await settle();
+		expect(t.result.current.analysisIncluded).toBe(true);
+		expect(store.forgetIdentifiedByUser).not.toHaveBeenCalled();
+
+		const other = setup(viewOf("m2"), store);
+		await settle();
+		act(() => other.result.current.scan());
+		other.scans[0]?.resolve(fail("quota_exhausted"));
+		await settle();
+		expect(store.forgetIdentifiedByUser).not.toHaveBeenCalled();
+	});
+
+	test("« Analyser » après une modification pendant l'identification : mis en file pour la version affichée", async () => {
+		const t = setup(viewOf("m1"));
+		act(() => t.result.current.identify());
+		const edited = listingOf("m1", { description: "Autre." });
+		t.rerender({ view: { report, listing: edited } });
+		act(() => t.result.current.scan());
+		expect(t.client.scan).not.toHaveBeenCalled();
+		expect(t.result.current.queued).toBe(true);
+		t.identifies[0]?.resolve(ok(sampleIdentification));
+		await settle();
+		expect(t.client.scan).toHaveBeenCalledTimes(1);
+		expect(t.scans[0]?.request.listing).toEqual(edited);
+		expect(t.result.current.queued).toBe(false);
+		expect(t.result.current.ai).toEqual(LOADING);
+	});
+
+	test("file oubliée si l'annonce change encore avant la fin de l'identification", async () => {
+		const t = setup(viewOf("m1"));
+		act(() => t.result.current.identify());
+		t.rerender({
+			view: { report, listing: listingOf("m1", { description: "Autre." }) },
+		});
+		act(() => t.result.current.scan());
+		expect(t.result.current.queued).toBe(true);
+		t.rerender({
+			view: { report, listing: listingOf("m1", { description: "Encore." }) },
+		});
+		expect(t.result.current.queued).toBe(false);
+		t.identifies[0]?.resolve(ok(sampleIdentification));
+		await settle();
+		expect(t.client.scan).not.toHaveBeenCalled();
+	});
+
+	test("relance sans cache : les événements d'identification ne touchent ni l'identification ni le déroulé", async () => {
+		const t = setup();
+		act(() => t.result.current.scan());
+		const first = { ...sampleAnalysis, identification: sampleIdentification };
+		t.scans[0]?.resolve(ok(first));
+		await settle();
+		const shown = t.result.current.identification;
+		expect(shown.status).toBe("done");
+
+		act(() => t.result.current.rescan());
+		t.scans[1]?.emit(readingPhotos);
+		t.scans[1]?.emit(search);
+		t.scans[1]?.emit(thinking);
+		const fresh = { ...sampleIdentification, identificationId: 8 };
+		t.scans[1]?.emit(identificationEvent(fresh));
+		expect(t.result.current.identification).toBe(shown);
+		t.scans[1]?.emit(photos);
+		t.scans[1]?.emit(searchDone);
+		const second = { ...sampleAnalysis, identification: fresh };
+		t.scans[1]?.resolve(ok(second));
+		await settle();
+		// Le résultat de la relance remplace l'identification affichée…
+		expect(t.result.current.identification).toEqual(
+			expect.objectContaining({ status: "done", result: fresh }),
+		);
+		// … et son déroulé ne garde que les étapes de l'analyse.
+		expect(t.result.current.ai).toEqual(doneWith(second));
+		expect(stepsOf(t.result.current.ai)).toEqual([photos, searchDone]);
 	});
 
 	test("identification démontée : annulée, ni état ni relecture", async () => {

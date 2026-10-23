@@ -163,6 +163,7 @@ const storeWith = (entries: Record<string, StoredAiResult>): AiResultStore => ({
 	get: async (site, id) => entries[`${site}|${id}`] ?? null,
 	put: async () => {},
 	prune: async () => {},
+	forgetIdentifiedByUser: async () => {},
 });
 
 /** Lance l'analyse depuis la pilule et attend son résultat (`score`/100). */
@@ -1213,7 +1214,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		const link = screen.getByRole("link", { name: "Analyseren met AI" });
 		expect(link.getAttribute("href")).toMatch(/\/pricing\/\?lang=nl$/);
 		expect(link.getAttribute("target")).toBe("_blank");
-		expect(link.getAttribute("rel")).toBe("noopener");
+		expect(link.getAttribute("rel")).toBe("noopener noreferrer");
 		expect(launchControls("nl")).toHaveLength(1);
 	});
 
@@ -2271,7 +2272,7 @@ describe("RiskBadge : focus clavier", () => {
 describe("RiskBadge : Identifier et deux panneaux", () => {
 	const IDENTIFY = contentText("fr", "identify.launch");
 	const ID_TITLE = contentText("fr", "identify.title");
-	const SURE = "Steam Deck OLED · Sûr 95 %";
+	const SURE = "Identification : Steam Deck OLED · Sûr 95 %";
 	/** « Identifier » au repos ou en cours (même nom accessible). */
 	const identifyButton = () => screen.getByRole("button", { name: IDENTIFY });
 	const identifyResult = () => screen.getByRole("button", { name: SURE });
@@ -2438,7 +2439,7 @@ describe("RiskBadge : Identifier et deux panneaux", () => {
 			screen.getByRole("button", { name: "Product identificeren" }),
 		);
 		const pill = await screen.findByRole("button", {
-			name: "Steam Deck OLED · Zeker 95%",
+			name: "Identificatie: Steam Deck OLED · Zeker 95%",
 		});
 		await user.click(pill);
 		const dialog = screen.getByRole("dialog", { name: "Identificatie" });
@@ -2619,12 +2620,52 @@ describe("RiskBadge : Identifier et deux panneaux", () => {
 		expect(ai.identify).not.toHaveBeenCalled();
 	});
 
+	test("0 analyse restante, identification venue d'une analyse : « Analyser » reste grisé", async () => {
+		const user = userEvent.setup();
+		const aiResults = storeWith({
+			"2ememain.be|m123": {
+				result: { ...sampleAnalysis, partial: true },
+				identification: sampleIdentification,
+				identifiedByUser: false,
+				fingerprint: listingFingerprint(listing),
+				storedAt: 1,
+			},
+		});
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				aiResults={aiResults}
+				accessCache={cached({ ...active, remaining: { scans: 0 } })}
+			/>,
+		);
+		await vi.waitFor(() => identifyResult());
+		expect(launch().getAttribute("aria-disabled")).toBe("true");
+		expect(launch().textContent).not.toContain(
+			contentText("fr", "identify.included"),
+		);
+		await user.click(launch());
+		expect(ai.scan).not.toHaveBeenCalled();
+	});
+
 	test("analyse sans identification préalable : les deux pilules s'animent, l'identification d'abord", async () => {
 		const user = userEvent.setup();
 		scanReply.mockImplementation(() => new Promise(() => {}));
 		renderActive();
 		await user.click(launch());
 		expect(toggle().getAttribute("aria-busy")).toBe("true");
+		// Dès le clic, avant tout événement : « Identifier » est en cours, et un
+		// clic sur elle ouvre son panneau au lieu d'être perdu.
+		const pill = identifyButton();
+		expect(pill.getAttribute("aria-busy")).toBe("true");
+		expect(lineOf(pill)).toBe("Démarrage de l'identification…");
+		await user.click(pill);
+		expect(idDialog()?.textContent).toContain("Démarrage de l'identification…");
+		await user.click(pill);
+		expect(idDialog()).toBeNull();
+		expect(ai.identify).not.toHaveBeenCalled();
 		emitScan({ type: "stage", stage: "reading_photos" });
 		expect(identifyButton().getAttribute("aria-busy")).toBe("true");
 		expect(lineOf(identifyButton())).toBe("Lecture des photos…");

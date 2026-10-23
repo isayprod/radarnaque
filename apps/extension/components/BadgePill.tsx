@@ -252,7 +252,7 @@ export function PricingLink({
 		<a
 			href={href}
 			target="_blank"
-			rel="noopener"
+			rel="noopener noreferrer"
 			aria-label={label}
 			className={className}
 		>

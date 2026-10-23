@@ -429,6 +429,7 @@ function fakeStore(
 				: null,
 		put: async () => {},
 		prune: async () => {},
+		forgetIdentifiedByUser: async () => {},
 	};
 }
 
