@@ -1,19 +1,27 @@
-import type { AnalysisResult } from "@radarnaque/shared";
+import type { AnalysisResult, IdentificationResult } from "@radarnaque/shared";
 import { storage } from "wxt/utils/storage";
 import type { Listing, Site } from "../listing/types";
+import { toIdentificationResult } from "../scan-events";
 
 /**
- * Un résultat IA reste valable 24 h après l'analyse (`analyzedAt`) et 24 h
- * après son écriture (`storedAt`) : la première échéance atteinte l'emporte.
+ * Un résultat IA reste valable 24 h après l'analyse (`analyzedAt`), 24 h après
+ * l'identification (`identifiedAt`) et 24 h après son écriture (`storedAt`) :
+ * la première échéance atteinte l'emporte.
  */
 export const AI_RESULT_TTL_MS = 24 * 60 * 60_000;
 
 /** Au plus 200 annonces gardées : les plus anciennes (`storedAt`) sont retirées. */
 export const MAX_AI_RESULTS = 200;
 
-/** Résultat IA gardé pour une annonce : une seule place par annonce. */
+/**
+ * Résultat IA gardé pour une annonce : une seule place par annonce, avec
+ * l'analyse, l'identification ou les deux (au moins l'une est non nulle).
+ */
 export interface StoredAiResult {
-	result: AnalysisResult;
+	result: AnalysisResult | null;
+	identification: IdentificationResult | null;
+	/** Vrai seulement si l'identification vient d'un « Identifier » de cet utilisateur. */
+	identifiedByUser: boolean;
 	/** `listingFingerprint` de l'annonce analysée. */
 	fingerprint: string;
 	/** Heure d'écriture, en millisecondes epoch. */
@@ -39,12 +47,13 @@ export function listingFingerprint(l: Listing): string {
 }
 
 /**
- * Valeur stockée sous `site|externalId`. Sans `v: 2`, elle est ignorée, puis
- * remplacée : l'ancienne forme `{ v: 1, text, image }` (une place par type) n'est
- * plus lue.
+ * Valeur stockée sous `site|externalId`. Une entrée `v: 2` (analyse seule) est
+ * relue avec l'identification qu'elle embarque ; sans `v: 2` ni `v: 3`, elle est
+ * ignorée, puis remplacée : l'ancienne forme `{ v: 1, text, image }` n'est plus
+ * lue.
  */
 export interface StoredAiEntry extends StoredAiResult {
-	v: 2;
+	v: 3;
 }
 
 /**
@@ -55,8 +64,10 @@ export const NO_REMAINING: AnalysisResult["remaining"] = Object.freeze({
 	scans: null,
 });
 
-/** Le résultat sans son quota restant d'alors. */
-export const withoutRemaining = (result: AnalysisResult): AnalysisResult => ({
+/** Le résultat (analyse ou identification) sans son quota restant d'alors. */
+export const withoutRemaining = <T extends { remaining?: unknown }>(
+	result: T,
+): T => ({
 	...result,
 	remaining: { ...NO_REMAINING },
 });
@@ -70,6 +81,13 @@ export const toStored = ({
 	debug: _,
 	...result
 }: AnalysisResult): AnalysisResult => withoutRemaining(result);
+
+/** L'identification telle qu'elle est gardée : sans quota restant ni `debug`. */
+export const toStoredIdentification = ({
+	debug: _,
+	...identification
+}: IdentificationResult): IdentificationResult =>
+	withoutRemaining(identification);
 
 /** Stockage d'une valeur : `storage.defineItem` de WXT, ou un double en test. */
 export interface StorageAreaLike {
@@ -102,29 +120,78 @@ const keyOf = (site: Site, externalId: string) => `${site}|${externalId}`;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Vérifie la forme d'une valeur lue : le stockage peut contenir n'importe quoi. */
-function isEntry(value: unknown): value is StoredAiEntry {
-	if (!isRecord(value) || !isRecord(value.result)) return false;
-	return (
-		value.v === 2 &&
-		typeof value.fingerprint === "string" &&
-		typeof value.storedAt === "number" &&
-		typeof value.result.partial === "boolean"
-	);
+/** L'analyse d'une valeur lue : son objet, ou null si elle n'en a pas la forme. */
+const toAnalysis = (value: unknown): AnalysisResult | null =>
+	isRecord(value) && typeof value.partial === "boolean"
+		? (value as unknown as AnalysisResult)
+		: null;
+
+/**
+ * Entrée lue sous sa forme `v: 3`, champs connus seuls ; l'ancienne `v: 2` est
+ * relue comme une analyse avec son identification embarquée. Null si illisible
+ * ou si ni l'analyse ni l'identification n'est lisible.
+ */
+function parseEntry(value: unknown): StoredAiEntry | null {
+	if (
+		!isRecord(value) ||
+		typeof value.fingerprint !== "string" ||
+		typeof value.storedAt !== "number"
+	)
+		return null;
+	const { fingerprint, storedAt } = value;
+	if (value.v === 2) {
+		const result = toAnalysis(value.result);
+		if (!result) return null;
+		const identification = toIdentificationResult(result.identification);
+		return {
+			v: 3,
+			result,
+			identification,
+			identifiedByUser: false,
+			fingerprint,
+			storedAt,
+		};
+	}
+	if (value.v !== 3 || typeof value.identifiedByUser !== "boolean") return null;
+	const result = value.result === null ? null : toAnalysis(value.result);
+	const identification =
+		value.identification === null
+			? null
+			: toIdentificationResult(value.identification);
+	if (
+		(value.result !== null && !result) ||
+		(value.identification !== null && !identification) ||
+		(!result && !identification)
+	)
+		return null;
+	return {
+		v: 3,
+		result,
+		identification,
+		identifiedByUser: identification !== null && value.identifiedByUser,
+		fingerprint,
+		storedAt,
+	};
 }
 
-/** M4 : expiré 24 h après l'analyse ou 24 h après l'écriture. */
+/**
+ * M4 : expiré 24 h après la plus ancienne des dates d'analyse et
+ * d'identification présentes, ou 24 h après l'écriture.
+ */
 function isExpired(entry: StoredAiResult, now: number): boolean {
-	const analyzed = Date.parse(entry.result.analyzedAt);
-	if (!Number.isNaN(analyzed) && now - analyzed > AI_RESULT_TTL_MS) return true;
+	const dates = [
+		entry.result?.analyzedAt,
+		entry.identification?.identifiedAt,
+	].map((date) => (date === undefined ? Number.NaN : Date.parse(date)));
+	for (const date of dates)
+		if (!Number.isNaN(date) && now - date > AI_RESULT_TTL_MS) return true;
 	return now - entry.storedAt > AI_RESULT_TTL_MS;
 }
 
 /** Entrée valable d'une valeur lue, champs connus seuls ; null sinon. */
 function cleanEntry(value: unknown, now: number): StoredAiEntry | null {
-	if (!isEntry(value) || isExpired(value, now)) return null;
-	const { result, fingerprint, storedAt } = value;
-	return { v: 2, result, fingerprint, storedAt };
+	const entry = parseEntry(value);
+	return entry && !isExpired(entry, now) ? entry : null;
 }
 
 /**
@@ -223,8 +290,15 @@ export function createAiResultStore(
 				memory ??= await readFresh();
 				const entry = cleanEntry(memory[keyOf(site, externalId)], now());
 				if (!entry) return null;
-				const { result, fingerprint, storedAt } = entry;
-				return { result: toStored(result), fingerprint, storedAt };
+				const { result, identification, identifiedByUser } = entry;
+				return {
+					result: result && toStored(result),
+					identification:
+						identification && toStoredIdentification(identification),
+					identifiedByUser,
+					fingerprint: entry.fingerprint,
+					storedAt: entry.storedAt,
+				};
 			}, null),
 
 		put: (site, externalId, entry) =>
@@ -232,16 +306,42 @@ export function createAiResultStore(
 				const { map } = cleanMap(await readFresh(), now());
 				const key = keyOf(site, externalId);
 				const previous = map[key];
+				// Même empreinte : l'analyse et l'identification déjà gardées sont
+				// conservées ; une autre empreinte remplace toute l'entrée.
+				const same =
+					previous?.fingerprint === entry.fingerprint ? previous : null;
+				// Une identification donnée l'emporte ; sinon celle qu'embarque l'analyse
+				// écrite, puis celle déjà gardée (même empreinte).
+				const embedded = toIdentificationResult(entry.result?.identification);
+				const given = entry.identification ?? embedded;
 				// Un résultat partiel (carte Facebook) ne remplace jamais l'analyse
-				// complète encore valable.
-				if (entry.result.partial && previous && !previous.result.partial) {
+				// complète encore valable : sans identification à ajouter, rien n'est écrit.
+				const protectsFull =
+					entry.result?.partial && previous?.result && !previous.result.partial;
+				if (protectsFull && (!same || !given)) {
+					memory = map;
+					return;
+				}
+				const result = protectsFull
+					? previous?.result
+					: (entry.result ?? same?.result ?? null);
+				const identification = given ?? same?.identification ?? null;
+				const identifiedByUser = entry.identification
+					? entry.identifiedByUser
+					: embedded
+						? false
+						: (same?.identifiedByUser ?? false);
+				if (!result && !identification) {
 					memory = map;
 					return;
 				}
 				const next: Record<string, StoredAiEntry> = {
 					[key]: {
-						v: 2,
-						result: toStored(entry.result),
+						v: 3,
+						result: result && toStored(result),
+						identification:
+							identification && toStoredIdentification(identification),
+						identifiedByUser: identification !== null && identifiedByUser,
 						fingerprint: entry.fingerprint,
 						storedAt: entry.storedAt,
 					},

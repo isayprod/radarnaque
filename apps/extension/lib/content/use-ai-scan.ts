@@ -274,7 +274,11 @@ export function useAiScan(
 		const adopt = (entry: StoredAiResult | null) => {
 			const current = listingFingerprint(viewRef.current.listing);
 			// Résultat partiel (carte) ou annonce changée depuis l'analyse : pastille au repos.
-			if (!entry || entry.result.partial || entry.fingerprint !== current)
+			if (
+				!entry?.result ||
+				entry.result.partial ||
+				entry.fingerprint !== current
+			)
 				return;
 			// I1 : jamais le quota restant de l'époque. Un scan en cours ou fini
 			// (pas `idle`) l'emporte sur l'entrée lue. Aucun déroulé n'est gardé.
@@ -386,6 +390,8 @@ export function useAiScan(
 					void aiResults
 						?.put(listing.site, listing.externalId, {
 							result: state.result,
+							identification: null,
+							identifiedByUser: false,
 							fingerprint: analysed,
 							storedAt: Date.now(),
 						})

@@ -219,7 +219,7 @@ export function createCardController(deps: CardControllerDeps): {
 		void deps.aiResults.get(site, id).then(
 			(entry) => {
 				// Un clic entre-temps (chargement, résultat, erreur) l'emporte.
-				if (disposed || !entry || stateOf(id).status !== "idle") return;
+				if (disposed || !entry?.result || stateOf(id).status !== "idle") return;
 				// I1 : jamais le quota restant de l'époque. Aucun déroulé n'est gardé.
 				setState(id, {
 					status: "done",
@@ -278,6 +278,8 @@ export function createCardController(deps: CardControllerDeps): {
 					void deps.aiResults
 						?.put(site, id, {
 							result: state.result,
+							identification: null,
+							identifiedByUser: false,
 							fingerprint: listingFingerprint(scanned),
 							storedAt: Date.now(),
 						})

@@ -266,6 +266,8 @@ function fakeStore(
 			result
 				? {
 						result,
+						identification: null,
+						identifiedByUser: false,
 						fingerprint: listingFingerprint(listing),
 						storedAt: Date.now(),
 					}

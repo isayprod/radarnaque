@@ -991,6 +991,8 @@ const partialEntry = (
 	overrides: Partial<StoredAiResult> = {},
 ): StoredAiResult => ({
 	result: { ...sampleAnalysis, partial: true },
+	identification: null,
+	identifiedByUser: false,
 	fingerprint: "autre empreinte",
 	storedAt: Date.parse(sampleAnalysis.analyzedAt),
 	...overrides,
@@ -1005,7 +1007,7 @@ describe("createCardController — résultats gardés 24 h", () => {
 		const id = FB_IDS[4] as string;
 		const mem = memoryStore({
 			[`facebook.com|${id}`]: {
-				v: 2,
+				v: 3,
 				...partialEntry({
 					result: { ...sampleAnalysis, remaining: { scans: 3 } },
 				}),
@@ -1031,7 +1033,7 @@ describe("createCardController — résultats gardés 24 h", () => {
 	test("entrée stockée : icône montée puis done sans clic, ai.scan jamais appelé", async () => {
 		const id = FB_IDS[2] as string;
 		const mem = memoryStore({
-			[`facebook.com|${id}`]: { v: 2, ...partialEntry() },
+			[`facebook.com|${id}`]: { v: 3, ...partialEntry() },
 		});
 		const doc = loadFixture("facebook/grid.html");
 		const t = setup(doc, FB_SEARCH, [withCards], {
@@ -1058,7 +1060,7 @@ describe("createCardController — résultats gardés 24 h", () => {
 	test("entrée expirée : l'icône reste idle", async () => {
 		const id = FB_IDS[2] as string;
 		const mem = memoryStore({
-			[`facebook.com|${id}`]: { v: 2, ...partialEntry() },
+			[`facebook.com|${id}`]: { v: 3, ...partialEntry() },
 		});
 		mem.advance(AI_RESULT_TTL_MS + 1_000);
 		const doc = loadFixture("facebook/grid.html");
@@ -1083,6 +1085,8 @@ describe("createCardController — résultats gardés 24 h", () => {
 		const scanned = t.ai.scan.mock.calls[0]?.[0];
 		expect(mem.store.put).toHaveBeenCalledWith("facebook.com", id, {
 			result: sampleAnalysis,
+			identification: null,
+			identifiedByUser: false,
 			fingerprint: listingFingerprint(scanned?.listing as never),
 			storedAt: expect.any(Number),
 		});
