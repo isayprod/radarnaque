@@ -14,6 +14,9 @@ nom n'est plus résolu au moment de se connecter, un DNS qui change de réponse 
 vérification et la connexion est donc sans effet. L'en-tête `Host` et l'extension httpcore
 `sni_hostname` portent le nom : le certificat TLS est vérifié contre le nom d'hôte.
 
+Aucune connexion n'est réutilisée entre requêtes (voir `make_http_client`) : le certificat est
+vérifié à chaque connexion pour le nom demandé.
+
 Les adresses IPv6 qui embarquent une IPv4 sont traitées comme dans `images.py` (refus fermé).
 `read_page` ne lève jamais (hors annulation) : tout refus ou échec donne `None`, sans détail.
 
@@ -25,6 +28,7 @@ import ipaddress
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from http.cookiejar import Cookie, CookieJar
 
 import httpx
 
@@ -37,12 +41,36 @@ from radarnaque_api.images import (
 )
 
 PAGE_TIMEOUT_S = 5
+USER_AGENT = "Radarnaque/1.0 (+https://radarnaque.mostconsult.be)"
 MAX_BYTES = 1024 * 1024
 MAX_TEXT_CHARS = 8000
 MAX_TITLE_CHARS = 300
 ALLOWED_TYPES = frozenset({"text/html", "text/plain"})
 SKIPPED_TAGS = frozenset({"script", "style", "nav", "footer", "noscript"})
-_CLOSING_TAG = re.compile(r"</(?=\s*page_web)", re.IGNORECASE)
+_PAGE_TAG = re.compile(r"<(?=\s*/?\s*page_web)", re.IGNORECASE)
+
+
+class _NoCookies(CookieJar):
+    """Jar qui ne retient jamais rien."""
+
+    def set_cookie(self, cookie: Cookie) -> None:
+        return None
+
+
+def make_http_client() -> httpx.AsyncClient:
+    """Client dédié au lecteur de pages. Sans proxy ni redirection automatique ; aucune
+    connexion n'est gardée (`max_keepalive_connections=0`) : httpcore choisit une connexion par
+    origine (`https://<ip>:443`), sans le nom d'hôte. Un second nom qui résoudrait vers la même
+    IP réutiliserait la connexion déjà vérifiée pour un autre nom, sans contrôle de son
+    certificat. Aucun cookie n'est jamais retenu (les requêtes visent des IP, et le client est
+    partagé entre sites)."""
+    client = httpx.AsyncClient(
+        trust_env=False,
+        follow_redirects=False,
+        limits=httpx.Limits(max_keepalive_connections=0),
+    )
+    client.cookies.jar = _NoCookies()  # httpx recopie un jar fourni : on remplace celui du client
+    return client
 
 
 @dataclass(frozen=True)
@@ -155,7 +183,7 @@ async def _fetch(raw: str, http: httpx.AsyncClient, resolve: Resolver) -> tuple[
         async with http.stream(
             "GET",
             _ip_url(url, address),
-            headers={"Host": host, "Accept-Encoding": "identity"},
+            headers={"Host": host, "Accept-Encoding": "identity", "User-Agent": USER_AGENT},
             extensions={"sni_hostname": host},
             auth=None,
             follow_redirects=False,
@@ -206,6 +234,7 @@ async def read_pages(
     finally:
         for task in tasks:
             task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
     return [
         page
         for task in tasks
@@ -214,7 +243,7 @@ async def read_pages(
 
 
 def _neutralize(value: str) -> str:
-    return _CLOSING_TAG.sub("&lt;/", value)
+    return _PAGE_TAG.sub("&lt;", value)
 
 
 def wrap_page(n: int, page: PageText) -> str:
