@@ -194,6 +194,84 @@ function ScanBlock(props: AiSectionProps) {
 	);
 }
 
+/**
+ * « Analyser le risque » dans le panneau, une fois le produit identifié : même
+ * action que celle de la pilule (le parent la passe par `useLaunch`, qui garde
+ * les règles d'accès). L'erreur de la dernière analyse au-dessus, le déroulé en
+ * direct dessous. Grisée (`aria-disabled`, focusable, raison lue avec elle) sans
+ * inclusion ni analyse restante ; décrite par « Inclus avec l'identification »
+ * quand l'analyse est incluse. Les écrans d'accès (connexion, formules) sont
+ * ceux d'`AccessBody`, jamais répétés ailleurs.
+ */
+export function RiskAction(
+	props: AccessActionsProps & {
+		ai: ScanState;
+		onAnalyze(): void;
+		/** Plus d'analyse restante et aucune incluse : l'action est grisée. */
+		empty: boolean;
+		/** L'analyse est incluse avec l'identification (acceptée à 0 restante). */
+		included: boolean;
+	},
+) {
+	const { locale, ai, empty, included } = props;
+	const reasonId = useId();
+	const includedId = useId();
+	const loading = ai.status === "loading";
+	const relaunch = ai.status === "error" && RELAUNCH_CODES.has(ai.code);
+	const errorHasAction = ai.status === "error" && hasOwnAction(ai.code);
+	let label = contentText(locale, "ai.analyzeRisk");
+	if (loading) label = contentText(locale, "ai.loading");
+	else if (relaunch) label = contentText(locale, "ai.retry");
+	const reason = contentText(locale, "ai.noScansLeft");
+	const includedText = contentText(locale, "identify.included");
+	const describedBy =
+		[empty ? reasonId : null, included ? includedId : null]
+			.filter((id) => id !== null)
+			.join(" ") || undefined;
+	return (
+		<AccessBody {...props}>
+			<div className="flex flex-col items-stretch">
+				{/* Région présente avant l'erreur, pour qu'elle soit annoncée. */}
+				<div aria-live="polite" className="w-full">
+					{ai.status === "error" && (
+						<div className="mb-3">
+							<ErrorNotice {...props} code={ai.code} />
+						</div>
+					)}
+				</div>
+				<button
+					type="button"
+					disabled={loading}
+					aria-busy={loading}
+					aria-disabled={empty ? true : undefined}
+					aria-describedby={describedBy}
+					title={empty ? reason : included ? includedText : undefined}
+					onClick={() => props.onAnalyze()}
+					className={`w-full ${errorHasAction ? SECONDARY_PILL_CLASS : WHITE_PILL_CLASS} aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:translate-y-0`}
+				>
+					{label}
+				</button>
+				{empty && (
+					<span id={reasonId} className="sr-only">
+						{reason}
+					</span>
+				)}
+				{included && (
+					<span id={includedId} className="sr-only">
+						{includedText}
+					</span>
+				)}
+				{/* Hors de la région annoncée : le déroulé change sans cesse. */}
+				{loading && (
+					<div className="mt-3 w-full">
+						<ScanProgressView progress={ai.progress} locale={locale} live />
+					</div>
+				)}
+			</div>
+		</AccessBody>
+	);
+}
+
 /** L'erreur `code` a sa propre action dans `ErrorNotice` (connexion ou formules). */
 export const hasOwnAction = (code: string) =>
 	RELOGIN_CODES.has(code) || PRICING_CODES.has(code);

@@ -19,8 +19,14 @@ import type { DebugLog } from "../lib/debug-log";
 import type { Listing } from "../lib/listing/types";
 import type { RiskReport } from "../lib/rules/score";
 import { AiErrorBoundary } from "./AiErrorBoundary";
-import { AiSection } from "./AiSection";
-import { activeIn, BadgePill, focusPill, useLaunch } from "./BadgePill";
+import { AiSection, RiskAction } from "./AiSection";
+import {
+	activeIn,
+	BadgePill,
+	focusPill,
+	noScansLeft,
+	useLaunch,
+} from "./BadgePill";
 import { DebugBoundary, DebugSection } from "./DebugSection";
 import { Icon } from "./Icon";
 import { IdentificationSection } from "./IdentificationSection";
@@ -147,6 +153,36 @@ function Panel({
 	);
 }
 
+/**
+ * « Détail du produit » sous le résultat du risque : un `<details>` natif,
+ * fermé par défaut, au clavier (Entrée, Espace) sans code. Le triangle est un
+ * simple glyphe qui tourne à l'ouverture.
+ */
+function ProductDetail({
+	locale,
+	children,
+}: {
+	locale: Locale;
+	children: ReactNode;
+}) {
+	return (
+		<details className="group mt-4 border-t border-border-subtle pt-3">
+			<summary
+				className={`${LABEL_CLASS} flex cursor-pointer list-none items-center gap-1.5 rounded-xs hover:text-text-1 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden [&::-webkit-details-marker]:hidden`}
+			>
+				<span
+					aria-hidden="true"
+					className="inline-block transition-transform group-open:rotate-90 motion-reduce:transition-none"
+				>
+					›
+				</span>
+				{contentText(locale, "identify.detail")}
+			</summary>
+			<div className="mt-3">{children}</div>
+		</details>
+	);
+}
+
 export function RiskBadge({
 	report,
 	listing,
@@ -238,13 +274,81 @@ export function RiskBadge({
 		scan.analysisIncluded,
 	);
 	const toggle = useCallback(() => setOpen((value) => !value), []);
-	// Contenu du panneau en attendant sa refonte : la section Identification,
-	// puis la section IA. Chaque état d'accès n'est montré qu'une fois : avant
-	// toute analyse du risque, par la section Identification seule ; ensuite,
-	// par la section IA, sous l'identification si elle est faite.
+	// Contenu du panneau (spec §3), selon l'étape. Chaque écran d'accès
+	// (déconnecté, sans abonnement, erreur) n'est montré qu'une fois :
+	// - produit pas encore identifié : la section Identification seule ;
+	// - identifié, risque pas encore analysé : le produit, puis « Analyser le
+	//   risque » (ou ses écrans d'accès, sous le produit) ;
+	// - risque analysé : le risque, puis « Détail du produit », replié.
 	const identified = scan.identification.status === "done";
-	const showIdentification = identified || scan.ai.status === "idle";
-	const showAi = identified || scan.ai.status !== "idle";
+	const analyzed = scan.ai.status === "done";
+	const noSubscription =
+		scan.access !== "loading" &&
+		!("error" in scan.access) &&
+		scan.access.status === "noSubscription";
+	const emptyAnalyze = noScansLeft(scan.access) && !scan.analysisIncluded;
+	const identificationSection = (hideRemaining: boolean) => (
+		<IdentificationSection
+			locale={locale}
+			identification={scan.identification}
+			access={scan.access}
+			onIdentify={() => scan.identify()}
+			onLogin={scan.login}
+			loginUnavailable={scan.loginUnavailable}
+			pricingUrl={scan.pricingUrl}
+			hideRemaining={hideRemaining}
+		/>
+	);
+	const aiSection = (
+		<AiSection
+			locale={locale}
+			access={scan.access}
+			ai={scan.ai}
+			onScan={() => scan.scan()}
+			onLogin={scan.login}
+			loginUnavailable={scan.loginUnavailable}
+			pricingUrl={scan.pricingUrl}
+		/>
+	);
+	let content: ReactNode;
+	if (analyzed) {
+		content = (
+			<>
+				{aiSection}
+				{identified && (
+					<ProductDetail locale={locale}>
+						{identificationSection(true)}
+					</ProductDetail>
+				)}
+			</>
+		);
+	} else if (identified) {
+		content = (
+			<div className="flex flex-col gap-4">
+				<section className="flex flex-col gap-2">
+					<h3 className={LABEL_CLASS}>
+						{contentText(locale, "identify.product")}
+					</h3>
+					{identificationSection(false)}
+				</section>
+				<RiskAction
+					locale={locale}
+					access={scan.access}
+					ai={scan.ai}
+					onAnalyze={analyze}
+					onLogin={scan.login}
+					loginUnavailable={scan.loginUnavailable}
+					pricingUrl={scan.pricingUrl}
+					empty={emptyAnalyze && !noSubscription}
+					included={scan.analysisIncluded && !noSubscription}
+				/>
+			</div>
+		);
+	} else if (scan.ai.status !== "idle") {
+		content = aiSection;
+	} else {
+		content = identificationSection(false);
+	}
 
 	// Police en px et reset explicite : le site hôte ne doit ni agrandir ni styler la pastille.
 	return (
@@ -270,31 +374,7 @@ export function RiskBadge({
 				>
 					{professional && <ProNotice locale={locale} />}
 					<AiErrorBoundary key={key} locale={locale}>
-						{showIdentification && (
-							<IdentificationSection
-								locale={locale}
-								identification={scan.identification}
-								access={scan.access}
-								onIdentify={() => scan.identify()}
-								onLogin={scan.login}
-								loginUnavailable={scan.loginUnavailable}
-								pricingUrl={scan.pricingUrl}
-							/>
-						)}
-						{showIdentification && showAi && (
-							<hr className="my-4 h-px border-0 bg-white/12" />
-						)}
-						{showAi && (
-							<AiSection
-								locale={locale}
-								access={scan.access}
-								ai={scan.ai}
-								onScan={() => scan.scan()}
-								onLogin={scan.login}
-								loginUnavailable={scan.loginUnavailable}
-								pricingUrl={scan.pricingUrl}
-							/>
-						)}
+						{content}
 						{debug && (
 							// Nouvelle tentative de rendu pour chaque nouveau bloc debug. La durée
 							// totale distingue une relance sans cache, qui réécrit l'analyse en

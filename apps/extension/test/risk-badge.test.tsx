@@ -152,19 +152,31 @@ const IDENTIFY = contentText("fr", "identify.launch");
 const PANEL_CLOSE = contentText("fr", "panel.close");
 /** Nom accessible de la partie produit de la pilule « Produit identifié ». */
 const SURE = "Identification : Steam Deck OLED · Sûr";
-/** Action « Analyser le risque » de la pilule (produit identifié, ou erreur). */
-const launch = () => screen.getByRole("button", { name: LAUNCH });
-const queryLaunch = () => screen.queryByRole("button", { name: LAUNCH });
-const findLaunch = () => screen.findByRole("button", { name: LAUNCH });
-/** Tous les contrôles « Analyser le risque » de la pastille (bouton ou lien). */
-const launchControls = (locale: "fr" | "nl" = "fr") => [
-	...screen.queryAllByRole("button", {
-		name: contentText(locale, "ai.analyzeRisk"),
-	}),
-	...screen.queryAllByRole("link", {
-		name: contentText(locale, "ai.analyzeRisk"),
-	}),
-];
+/**
+ * Action « Analyser le risque » de la pilule (produit identifié, ou erreur),
+ * hors du panneau, qui a son propre bouton du même nom.
+ */
+const outsidePanel = (elements: HTMLElement[]) =>
+	elements.filter((element) => !element.closest("[role='dialog']"));
+const pillLaunches = () =>
+	outsidePanel(screen.queryAllByRole("button", { name: LAUNCH }));
+const launch = () => {
+	const [button] = pillLaunches();
+	if (!button) throw new Error("Pas de bouton « Analyser le risque » (pilule)");
+	return button;
+};
+const queryLaunch = () => pillLaunches()[0] ?? null;
+const findLaunch = () => vi.waitFor(() => launch());
+/** Tous les contrôles « Analyser le risque » de la pilule (bouton ou lien). */
+const launchControls = (locale: "fr" | "nl" = "fr") =>
+	outsidePanel([
+		...screen.queryAllByRole("button", {
+			name: contentText(locale, "ai.analyzeRisk"),
+		}),
+		...screen.queryAllByRole("link", {
+			name: contentText(locale, "ai.analyzeRisk"),
+		}),
+	]);
 /**
  * Pilule au repos : « Identifier », nommée « Identifier le produit » (le
  * panneau a son propre bouton du même nom).
@@ -697,8 +709,8 @@ describe("RiskBadge : panneau", () => {
 		expect(
 			within(dialog).getByText("Risque élevé").closest("[data-verdict]"),
 		).not.toBeNull();
-		// La barre de la section IA, après celle de l'identification.
-		const analysis = within(dialog).getAllByRole("region").at(-1);
+		// La barre de la section IA, avant celle de « Détail du produit ».
+		const analysis = within(dialog).getAllByRole("region").at(0);
 		const fill = analysis?.querySelector("[role='presentation']")
 			?.firstElementChild as HTMLElement | null;
 		expect(fill?.style.width).toBe("82%");
@@ -2640,7 +2652,7 @@ describe("RiskBadge : une seule pilule, identification puis risque", () => {
 		expect(aiDialog()).toBeNull();
 	});
 
-	test("panneau après l'identification : « Analyse Radarnaque », la section Identification puis la section IA", async () => {
+	test("panneau après l'identification : « Analyse Radarnaque », la section Produit puis « Analyser le risque »", async () => {
 		const user = userEvent.setup();
 		renderActive();
 		await identifyFirst(user);
@@ -2653,21 +2665,250 @@ describe("RiskBadge : une seule pilule, identification puis risque", () => {
 		expect(dialog.textContent).toContain("Steam Deck OLED");
 		expect(dialog.textContent).toContain("Sûr");
 		expect(dialog.textContent).toContain("95 %");
-		const [identification, analysis] = within(dialog).getAllByRole("region");
-		expect(identification?.getAttribute("aria-labelledby")).toBeTruthy();
+		// Une seule section (le produit), sous son en-tête « Produit ».
+		const regions = within(dialog).getAllByRole("region");
+		expect(regions).toHaveLength(1);
+		const [label, region] = within(dialog).getAllByRole("heading", {
+			level: 3,
+		});
+		expect(label?.textContent).toBe(contentText("fr", "identify.product"));
+		expect(label?.className).toContain("uppercase");
+		expect(region?.textContent).toBe(contentText("fr", "identify.title"));
+		// Puis le bouton pleine largeur, sans l'ancien « Lancer une analyse IA ».
+		const action = within(dialog).getByRole("button", { name: LAUNCH });
+		expect(action.className).toContain("w-full");
 		expect(
-			within(identification as HTMLElement).getByRole("heading", { level: 3 })
-				.textContent,
-		).toBe(contentText("fr", "identify.title"));
+			(label as HTMLElement).compareDocumentPosition(action) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 		expect(
-			within(analysis as HTMLElement).getByRole("heading", { level: 3 })
-				.textContent,
-		).toBe(contentText("fr", "ai.title"));
+			within(dialog).queryByRole("button", {
+				name: contentText("fr", "ai.run"),
+			}),
+		).toBeNull();
 		// Aucune couleur sémantique du risque avant l'analyse.
 		for (const element of Array.from(dialog.querySelectorAll("*")))
 			expect(element.getAttribute("class") ?? "").not.toMatch(
 				/(^|\s)(text|bg)-(danger|warning|success)(-soft)?(\s|$)/,
 			);
+	});
+
+	test.each([
+		["fr", "Produit", "Analyser le risque"],
+		["nl", "Product", "Risico analyseren"],
+	] as const)(
+		"%s : « Analyser le risque » du panneau passe par le même chemin que la pilule",
+		async (locale, label, action) => {
+			const user = userEvent.setup();
+			renderActive(locale);
+			await user.click(
+				screen.getByRole("button", {
+					name: contentText(locale, "identify.launch"),
+				}),
+			);
+			const pillPart = await screen.findByRole("button", {
+				name: /Steam Deck OLED/,
+			});
+			await user.click(pillPart);
+			const dialog = screen.getByRole("dialog");
+			expect(
+				within(dialog).getAllByRole("heading", { level: 3 })[0]?.textContent,
+			).toBe(label);
+			await user.click(within(dialog).getByRole("button", { name: action }));
+			expect(ai.scan).toHaveBeenCalledTimes(1);
+			expect(ai.identify).toHaveBeenCalledTimes(1);
+		},
+	);
+
+	test("accès connecté, un seul pied « Analyses restantes » avant et après l'analyse du risque", async () => {
+		const user = userEvent.setup();
+		const finish = pendingScan();
+		renderActive();
+		await identifyFirst(user);
+		await user.click(product());
+		const dialog = aiDialog() as HTMLElement;
+		const remaining = (count: number) =>
+			contentText("fr", "ai.remaining").replace("{count}", String(count));
+		const footers = () =>
+			(dialog.textContent ?? "").split("Analyses restantes").length - 1;
+		expect(footers()).toBe(1);
+		await user.click(within(dialog).getByRole("button", { name: LAUNCH }));
+		await finish({ ok: true, data: aiHigh });
+		expect(within(dialog).getByText(remaining(aiHigh.remaining.scans ?? 0)));
+		// Le détail replié répète le produit, pas le pied.
+		expect(footers()).toBe(1);
+	});
+
+	test.each([
+		["fr", "Détail du produit"],
+		["nl", "Productdetails"],
+	] as const)(
+		"%s : après l'analyse, le risque puis « %s », replié, qui s'ouvre au clic et montre le produit",
+		async (locale, summaryText) => {
+			const user = userEvent.setup();
+			const finish = pendingScan();
+			renderActive(locale);
+			await user.click(
+				screen.getByRole("button", {
+					name: contentText(locale, "identify.launch"),
+				}),
+			);
+			await user.click(
+				await screen.findByRole("button", { name: /Steam Deck OLED/ }),
+			);
+			const dialog = screen.getByRole("dialog");
+			await user.click(
+				within(dialog).getByRole("button", {
+					name: contentText(locale, "ai.analyzeRisk"),
+				}),
+			);
+			await finish({ ok: true, data: aiHigh });
+			// Le risque d'abord, l'ancien bouton d'analyse a disparu.
+			expect(dialog.textContent).toContain("82");
+			expect(
+				within(dialog).queryByRole("button", {
+					name: contentText(locale, "ai.analyzeRisk"),
+				}),
+			).toBeNull();
+			const details = dialog.querySelector("details") as HTMLDetailsElement;
+			const summary = details.querySelector("summary") as HTMLElement;
+			expect(summary.textContent).toContain(summaryText);
+			expect(details.open).toBe(false);
+			// Après le résumé « Produit : … » du risque, dans l'ordre du DOM.
+			const verdict = dialog.querySelector("[data-verdict]") as HTMLElement;
+			expect(
+				verdict.compareDocumentPosition(details) &
+					Node.DOCUMENT_POSITION_FOLLOWING,
+			).toBeTruthy();
+			await user.click(summary);
+			expect(details.open).toBe(true);
+			expect(
+				within(details).getAllByRole("heading", { level: 3 })[0]?.textContent,
+			).toBe(contentText(locale, "identify.title"));
+			expect(details.textContent).toContain("Steam Deck OLED");
+		},
+	);
+
+	test("accès déconnecté après l'identification : l'écran de connexion n'apparaît qu'une fois", async () => {
+		const user = userEvent.setup();
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { status: "signedOut" },
+		}));
+		const aiResults = storeWith(identifiedEntry());
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				aiResults={aiResults}
+				accessCache={cached({ status: "signedOut" })}
+			/>,
+		);
+		await user.click(await screen.findByRole("button", { name: SURE }));
+		const dialog = screen.getByRole("dialog");
+		expect(
+			within(dialog).getAllByText(contentText("fr", "ai.loginHint")),
+		).toHaveLength(1);
+		expect(
+			within(dialog).getAllByRole("button", {
+				name: contentText("fr", "ai.login"),
+			}),
+		).toHaveLength(1);
+	});
+
+	test("0 analyse restante sans inclusion : le bouton du panneau est grisé, avec sa raison, et ne lance rien", async () => {
+		const user = userEvent.setup();
+		const aiResults = storeWith({
+			"2ememain.be|m123": {
+				result: { ...sampleAnalysis, partial: true },
+				identification: sampleIdentification,
+				identifiedByUser: false,
+				fingerprint: listingFingerprint(listing),
+				storedAt: 1,
+			},
+		});
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				aiResults={aiResults}
+				accessCache={cached({ ...active, remaining: { scans: 0 } })}
+			/>,
+		);
+		await findLaunch();
+		await user.click(await screen.findByRole("button", { name: SURE }));
+		const action = within(screen.getByRole("dialog")).getByRole("button", {
+			name: LAUNCH,
+		});
+		expect(action.getAttribute("aria-disabled")).toBe("true");
+		expect(
+			(action.getAttribute("aria-describedby") ?? "")
+				.split(" ")
+				.map((id) => document.getElementById(id)?.textContent),
+		).toEqual([contentText("fr", "ai.noScansLeft")]);
+		await user.click(action);
+		expect(ai.scan).not.toHaveBeenCalled();
+	});
+
+	test("à 0 analyse restante, l'analyse incluse part depuis le panneau", async () => {
+		const user = userEvent.setup();
+		await renderIdentified({
+			accessCache: cached({ ...active, remaining: { scans: 0 } }),
+		});
+		await user.click(product());
+		const action = within(screen.getByRole("dialog")).getByRole("button", {
+			name: LAUNCH,
+		});
+		expect(action.hasAttribute("aria-disabled")).toBe(false);
+		expect(
+			(action.getAttribute("aria-describedby") ?? "")
+				.split(" ")
+				.map((id) => document.getElementById(id)?.textContent),
+		).toEqual([contentText("fr", "identify.included")]);
+		await user.click(action);
+		expect(ai.scan).toHaveBeenCalledTimes(1);
+	});
+
+	test("sans abonnement : le panneau montre le lien vers les formules, une seule fois", async () => {
+		const user = userEvent.setup();
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				aiResults={storeWith(identifiedEntry())}
+				accessCache={cached({ status: "noSubscription" })}
+			/>,
+		);
+		await user.click(await screen.findByRole("button", { name: SURE }));
+		const dialog = screen.getByRole("dialog");
+		expect(
+			within(dialog).getAllByRole("link", {
+				name: contentText("fr", "ai.pricing"),
+			}),
+		).toHaveLength(1);
+		expect(within(dialog).queryByRole("button", { name: LAUNCH })).toBeNull();
+	});
+
+	test("analyse du risque en cours : le panneau montre son déroulé", async () => {
+		const user = userEvent.setup();
+		pendingScan();
+		await renderIdentified({ accessCache: cached(active) });
+		await user.click(launch());
+		emitScan({ type: "page_read", domain: "www.steamdeck.com", ok: true });
+		await user.click(toggle());
+		const dialog = screen.getByRole("dialog");
+		expect(dialog.textContent).toContain("www.steamdeck.com");
+		expect(
+			within(dialog)
+				.getByRole("button", { name: contentText("fr", "ai.loading") })
+				.hasAttribute("disabled"),
+		).toBe(true);
 	});
 
 	test("nl : partie produit « Identificatie: … Zeker », panneau en néerlandais", async () => {
