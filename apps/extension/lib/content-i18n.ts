@@ -22,6 +22,7 @@ export type ContentKey =
 	| "severity.warning"
 	| "severity.info"
 	| AiKey
+	| IdentifyKey
 	| ProgressKey
 	| DebugKey;
 
@@ -66,6 +67,21 @@ type AiKey =
 	| "ai.advice"
 	| "ai.reasons"
 	| AiErrorKey;
+
+// Pilule « Identifier » et en-tête de son panneau. `identify.percent` utilise
+// `{count}` ; `identify.either`, `{a}` et `{b}` (les deux premiers candidats).
+type IdentifyKey =
+	| "identify.launch"
+	| "identify.launchShort"
+	| "identify.title"
+	| "identify.level.sure"
+	| "identify.level.probable"
+	| "identify.level.uncertain"
+	| "identify.percent"
+	| "identify.either"
+	| "identify.none"
+	| "identify.included"
+	| "identify.queued";
 
 // Ligne d'état d'une analyse en cours (`statusLine`). `{count}`, `{aspect}`,
 // `{query}`, `{results}` et `{domains}` sont remplis par `scan-progress.ts`.
@@ -164,6 +180,17 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"ai.error.stream_interrupted": "Analyse interrompue",
 		"ai.error.timeout": "L'analyse a pris trop de temps",
 		"ai.error.default": "Une erreur est survenue. Réessayez plus tard.",
+		"identify.launch": "Identifier le produit",
+		"identify.launchShort": "Identifier",
+		"identify.title": "Identification",
+		"identify.level.sure": "Sûr",
+		"identify.level.probable": "Probable",
+		"identify.level.uncertain": "Incertain",
+		"identify.percent": "{count} %",
+		"identify.either": "{a} ou {b} ?",
+		"identify.none": "Produit non identifié",
+		"identify.included": "Inclus avec l'identification",
+		"identify.queued": "En attente de l'identification…",
 		"progress.start": "Démarrage de l'analyse",
 		"progress.cache": "Analyse déjà disponible",
 		"progress.photos": "Téléchargement de {count} photos",
@@ -256,6 +283,17 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"ai.error.stream_interrupted": "Analyse onderbroken",
 		"ai.error.timeout": "De analyse duurde te lang",
 		"ai.error.default": "Er is een fout opgetreden. Probeer het later opnieuw.",
+		"identify.launch": "Product identificeren",
+		"identify.launchShort": "Identificeren",
+		"identify.title": "Identificatie",
+		"identify.level.sure": "Zeker",
+		"identify.level.probable": "Waarschijnlijk",
+		"identify.level.uncertain": "Onzeker",
+		"identify.percent": "{count}%",
+		"identify.either": "{a} of {b}?",
+		"identify.none": "Product niet geïdentificeerd",
+		"identify.included": "Inbegrepen bij de identificatie",
+		"identify.queued": "Wacht op de identificatie…",
 		"progress.start": "Analyse wordt gestart",
 		"progress.cache": "Analyse al beschikbaar",
 		"progress.photos": "{count} foto's downloaden",

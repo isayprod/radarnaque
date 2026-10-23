@@ -307,20 +307,26 @@ async function waitFor<T extends Element>(
 	throw new Error(`galerie : ${selector} introuvable`);
 }
 
-/** Clic sur la pilule (premier bouton), une fois qu'elle est rendue. */
-const clickPill = async (root: ShadowRoot, selector = "button") =>
+/** Pilule « Analyser » : la seconde de la ligne, après « Identifier ». */
+const ANALYZE = "[data-pill='analyze']";
+
+/** Clic sur la pilule « Analyser » (son bouton), une fois qu'elle est rendue. */
+const clickPill = async (root: ShadowRoot, selector = `${ANALYZE} button`) =>
 	(await waitFor<HTMLElement>(root, selector)).click();
 
 /** Lance l'analyse, puis ouvre le panneau sur son résultat. */
 async function launchThenOpen(root: ShadowRoot) {
 	await clickPill(root);
-	await clickPill(root, "button[aria-describedby][aria-expanded='false']");
+	await clickPill(
+		root,
+		`${ANALYZE} button[aria-describedby][aria-expanded='false']`,
+	);
 }
 
 /** Lance l'analyse et ouvre le panneau pendant qu'elle tourne. */
 async function launchAndOpenWhileLoading(root: ShadowRoot) {
 	await clickPill(root);
-	await clickPill(root, "button[aria-busy='true']");
+	await clickPill(root, `${ANALYZE} button[aria-busy='true']`);
 }
 
 /** Affiche l'infobulle d'une icône de carte (survol simulé). */

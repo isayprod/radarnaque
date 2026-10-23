@@ -1,5 +1,6 @@
 import type { Locale } from "@radarnaque/shared";
 import {
+	type ReactNode,
 	type RefObject,
 	useCallback,
 	useEffect,
@@ -22,6 +23,8 @@ import { AiSection } from "./AiSection";
 import { activeIn, BadgePill, focusPill, useLaunch } from "./BadgePill";
 import { DebugBoundary, DebugSection } from "./DebugSection";
 import { Icon } from "./Icon";
+import { IdentificationPanelBody } from "./IdentificationPanelBody";
+import { IdentifyPill } from "./IdentifyPill";
 import { Logo } from "./Logo";
 import { LABEL_CLASS } from "./risk-styles";
 import { useKeepInView } from "./useKeepInView";
@@ -101,6 +104,54 @@ const PANEL_CLASS =
 const CLOSE_CLASS =
 	"-my-1 -mr-1.5 inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-pill text-text-2 hover:bg-white/8 hover:text-text-1 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
 
+/** Panneau ouvert : celui de l'identification, celui de l'analyse, ou aucun. */
+type OpenPanel = null | "identify" | "analyze";
+
+/**
+ * Carte d'un panneau (`PANEL_CLASS`) : en-tête avec le logo, le titre en style
+ * `label` qui nomme la boîte de dialogue, et « Fermer ». Les deux panneaux,
+ * Identification et Analyse, ont la même.
+ */
+function Panel({
+	panelRef,
+	title,
+	locale,
+	onClose,
+	children,
+}: {
+	panelRef: RefObject<HTMLDivElement | null>;
+	title: string;
+	locale: Locale;
+	onClose(): void;
+	children: ReactNode;
+}) {
+	const titleId = useId();
+	return (
+		<div
+			ref={panelRef}
+			role="dialog"
+			aria-labelledby={titleId}
+			className={PANEL_CLASS}
+		>
+			<div className="mb-4 flex items-center gap-2">
+				<Logo size={14} className="shrink-0 text-text-1" />
+				<h2 id={titleId} className={`${LABEL_CLASS} min-w-0 flex-1 truncate`}>
+					{title}
+				</h2>
+				<button
+					type="button"
+					aria-label={contentText(locale, "panel.close")}
+					onClick={onClose}
+					className={CLOSE_CLASS}
+				>
+					<Icon name="close" size={16} />
+				</button>
+			</div>
+			{children}
+		</div>
+	);
+}
+
 export function RiskBadge({
 	report,
 	listing,
@@ -123,22 +174,28 @@ export function RiskBadge({
 	/** Logs de debug du superuser (scan demandé, scan reçu). */
 	debugLog?: DebugLog;
 }) {
-	const [open, setOpen] = useState(false);
+	// Un seul panneau à la fois : ouvrir l'un ferme l'autre.
+	const [open, setOpen] = useState<OpenPanel>(null);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const pillRef = useRef<HTMLSpanElement>(null);
+	const identifyPillRef = useRef<HTMLSpanElement>(null);
 	const panelRef = useRef<HTMLDivElement>(null);
-	useKeepInView(panelRef, open);
-	const close = useCallback(() => setOpen(false), []);
-	const titleId = useId();
+	const identifyPanelRef = useRef<HTMLDivElement>(null);
+	// Un appel par panneau : chacun garde son écoute du redimensionnement.
+	useKeepInView(panelRef, open === "analyze");
+	useKeepInView(identifyPanelRef, open === "identify");
+	const close = useCallback(() => setOpen(null), []);
 	// « Fermer », ou Escape avec le focus dans la pastille : le focus revient à la
-	// pilule (le bouton, l'action de la pilule d'erreur, ou la pilule d'erreur
-	// elle-même), avant que le panneau, qui peut le contenir, ne disparaisse.
+	// pilule qui a ouvert le panneau (le bouton, l'action de la pilule d'erreur, ou
+	// la pilule d'erreur elle-même), avant que le panneau, qui peut le contenir,
+	// ne disparaisse.
 	const closeToPill = useCallback(() => {
-		focusPill(pillRef.current);
-		setOpen(false);
-	}, []);
-	const openPanel = useCallback(() => setOpen(true), []);
-	useDismiss(open, rootRef, close, closeToPill);
+		focusPill(open === "identify" ? identifyPillRef.current : pillRef.current);
+		setOpen(null);
+	}, [open]);
+	const openAnalyze = useCallback(() => setOpen("analyze"), []);
+	const openIdentify = useCallback(() => setOpen("identify"), []);
+	useDismiss(open !== null, rootRef, close, closeToPill);
 	// L'état IA vit ici, pas dans le panneau : il survit à sa fermeture.
 	const scan = useAiScan(
 		ai,
@@ -149,12 +206,13 @@ export function RiskBadge({
 		debugLog,
 	);
 	const { loadAccess } = scan;
-	// Accès lu au clic sur « Analyser » (`useLaunch`) ou à l'ouverture du panneau,
+	// Accès lu au clic sur une pilule (`useLaunch`) ou à l'ouverture d'un panneau,
 	// jamais avant. Panneau ouvert, il est relu
 	// au retour sur l'onglet (connexion faite dans la popup) ; `loadAccess` ne fait
 	// rien s'il est déjà actif.
+	const anyOpen = open !== null;
 	useEffect(() => {
-		if (!open) return;
+		if (!anyOpen) return;
 		loadAccess();
 		const onFocus = () => loadAccess();
 		const onVisibility = () => {
@@ -166,11 +224,10 @@ export function RiskBadge({
 			window.removeEventListener("focus", onFocus);
 			document.removeEventListener("visibilitychange", onVisibility);
 		};
-	}, [open, loadAccess]);
+	}, [anyOpen, loadAccess]);
 
 	// Seul le résultat IA est affiché ; le rapport local ne sert qu'à la demande.
 	const shown = shownResult(scan.ai);
-	const title = contentText(locale, "panel.title");
 	// Section Debug : le serveur a renvoyé `debug` ET l'accès lu est celui du
 	// superuser. Un résultat repris du magasin n'a jamais de `debug`.
 	const debug =
@@ -185,12 +242,24 @@ export function RiskBadge({
 		listing.seller.sellerKind === "professional" ||
 		shown?.professional === true;
 
+	const key = `${listing.site}|${listing.externalId}`;
 	const launch = useLaunch(
 		scan,
-		`${listing.site}|${listing.externalId}`,
-		openPanel,
+		key,
+		openAnalyze,
+		scan.scan,
+		scan.analysisIncluded,
 	);
-	const toggle = useCallback(() => setOpen((value) => !value), []);
+	const launchIdentify = useLaunch(scan, key, openIdentify, scan.identify);
+	// Chaque pilule ouvre ou ferme son propre panneau.
+	const toggle = useCallback(
+		() => setOpen((value) => (value === "analyze" ? null : "analyze")),
+		[],
+	);
+	const toggleIdentify = useCallback(
+		() => setOpen((value) => (value === "identify" ? null : "identify")),
+		[],
+	);
 
 	// Police en px et reset explicite : le site hôte ne doit ni agrandir ni styler la pastille.
 	return (
@@ -198,43 +267,53 @@ export function RiskBadge({
 			ref={rootRef}
 			className="radarnaque-root relative ml-2 inline-block align-middle text-[13px] leading-[1.4] font-normal"
 		>
-			<BadgePill
-				scan={scan}
-				locale={locale}
-				open={open}
-				onToggle={toggle}
-				onLaunch={launch}
-				pillRef={pillRef}
-			/>
-			{open && (
-				<div
-					ref={panelRef}
-					role="dialog"
-					aria-labelledby={titleId}
-					className={PANEL_CLASS}
+			<span className="inline-flex max-w-full items-center gap-2 align-middle">
+				<IdentifyPill
+					scan={scan}
+					locale={locale}
+					open={open === "identify"}
+					onToggle={toggleIdentify}
+					onLaunch={launchIdentify}
+					pillRef={identifyPillRef}
+				/>
+				<BadgePill
+					scan={scan}
+					locale={locale}
+					open={open === "analyze"}
+					onToggle={toggle}
+					onLaunch={launch}
+					pillRef={pillRef}
+				/>
+			</span>
+			{open === "identify" && (
+				<Panel
+					panelRef={identifyPanelRef}
+					title={contentText(locale, "identify.title")}
+					locale={locale}
+					onClose={closeToPill}
 				>
-					<div className="mb-4 flex items-center gap-2">
-						<Logo size={14} className="shrink-0 text-text-1" />
-						<h2
-							id={titleId}
-							className={`${LABEL_CLASS} min-w-0 flex-1 truncate`}
-						>
-							{title}
-						</h2>
-						<button
-							type="button"
-							aria-label={contentText(locale, "panel.close")}
-							onClick={closeToPill}
-							className={CLOSE_CLASS}
-						>
-							<Icon name="close" size={16} />
-						</button>
-					</div>
+					<AiErrorBoundary key={key} locale={locale}>
+						<IdentificationPanelBody
+							locale={locale}
+							identification={scan.identification}
+							access={scan.access}
+							onIdentify={() => scan.identify()}
+							onLogin={scan.login}
+							loginUnavailable={scan.loginUnavailable}
+							pricingUrl={scan.pricingUrl}
+						/>
+					</AiErrorBoundary>
+				</Panel>
+			)}
+			{open === "analyze" && (
+				<Panel
+					panelRef={panelRef}
+					title={contentText(locale, "panel.title")}
+					locale={locale}
+					onClose={closeToPill}
+				>
 					{professional && <ProNotice locale={locale} />}
-					<AiErrorBoundary
-						key={`${listing.site}|${listing.externalId}`}
-						locale={locale}
-					>
+					<AiErrorBoundary key={key} locale={locale}>
 						<AiSection
 							locale={locale}
 							access={scan.access}
@@ -261,7 +340,7 @@ export function RiskBadge({
 							</DebugBoundary>
 						)}
 					</AiErrorBoundary>
-				</div>
+				</Panel>
 			)}
 		</div>
 	);
