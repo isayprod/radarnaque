@@ -55,3 +55,6 @@ web-pages/
 
 # Historiques R
 .Rhistory
+
+# Jeu d'évaluation de l'identification (construit à la main depuis web-pages/, données personnelles)
+services/api/evals/
