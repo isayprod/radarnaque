@@ -66,7 +66,7 @@ from radarnaque_api.identify.schemas import (
 )
 from radarnaque_api.identify.store import StepSetup, record_criteria_call
 from radarnaque_api.images import Resolver, fetch_images
-from radarnaque_api.llm.client import LLMClient, LLMError, LLMErrorCode, StepResult
+from radarnaque_api.llm.client import Bilingual, LLMClient, LLMError, LLMErrorCode, StepResult
 from radarnaque_api.llm.events import CriteriaCached
 from radarnaque_api.llm.payload import summarize_messages
 from radarnaque_api.llm.providers import ReasoningEffort
@@ -91,7 +91,13 @@ Observation = Literal["seen_match", "seen_contrary", "not_visible"]
 _VALUE_RANK = {"high": 0, "medium": 1, "low": 2}
 _BAD_URL_CHARS = re.compile(r"[\s\x00-\x1f\x7f]")
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# Schéma d'URL collé à sa suite (`javascript:alert(1)`, `data:text/html`) ; « Note : » passe.
+_SCHEME = re.compile(
+    r"(?<![\w.+-])(?:https?|ftp|file|javascript|vbscript|data|blob|mailto|tel):(?=\S)",
+    re.IGNORECASE,
+)
 NAME_MAX = 120
+SENTENCE_MAX = 300
 
 
 class StepError(LLMError):
@@ -325,7 +331,7 @@ async def run_pipeline(
         on_event,
     )
     run.calls.append(_record("read_photos", setup, result, images=len(images)))
-    read = run.read_photos = result.output
+    read = run.read_photos = _clean_read(result.output)
     if read.status == "nothing":
         return run
 
@@ -503,8 +509,8 @@ async def _identify(
     )
     result = await _call(ctx, run, setup, messages, IdentifyOut, SCHEMA_IDENTIFY, None, on_event)
     run.calls.append(_record("identify", setup, result, images=len(images)))
-    run.identify = result.output
-    return result.output
+    run.identify = _clean_identify(result.output)
+    return run.identify
 
 
 def _targets(objects: list[ReadPhotosObject]) -> list[int]:
@@ -534,21 +540,60 @@ def _designated(reference: str | None, candidates: list[str]) -> str | None:
     return matched[0] if len(matched) == 1 else None
 
 
-def _clean_name(value: str | None) -> str | None:
-    """Nom de produit écrit par le modèle, rendu tel quel à l'extension : `None` s'il contient
-    une URL (`://`, `www.`), un caractère de contrôle ou `<`/`>` ; 120 caractères au plus."""
+def _clean_text(value: str | None, limit: int) -> str | None:
+    """Texte libre écrit par le modèle, rendu tel quel à l'extension : `None` s'il contient une
+    URL (`://`, `www.`, schéma comme `javascript:`), un caractère de contrôle ou `<`/`>`, plutôt
+    que réécrit en partie ; `limit` caractères au plus."""
     text = (value or "").strip()
     lowered = text.lower()
     if (
         not text
         or "://" in lowered
         or "www." in lowered
+        or _SCHEME.search(text)
         or _CONTROL_CHARS.search(text)
         or "<" in text
         or ">" in text
     ):
         return None
-    return text[:NAME_MAX].strip()
+    return text[:limit].strip()
+
+
+def _clean_name(value: str | None) -> str | None:
+    """Nom de produit (référence, candidat, catégorie) : 120 caractères au plus."""
+    return _clean_text(value, NAME_MAX)
+
+
+def _clean_sentence(value: str | None) -> str | None:
+    """Phrase (question au vendeur, écart avec le titre, note sur une photo) : 300 caractères
+    au plus."""
+    return _clean_text(value, SENTENCE_MAX)
+
+
+def _clean_read(read: ReadPhotosOut) -> ReadPhotosOut:
+    """Textes de `read_photos` rendus à l'extension (`title_mismatch`, notes des observations) ;
+    une observation dont la note est refusée disparaît. Les candidats et la catégorie servent
+    encore au pipeline : ils sont filtrés à la construction des objets (`_resolve`)."""
+    observations = [
+        o.model_copy(update={"note": note})
+        for o in read.photo_observations
+        if (note := _clean_sentence(o.note)) is not None
+    ]
+    return read.model_copy(
+        update={
+            "title_mismatch": _clean_sentence(read.title_mismatch),
+            "photo_observations": observations,
+        }
+    )
+
+
+def _clean_identify(out: IdentifyOut) -> IdentifyOut:
+    """Question au vendeur d'`identify` : retirée si l'une de ses deux langues est refusée."""
+    question = out.seller_question
+    if question is not None:
+        fr, nl = _clean_sentence(question.fr), _clean_sentence(question.nl)
+        question = Bilingual(fr=fr, nl=nl) if fr and nl else None
+    return out.model_copy(update={"seller_question": question})
 
 
 # --- Critères ----------------------------------------------------------------------------------
@@ -777,9 +822,9 @@ def _resolve(
         shown = [c for c in crit.items if c.kind == "photo"]
         checks = _checks(answer.checks if answer else [], shown, crit.stored, photos)
         reference = _clean_name(answer.reference) if answer else None
-        remaining = (
-            [r for r in map(_clean_name, answer.remaining) if r] if answer else obj.candidates
-        )
+        remaining = [
+            r for r in map(_clean_name, answer.remaining if answer else obj.candidates) if r
+        ]
         # Plancher de la référence lue : seulement si `identify` retient le candidat qu'elle
         # désigne, et si elle figure dans un résultat de recherche.
         designated = read_designates[n]
@@ -811,7 +856,9 @@ def _resolve(
         objects.append(
             ObjectRecord(
                 role=obj.role,
-                label=obj.category.strip() or obj.candidates[0],
+                # Catégorie refusée : premier candidat acceptable, sinon libellé vide.
+                label=_clean_name(obj.category)
+                or next(filter(None, map(_clean_name, obj.candidates)), ""),
                 reference=reference,
                 remaining=tuple(remaining),
                 confidence=confidence,
