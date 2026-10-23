@@ -67,13 +67,8 @@ function tooltipOf(
 	const headline = identification
 		? identificationHeadline(identification, locale)
 		: null;
-	// Même objet principal que le titre ; sans référence, « ? ».
-	const main =
-		identification?.objects.find((o) => o.role === "main") ??
-		identification?.objects[0];
-	const product = headline
-		? `${main?.reference ? headline.short : "?"} · ${headline.level}`
-		: null;
+	// Même texte que la pilule « Identifier » : la référence courte, ou « A ou B ? ».
+	const product = headline ? `${headline.short} · ${headline.level}` : null;
 	return { text, product, professional };
 }
 

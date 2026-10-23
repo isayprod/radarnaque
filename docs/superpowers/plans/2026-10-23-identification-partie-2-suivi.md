@@ -55,14 +55,20 @@ README, « Tester les analyses IA dans l'extension »). À faire en FR et en NL,
 - **Modifier une annonce pendant une requête n'annule pas la requête.** Le changement d'empreinte
   remet les deux états à zéro et vide la file, mais la requête en cours va à son terme et son
   résultat est gardé avec l'empreinte du moment du clic. Seul un changement d'annonce annule.
+  « Analyser » cliqué après la modification, pendant l'identification, est mis en file pour la
+  version affichée au clic ; il n'est oublié que si l'annonce change encore avant la fin.
 - **Critère manquant : pas de champ dédié dans l'API.** Pour un résultat incertain, l'encadré « À
   demander au vendeur » liste les critères de l'objet principal marqués « non visible » sous la
   forme « Non visible sur les photos : … », au-dessus de la question. Les « analyses restantes »
-  du panneau viennent du résultat, et de l'accès lu seulement si le résultat n'en porte pas ; un
-  décompte nul dans le résultat (illimité) n'affiche rien, comme la section d'analyse.
+  du panneau viennent du résultat ; l'accès lu ne sert de repli qu'à une identification sans
+  `remaining` (celle embarquée dans une analyse). Un résultat repris du magasin porte
+  `{ scans: null }` et, comme un décompte nul (illimité), n'affiche rien, comme la section
+  d'analyse.
 - **« Inclus » possible à zéro analyse restante.** Conformément au §7 de la spécification,
   l'analyse qui suit une identification est incluse : la pilule « Analyser » reste active à quota 0
-  tant que l'identification est récente.
+  tant que l'identification est récente. Si le serveur refuse quand même cette analyse
+  (`quota_exhausted`), l'identification n'est plus marquée comme celle de l'utilisateur (dans la
+  pastille et dans le magasin) : « Inclus » disparaît et « Analyser » redevient grisé.
 - **L'API se déploie avant l'extension**, comme pour la partie 1.
 
 ## Points mineurs reportés

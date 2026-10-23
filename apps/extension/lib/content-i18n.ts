@@ -70,7 +70,8 @@ type AiKey =
 	| AiErrorKey;
 
 // Pilule « Identifier » et en-tête de son panneau. `identify.percent` utilise
-// `{count}` ; `identify.either`, `{a}` et `{b}` (les deux premiers candidats).
+// `{count}` ; `identify.either`, `{a}` et `{b}` (les deux premiers candidats) ;
+// `identify.name`, `{name}` (le nom accessible de la pilule du résultat).
 type IdentifyKey =
 	| "identify.launch"
 	| "identify.launchShort"
@@ -98,7 +99,9 @@ type IdentifyKey =
 	| "identify.accessories"
 	| "identify.object"
 	| "identify.pages"
-	| "identify.howIdentified";
+	| "identify.howIdentified"
+	| "identify.start"
+	| "identify.name";
 
 // Ligne d'état d'une analyse en cours (`statusLine`). `{count}`, `{aspect}`,
 // `{query}`, `{results}` et `{domains}` sont remplis par `scan-progress.ts`.
@@ -224,6 +227,8 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"identify.object": "Objet",
 		"identify.pages": "Pages de référence",
 		"identify.howIdentified": "Déroulé de l'identification",
+		"identify.start": "Démarrage de l'identification…",
+		"identify.name": "Identification : {name}",
 		"ai.product": "Produit : {reference} ({level})",
 		"progress.start": "Démarrage de l'analyse",
 		"progress.cache": "Analyse déjà disponible",
@@ -344,6 +349,8 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"identify.object": "Object",
 		"identify.pages": "Referentiepagina's",
 		"identify.howIdentified": "Verloop van de identificatie",
+		"identify.start": "Identificatie starten…",
+		"identify.name": "Identificatie: {name}",
 		"ai.product": "Product: {reference} ({level})",
 		"progress.start": "Analyse wordt gestart",
 		"progress.cache": "Analyse al beschikbaar",

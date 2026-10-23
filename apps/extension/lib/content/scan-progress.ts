@@ -181,9 +181,14 @@ function clip(line: string): string {
 
 /**
  * Ligne d'état de la pastille : le texte du dernier événement, ou de l'étape la plus
- * récente qui en a un (un résumé de réflexion encore vide ne l'efface pas).
+ * récente qui en a un (un résumé de réflexion encore vide ne l'efface pas). Avant
+ * tout texte, `start` (« Démarrage de l'analyse », ou de l'identification).
  */
-export function statusLine(p: ScanProgress, locale: Locale): string {
+export function statusLine(
+	p: ScanProgress,
+	locale: Locale,
+	start: ContentKey = "progress.start",
+): string {
 	const events = p.steps.map((s) => s.event);
 	if (p.last && events.at(-1) !== p.last) events.push(p.last);
 	for (let i = events.length - 1; i >= 0; i--) {
@@ -191,5 +196,5 @@ export function statusLine(p: ScanProgress, locale: Locale): string {
 		const line = event ? eventLine(event, locale) : "";
 		if (line) return clip(line);
 	}
-	return clip(contentText(locale, "progress.start"));
+	return clip(contentText(locale, start));
 }

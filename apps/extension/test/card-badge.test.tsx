@@ -336,11 +336,15 @@ describe("CardBadge", () => {
 					...(sampleIdentification
 						.objects[0] as (typeof sampleIdentification)["objects"][number]),
 					reference: null,
+					remaining: ["Steam Deck OLED", "Steam Deck LCD"],
 				},
 			],
 		};
+		// Sans référence : « A of B? », comme la pilule « Identifier ».
 		renderInLink(done(unsure), "nl");
-		expect(tip().textContent).toContain("? · Onzeker");
+		expect(tip().textContent).toContain(
+			"Steam Deck OLED of Steam Deck LCD? · Onzeker",
+		);
 		cleanup();
 		// Pas d'identification, ou rien d'identifiable : pas de ligne produit.
 		renderInLink(done(null));

@@ -121,7 +121,10 @@ function IdentifyBlock(props: IdentificationSectionProps) {
 				{contentText(locale, "identify.launch")}
 			</button>
 			{progress && (
-				<LiveLine text={statusLine(progress, locale)} waiting={waiting} />
+				<LiveLine
+					text={statusLine(progress, locale, "identify.start")}
+					waiting={waiting}
+				/>
 			)}
 		</div>
 	);
@@ -164,8 +167,10 @@ function CheckItem({ check, locale }: { check: Check; locale: Locale }) {
 						)
 					</span>
 				)}
-				{check.sources.map((source) => (
-					<span key={source.url}>
+				{/* Une même page peut revenir : la clé est la position. */}
+				{check.sources.map((source, i) => (
+					// biome-ignore lint/suspicious/noArrayIndexKey: liste figée, URL possiblement en double
+					<span key={i}>
 						{" "}
 						<Domain page={source} />
 					</span>
@@ -281,13 +286,15 @@ function ResultView({
 	);
 	const question = result.sellerQuestion?.[locale] ?? "";
 	// `null` : illimité ou sans plafond (rien à dire, jamais « 0 »). Le résultat
-	// porte le décompte du serveur ; à défaut (repris du magasin), l'accès lu.
+	// porte le décompte du serveur ; un résultat repris du magasin porte
+	// `{ scans: null }` (`withoutRemaining`) et n'affiche rien.
 	const accessRemaining =
 		access !== "loading" && !("error" in access) && access.status === "active"
 			? access.remaining.scans
 			: null;
-	// Le repli sur l'accès ne vaut que si le résultat n'a pas de décompte : un
-	// `scans` nul dans le résultat dit « illimité » (comme `AiSection`).
+	// Le repli sur l'accès lu ne vaut que pour une identification sans
+	// `remaining` (celle embarquée dans une analyse) : un `scans` nul dans le
+	// résultat dit « illimité » (comme `AiSection`).
 	const remaining = result.remaining ? result.remaining.scans : accessRemaining;
 	const live = progress && progress.steps.length > 0 ? progress : null;
 	const shownProgress = live ?? progressFromSearches(result.searches);

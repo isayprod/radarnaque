@@ -22,10 +22,12 @@ import { Logo } from "./Logo";
  * 1. résultat : glyphe de confiance, référence courte, « · », niveau et
  *    pourcentage en chiffres tabulaires ; « A ou B ? » quand deux candidats
  *    restent, « Produit non identifié » quand rien n'est identifiable. Aucune
- *    couleur sémantique du risque. Le nom accessible donne la référence
- *    entière ; le clic ouvre ou ferme le panneau Identification ;
- * 2. en cours (identification seule, ou première phase d'une analyse) : le
- *    logo animé et la ligne d'état, même clic ;
+ *    couleur sémantique du risque. Le nom accessible, « Identification : »
+ *    puis la référence entière ; le clic ouvre ou ferme le panneau
+ *    Identification ;
+ * 2. en cours (identification seule, ou première phase d'une analyse, dès le
+ *    clic sur « Analyser ») : le logo animé et la ligne d'état (« Démarrage de
+ *    l'identification… » avant le premier événement), même clic ;
  * 3. erreur : comme l'erreur de l'analyse, l'action étant « Identifier » ;
  * 4. repos : le logo et « Identifier », nommé « Identifier le produit » ; un
  *    lien vers les formules sans abonnement ; grisé sans analyse restante.
@@ -55,7 +57,7 @@ export function IdentifyPill({
 	const { identification, access } = scan;
 	const progress =
 		identification.status === "loading" ? identification.progress : null;
-	const line = progress ? statusLine(progress, locale) : "";
+	const line = progress ? statusLine(progress, locale, "identify.start") : "";
 	const waiting = useWaiting(progress?.lastAt ?? 0, progress !== null);
 	const error =
 		identification.status === "error" && !open
@@ -77,9 +79,14 @@ export function IdentifyPill({
 		// Lecture du magasin en cours : rien à cliquer.
 	} else if (identification.status === "done") {
 		const headline = identificationHeadline(identification.result, locale);
-		const name = headline
+		const label = headline
 			? `${headline.reference} · ${headline.level} ${headline.percent}`
 			: contentText(locale, "identify.none");
+		// « Identification : Steam Deck OLED · Sûr 95 % » : le nom dit de quelle pilule il s'agit.
+		const name = contentText(locale, "identify.name").replace(
+			"{name}",
+			() => label,
+		);
 		pill = (
 			<button
 				type="button"
@@ -107,7 +114,7 @@ export function IdentifyPill({
 						</span>
 					</>
 				) : (
-					name
+					label
 				)}
 			</button>
 		);

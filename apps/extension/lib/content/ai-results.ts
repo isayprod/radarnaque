@@ -72,22 +72,31 @@ export const withoutRemaining = <T extends { remaining?: unknown }>(
 	remaining: { ...NO_REMAINING },
 });
 
-/**
- * Le résultat tel qu'il est gardé : sans quota restant (I1) ni bloc `debug` du
- * superuser, dont les prompts et la réponse brute ne vont jamais dans
- * `storage.local`. Un résultat repris n'a donc pas de section Debug.
- */
-export const toStored = ({
-	debug: _,
-	...result
-}: AnalysisResult): AnalysisResult => withoutRemaining(result);
-
 /** L'identification telle qu'elle est gardée : sans quota restant ni `debug`. */
 export const toStoredIdentification = ({
 	debug: _,
 	...identification
 }: IdentificationResult): IdentificationResult =>
 	withoutRemaining(identification);
+
+/**
+ * Le résultat tel qu'il est gardé : sans quota restant (I1) ni bloc `debug` du
+ * superuser, dont les prompts et la réponse brute ne vont jamais dans
+ * `storage.local`. Un résultat repris n'a donc pas de section Debug. Son
+ * identification embarquée est gardée comme une identification seule.
+ */
+export const toStored = ({
+	debug: _,
+	...result
+}: AnalysisResult): AnalysisResult =>
+	withoutRemaining(
+		result.identification
+			? {
+					...result,
+					identification: toStoredIdentification(result.identification),
+				}
+			: result,
+	);
 
 /** Stockage d'une valeur : `storage.defineItem` de WXT, ou un double en test. */
 export interface StorageAreaLike {
@@ -113,6 +122,16 @@ export interface AiResultStore {
 	put(site: Site, externalId: string, entry: StoredAiResult): Promise<void>;
 	/** Retire les entrées expirées ; n'écrit que s'il y en a. */
 	prune(): Promise<void>;
+	/**
+	 * Remet `identifiedByUser` à faux pour l'entrée de cette empreinte : `put` ne
+	 * le peut pas (le drapeau gardé l'emporte pour la même empreinte). Une autre
+	 * empreinte, ou aucune entrée : rien n'est écrit.
+	 */
+	forgetIdentifiedByUser(
+		site: Site,
+		externalId: string,
+		fingerprint: string,
+	): Promise<void>;
 }
 
 const keyOf = (site: Site, externalId: string) => `${site}|${externalId}`;
@@ -352,6 +371,18 @@ export function createAiResultStore(
 				const { map, dropped } = cleanMap(await readFresh(), now());
 				if (dropped) await write(map);
 				else memory = map;
+			}, undefined),
+
+		forgetIdentifiedByUser: (site, externalId, fingerprint) =>
+			serial(async () => {
+				const { map } = cleanMap(await readFresh(), now());
+				const key = keyOf(site, externalId);
+				const entry = map[key];
+				if (entry?.fingerprint !== fingerprint || !entry.identifiedByUser) {
+					memory = map;
+					return;
+				}
+				await write({ ...map, [key]: { ...entry, identifiedByUser: false } });
 			}, undefined),
 	};
 }

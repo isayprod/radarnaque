@@ -981,6 +981,10 @@ function memoryStore(initial: Record<string, StoredAiEntry> = {}) {
 		get: vi.fn<AiResultStore["get"]>((site, id) => store.get(site, id)),
 		put: vi.fn<AiResultStore["put"]>((site, id, e) => store.put(site, id, e)),
 		prune: vi.fn<AiResultStore["prune"]>(() => store.prune()),
+		forgetIdentifiedByUser: vi.fn<AiResultStore["forgetIdentifiedByUser"]>(
+			(site, id, fingerprint) =>
+				store.forgetIdentifiedByUser(site, id, fingerprint),
+		),
 	};
 	return {
 		store: spied,
@@ -1184,6 +1188,7 @@ describe("createCardController — résultats gardés 24 h", () => {
 			get: vi.fn(async (_site, cardId) => (cardId === id ? stored : null)),
 			put: vi.fn(async () => {}),
 			prune: vi.fn(async () => {}),
+			forgetIdentifiedByUser: vi.fn(async () => {}),
 		};
 		const doc = loadFixture("facebook/grid.html");
 		const t = setup(doc, FB_SEARCH, [withCards], { aiResults: store });
@@ -1237,6 +1242,7 @@ describe("createCardController — résultats gardés 24 h", () => {
 				throw new Error("indisponible");
 			}),
 			prune: vi.fn(async () => {}),
+			forgetIdentifiedByUser: vi.fn(async () => {}),
 		};
 		const doc = loadFixture("facebook/grid.html");
 		const t = setup(doc, FB_SEARCH, [withCards], { aiResults: failing });

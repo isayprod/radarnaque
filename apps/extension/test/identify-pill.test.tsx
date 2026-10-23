@@ -311,20 +311,18 @@ describe("IdentifyPill : en cours", () => {
 
 describe("IdentifyPill : résultat", () => {
 	test.each([
-		["fr", "Steam Deck OLED · Sûr 95 %"],
-		["nl", "Steam Deck OLED · Zeker 95%"],
+		["fr", "Identification : Steam Deck OLED · Sûr 95 %", "Sûr 95 %"],
+		["nl", "Identificatie: Steam Deck OLED · Zeker 95%", "Zeker 95%"],
 	] as const)(
 		"%s : glyphe ●, référence, niveau, pourcentage",
-		(locale, name) => {
+		(locale, name, level) => {
 			const { onToggle } = renderPill(done(sampleIdentification), { locale });
 			const pill = screen.getByRole("button", { name });
 			expect(pill.getAttribute("aria-expanded")).toBe("false");
 			expect(pill.querySelector("[data-reference]")?.textContent).toBe(
 				"Steam Deck OLED",
 			);
-			expect(pill.querySelector("[data-level]")?.textContent).toBe(
-				name.split(" · ")[1],
-			);
+			expect(pill.querySelector("[data-level]")?.textContent).toBe(level);
 			const glyph = pill.querySelector("[data-glyph]");
 			expect(glyph?.textContent).toBe("●");
 			expect(glyph?.getAttribute("aria-hidden")).toBe("true");
@@ -341,31 +339,42 @@ describe("IdentifyPill : résultat", () => {
 		const pill = pillButton();
 		expect(pill.querySelector("[data-glyph]")?.textContent).toBe("◐");
 		expect(pill.getAttribute("aria-label")).toBe(
-			"Steam Deck OLED · Probable 80 %",
+			"Identification : Steam Deck OLED · Probable 80 %",
 		);
 	});
 
 	test.each([
-		["fr", "Steam Deck OLED ou Steam Deck LCD ? · Incertain 55 %"],
-		["nl", "Steam Deck OLED of Steam Deck LCD? · Onzeker 55%"],
-	] as const)("%s : incertain, deux candidats et glyphe ○", (locale, name) => {
-		renderPill(done(uncertain), { locale });
-		const pill = screen.getByRole("button", { name });
-		expect(pill.querySelector("[data-glyph]")?.textContent).toBe("○");
-		expect(pill.querySelector("[data-reference]")?.textContent).toBe(
-			name.split(" · ")[0],
-		);
-		expect(pill.querySelector("[data-level]")?.textContent).toBe(
-			name.split(" · ")[1],
-		);
-	});
+		[
+			"fr",
+			"Identification : ",
+			"Steam Deck OLED ou Steam Deck LCD ? · Incertain 55 %",
+		],
+		[
+			"nl",
+			"Identificatie: ",
+			"Steam Deck OLED of Steam Deck LCD? · Onzeker 55%",
+		],
+	] as const)(
+		"%s : incertain, deux candidats et glyphe ○",
+		(locale, prefix, text) => {
+			renderPill(done(uncertain), { locale });
+			const pill = screen.getByRole("button", { name: `${prefix}${text}` });
+			expect(pill.querySelector("[data-glyph]")?.textContent).toBe("○");
+			expect(pill.querySelector("[data-reference]")?.textContent).toBe(
+				text.split(" · ")[0],
+			);
+			expect(pill.querySelector("[data-level]")?.textContent).toBe(
+				text.split(" · ")[1],
+			);
+		},
+	);
 
 	test.each([
-		["fr", "Produit non identifié"],
-		["nl", "Product niet geïdentificeerd"],
-	] as const)("%s : rien d'identifiable, « %s »", (locale, text) => {
+		["fr", "Identification : ", "Produit non identifié"],
+		["nl", "Identificatie: ", "Product niet geïdentificeerd"],
+	] as const)("%s : rien d'identifiable, « %s%s »", (locale, prefix, text) => {
 		renderPill(done(none), { locale });
-		const pill = screen.getByRole("button", { name: text });
+		const pill = screen.getByRole("button", { name: `${prefix}${text}` });
 		expect(pill.textContent).toBe(text);
 		expect(pill.querySelector("[data-percent]")).toBeNull();
 	});
@@ -388,7 +397,9 @@ describe("IdentifyPill : résultat", () => {
 		const shown = pill.querySelector("[data-reference]")?.textContent ?? "";
 		expect(Array.from(shown)).toHaveLength(32);
 		expect(shown).toBe(`${reference.slice(0, 31).trimEnd()}…`);
-		expect(pill.getAttribute("aria-label")).toBe(`${reference} · Sûr 95 %`);
+		expect(pill.getAttribute("aria-label")).toBe(
+			`Identification : ${reference} · Sûr 95 %`,
+		);
 	});
 
 	test("incertain, candidats longs : chacun tronqué à 32, nom accessible complet", () => {
@@ -412,7 +423,7 @@ describe("IdentifyPill : résultat", () => {
 			`${cut(a)} ou ${cut(b)} ?`,
 		);
 		expect(pill.getAttribute("aria-label")).toBe(
-			`${a} ou ${b} ? · Incertain 55 %`,
+			`Identification : ${a} ou ${b} ? · Incertain 55 %`,
 		);
 	});
 

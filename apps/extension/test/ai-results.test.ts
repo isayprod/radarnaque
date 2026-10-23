@@ -1,3 +1,4 @@
+import type { IdentificationResult } from "@radarnaque/shared";
 import { describe, expect, test, vi } from "vitest";
 import {
 	AI_RESULT_TTL_MS,
@@ -161,6 +162,54 @@ describe("createAiResultStore : lecture et écriture", () => {
 		const got = await store.get("2ememain.be", "m1");
 		expect(got?.result).not.toHaveProperty("debug");
 		expect(got?.result?.summary).toEqual(debugAnalysis.summary);
+	});
+
+	test("l'identification embarquée dans l'analyse est gardée sans debug ni quota", async () => {
+		const identDebug = {
+			steps: [
+				{
+					step: "identify",
+					model: "m",
+					provider: "p",
+					ms: 1,
+					messages: [],
+					costUsdMicros: 0,
+					system: "Tu identifies un produit.",
+					raw: "réponse brute",
+				},
+			],
+		} as unknown as IdentificationResult["debug"];
+		const result = {
+			...debugAnalysis,
+			identification: {
+				...sampleIdentification,
+				debug: identDebug,
+				remaining: { scans: 3 },
+			},
+		};
+		const mem = memoryArea();
+		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
+		await store.put("2ememain.be", "m1", entryOf(ANALYZED_AT, { result }));
+		const stored = mem.value()["2ememain.be|m1"]?.result?.identification;
+		expect(stored).toBeDefined();
+		expect(stored).not.toHaveProperty("debug");
+		expect(stored?.remaining).toEqual(NO_REMAINING);
+		expect(JSON.stringify(mem.value())).not.toContain(
+			"Tu identifies un produit.",
+		);
+		// Une entrée déjà gardée avec eux est rendue sans eux.
+		const legacy = memoryArea({
+			"2ememain.be|m1": v3(entryOf(ANALYZED_AT, { result })),
+		});
+		const got = await createAiResultStore(legacy.area, () => ANALYZED_AT).get(
+			"2ememain.be",
+			"m1",
+		);
+		expect(got?.result?.identification).not.toHaveProperty("debug");
+		expect(got?.result?.identification?.remaining).toEqual(NO_REMAINING);
+		expect(got?.result?.identification?.identificationId).toBe(
+			sampleIdentification.identificationId,
+		);
 	});
 
 	test("une entrée stockée avec un bloc debug est rendue sans lui", async () => {
@@ -612,16 +661,19 @@ describe("createAiResultStore : identification", () => {
 		const clock = IDENTIFIED_AT;
 		const store = createAiResultStore(memoryArea().area, () => clock);
 		await store.put("2ememain.be", "m1", identOnly(clock));
+		// L'identification de l'analyse se distingue de celle de l'utilisateur.
+		const fromAnalysis = { ...sampleIdentification, identificationId: 8 };
 		await store.put(
 			"2ememain.be",
 			"m1",
 			fullEntry(clock, {
-				result: { ...sameDay, identification: sampleIdentification },
+				result: { ...sameDay, identification: fromAnalysis },
 			}),
 		);
 		const got = await store.get("2ememain.be", "m1");
 		expect(got?.identifiedByUser).toBe(true);
-		expect(got?.identification).not.toBeNull();
+		// L'identification embarquée par l'analyse écrite remplace celle gardée.
+		expect(got?.identification?.identificationId).toBe(8);
 		expect(got?.result).not.toBeNull();
 		// Autre empreinte : la valeur entrante.
 		await store.put(
@@ -630,6 +682,32 @@ describe("createAiResultStore : identification", () => {
 			fullEntry(clock, { fingerprint: "x" }),
 		);
 		expect((await store.get("2ememain.be", "m1"))?.identifiedByUser).toBe(
+			false,
+		);
+	});
+
+	test("forgetIdentifiedByUser clears the flag for the same fingerprint only", async () => {
+		const clock = IDENTIFIED_AT;
+		const mem = memoryArea();
+		const store = createAiResultStore(mem.area, () => clock);
+		await store.put("2ememain.be", "m1", identOnly(clock));
+		const writes = mem.area.setValue.mock.calls.length;
+		// Autre empreinte, ou annonce sans entrée : rien n'est écrit.
+		await store.forgetIdentifiedByUser("2ememain.be", "m1", "autre");
+		await store.forgetIdentifiedByUser("2ememain.be", "m9", "fp");
+		expect(mem.area.setValue).toHaveBeenCalledTimes(writes);
+		expect((await store.get("2ememain.be", "m1"))?.identifiedByUser).toBe(true);
+
+		await store.forgetIdentifiedByUser("2ememain.be", "m1", "fp");
+		const got = await store.get("2ememain.be", "m1");
+		expect(got?.identifiedByUser).toBe(false);
+		// L'identification reste gardée.
+		expect(got?.identification?.identificationId).toBe(
+			sampleIdentification.identificationId,
+		);
+		// Relu depuis le stockage aussi.
+		const fresh = createAiResultStore(mem.area, () => clock);
+		expect((await fresh.get("2ememain.be", "m1"))?.identifiedByUser).toBe(
 			false,
 		);
 	});
