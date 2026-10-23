@@ -170,7 +170,8 @@ pnpm e2e:scan                # contre la stack lancée (pnpm dev)
 Le faux fournisseur répond toujours la même analyse (score 42, une raison, textes FR/NL fixes),
 ou, pour les étapes de l'identification, une sortie fixe valide selon le nom du schéma demandé
 (`radarnaque_read_photos`, `radarnaque_criteria`, `radarnaque_identify` ; en mode `json_object`,
-d'après le schéma ajouté au prompt) : un vélo à deux candidats, donc une étape de critères. Il écrit une ligne par requête : modèle, nombre de messages, présence d'images, jamais le
+d'après le schéma ajouté au prompt) : un vélo à deux candidats, donc une étape de critères.
+Il écrit une ligne par requête : modèle, nombre de messages, présence d'images, jamais le
 contenu ni les en-têtes. Il n'écoute que sur `127.0.0.1`. Le port 20199 est imposé : le
 fournisseur `stub` de `providers.toml` n'a pas de `base_url_env`, l'API appelle donc toujours
 `http://localhost:20199/v1`, même si le faux fournisseur est lancé sur un autre port.
@@ -194,8 +195,21 @@ quel fournisseur ; le score 42 n'est vérifié qu'avec `stub`.
 (`fromCache: false`, étapes `reading_photos` puis `identifying`, et `criteria` avec ses
 recherches quand SearXNG répond), le second est servi depuis le cache (`fromCache: true`, même
 `identificationId`). Il affiche `E2E IDENTIFY OK (status=<s>, confidence=<n>, level=<l>)` ; sinon
-il nomme l'étape en échec. Avec `stub`, les trois étapes d'identification doivent avoir `stub/stub-model`
-pour modèle actif (écran IA de l'admin, section de chaque étape).
+il nomme l'étape en échec.
+
+Pour `pnpm e2e:identify` avec `stub`, `radarnaque-llm use` ne suffit pas : son option `--kind`
+ne vise que les types de scan (`text`, `image`, `full`). Les trois étapes se règlent dans
+l'écran IA de l'admin :
+
+1. noter les modèles actuels : `cd services/api && uv run --env-file ../../infra/.env radarnaque-llm list`
+   (types de scan), et le modèle actif de chaque étape dans l'écran IA ;
+2. lancer `pnpm llm:stub` ;
+3. dans l'écran IA de l'admin, choisir `stub/stub-model` comme modèle actif des étapes
+   `read_photos`, `criteria` et `identify` (le modèle `stub/stub-model` existe après
+   `radarnaque-llm use stub stub-model --kind full`) ;
+4. lancer `pnpm e2e:identify` puis `pnpm e2e:scan` ;
+5. remettre les modèles notés : écran IA pour les trois étapes, `radarnaque-llm use <fournisseur>
+   <modèle> --kind full` pour le type `full`.
 
 Au-delà d'environ 3 connexions par minute (`pnpm e2e:login` et `pnpm e2e:scan` confondus),
 le limiteur du service auth répond 429 à l'étape « connexion 3 »
@@ -325,7 +339,7 @@ Incertain). Le résultat nourrit ensuite l'analyse anti-arnaque (`scam`). La sp�
   | `criteria_max_pages` | 3 | pages publiques lues par le serveur pour les critères |
   | `identify_retry_threshold` | 60 | confiance en dessous de laquelle `identify` est relancé (recherche en plus, modèle de relance) |
   | `identify_image_side` | 1280 | côté maximal des photos envoyées à l'identification (768 à 1536 px) |
-  | `scam_sends_photos` | oui | l'analyse anti-arnaque reçoit-elle aussi les photos |
+  | `scam_sends_photos` | non | l'analyse anti-arnaque reçoit-elle aussi les photos |
   | `identify_escalation_model_id` | aucun | modèle de la relance (sinon celui d'`identify`) |
 - **Étapes :** un modèle actif et un prompt versionné par étape (`read_photos`, `criteria`,
   `identify`), réglés dans l'écran IA de l'admin ; l'analyse (`scam`, prompt `full`) garde ses

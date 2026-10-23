@@ -57,15 +57,26 @@ le plan dans [`2026-10-23-identification-partie-1-api.md`](2026-10-23-identifica
 
 ## À vérifier sur la vraie pile
 
-Rien de ceci n'a été essayé hors des tests (1247 tests de l'API, voir l'[état du projet](../../etat-du-projet.md)).
+Rien de ceci n'a été essayé hors des tests (1247 tests de l'API, voir l'[état du projet](../../etat-du-projet.md)),
+sauf une passe unique de `eval:identify` avec une annonce fictive contre le modèle actif (`openai-oauth`) : elle a
+tourné jusqu'au bout et a écrit dans la base de critères et dans `llm_calls` de la base de dev.
 
-- **`pnpm e2e:identify` et `pnpm e2e:scan` avec le faux fournisseur** : lancer `pnpm llm:stub`,
-  activer `stub/stub-model` pour les étapes `read_photos`, `criteria` et `identify` (écran IA de
-  l'admin) et pour le type `full`, puis lancer les deux commandes. Attendu : `reading_photos`,
-  `criteria` (avec ses `search` et `page_read` si SearXNG répond), `identifying`, `identification`,
-  puis `result`. **Cette passe n'a pas été faite pendant la tâche** (la pile tournait avec
-  `openai-oauth` actif, le faux fournisseur n'écoutait pas : rien n'a été changé dans la
-  configuration de dev). Remettre le modèle habituel ensuite.
+- **`pnpm e2e:identify` et `pnpm e2e:scan` avec le faux fournisseur.** `radarnaque-llm use` ne
+  règle que les types de scan (`--kind text|image|full`) : les trois étapes d'identification se
+  règlent dans l'écran IA de l'admin. Pas à pas :
+  1. noter les modèles actuels : `cd services/api && uv run --env-file ../../infra/.env radarnaque-llm list`
+     (types de scan) et le modèle actif de chaque étape dans l'écran IA ;
+  2. `pnpm llm:stub` dans un terminal à part ;
+  3. `radarnaque-llm use stub stub-model --kind full` (crée aussi le modèle `stub/stub-model`),
+     puis, dans l'écran IA, `stub/stub-model` comme modèle actif de `read_photos`, `criteria` et
+     `identify` ;
+  4. `pnpm e2e:identify` puis `pnpm e2e:scan`. Attendu : `reading_photos`, `criteria` (avec ses
+     `search` et `page_read` si SearXNG répond), `identifying`, `identification`, puis `result` ;
+  5. remettre les modèles notés (écran IA pour les étapes, `radarnaque-llm use <fournisseur>
+     <modèle> --kind full` pour `full`).
+
+  **Cette passe n'a pas été faite pendant la tâche** : la pile tournait avec `openai-oauth` actif et
+  le faux fournisseur n'écoutait pas ; la configuration de dev n'a pas été modifiée.
 - **OpenRouter et modèles vision réels** : sortie structurée stricte sur les trois schémas,
   nombre de photos accepté, lecture correcte des références sur de vraies annonces. `pnpm
   eval:identify` sur un jeu construit à la main donne la justesse, les niveaux et le coût par
