@@ -9,6 +9,17 @@ from radarnaque_api.models.analyses import (
 )
 from radarnaque_api.models.auth_user import AuthUser
 from radarnaque_api.models.base import Base
+from radarnaque_api.models.identification import (
+    CriteriaSet,
+    Criterion,
+    CriterionSource,
+    Identification,
+    IdentificationCheck,
+    IdentificationObject,
+    IdentificationPage,
+    IdentificationResult,
+    IdentificationSearch,
+)
 from radarnaque_api.models.listings import Listing, ListingSnapshot, SnapshotImage
 from radarnaque_api.models.offer import Plan, PlanFeature, PlanPrice, PlanQuota
 from radarnaque_api.models.reference import (
@@ -20,6 +31,7 @@ from radarnaque_api.models.reference import (
     Locale,
     Marketplace,
     Model,
+    PipelineStep,
     PromptVersion,
     QuotaPeriod,
     ScanKind,
@@ -44,14 +56,24 @@ __all__ = [
     "Base",
     "BillingInterval",
     "BillingProvider",
+    "CriteriaSet",
+    "Criterion",
+    "CriterionSource",
     "Currency",
     "Feature",
+    "Identification",
+    "IdentificationCheck",
+    "IdentificationObject",
+    "IdentificationPage",
+    "IdentificationResult",
+    "IdentificationSearch",
     "Listing",
     "ListingSnapshot",
     "LlmCall",
     "Locale",
     "Marketplace",
     "Model",
+    "PipelineStep",
     "Plan",
     "PlanFeature",
     "PlanPrice",
