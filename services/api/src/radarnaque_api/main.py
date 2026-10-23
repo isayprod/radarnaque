@@ -123,6 +123,8 @@ def create_app(
         # résoudrait l'hôte à la place de la vérification SSRF), ni redirection automatique
         # (fetch_images vérifie chaque saut), ni en-têtes, cookies ou authentification partagés.
         app.state.http_images = httpx.AsyncClient(trust_env=False, follow_redirects=False)
+        # Client dédié au lecteur de pages (pages.py) : mêmes garanties, sans proxy ni redirection.
+        app.state.http_pages = httpx.AsyncClient(trust_env=False, follow_redirects=False)
         # Client dédié à SearXNG, seul hôte que l'API appelle pour la recherche : pas de proxy de
         # l'environnement ni de redirection. Absent (None) quand SEARCH_BACKEND vaut "none".
         app.state.http_search = (
@@ -164,6 +166,7 @@ def create_app(
                     await app.state.purge_task
             await app.state.llm_clients.aclose()
             await app.state.http_images.aclose()
+            await app.state.http_pages.aclose()
             if app.state.http_search is not None:
                 await app.state.http_search.aclose()
             await app.state.engine.dispose()
