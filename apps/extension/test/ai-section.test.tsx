@@ -1,4 +1,4 @@
-import type { AnalysisResult } from "@radarnaque/shared";
+import type { AnalysisResult, IdentificationResult } from "@radarnaque/shared";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
@@ -9,6 +9,7 @@ import { addEvent, startProgress } from "../lib/content/scan-progress";
 import { shownResult } from "../lib/content/shown-result";
 import { contentText } from "../lib/content-i18n";
 import type { ContentAccess } from "../lib/messages";
+import { sampleIdentification } from "./helpers";
 
 afterEach(cleanup);
 
@@ -727,5 +728,50 @@ describe("AiSection : design du panneau", () => {
 			);
 			unmount();
 		}
+	});
+});
+
+describe("AiSection : ligne produit", () => {
+	const withIdentification = (
+		identification: AnalysisResult["identification"],
+	) => done({ ...result, identification });
+
+	test("produit identifié : « Produit : référence (niveau) » en tête", () => {
+		setup({ ai: withIdentification(sampleIdentification) });
+		expect(screen.getByText("Produit : Steam Deck OLED (Sûr)")).not.toBeNull();
+	});
+
+	test("produit incertain : « A ou B ? » et le niveau, en néerlandais aussi", () => {
+		const uncertain: IdentificationResult = {
+			...sampleIdentification,
+			status: "uncertain",
+			level: "uncertain",
+			objects: [
+				{
+					...(sampleIdentification
+						.objects[0] as IdentificationResult["objects"][number]),
+					reference: null,
+					remaining: ["Modèle A", "Modèle B"],
+				},
+			],
+		};
+		setup({ locale: "nl", ai: withIdentification(uncertain) });
+		expect(
+			screen.getByText("Product: Modèle A of Modèle B? (Onzeker)"),
+		).not.toBeNull();
+	});
+
+	test("statut none ou sans identification : pas de ligne produit", () => {
+		setup({
+			ai: withIdentification({
+				...sampleIdentification,
+				status: "none",
+				objects: [],
+			}),
+		});
+		expect(screen.queryByText(/^Produit/)).toBeNull();
+		cleanup();
+		setup({ ai: done() });
+		expect(screen.queryByText(/^Produit/)).toBeNull();
 	});
 });

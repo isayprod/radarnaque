@@ -5,7 +5,7 @@ import {
 	type ScanProgress,
 	thinkingParts,
 } from "../lib/content/scan-progress";
-import { contentText } from "../lib/content-i18n";
+import { type ContentKey, contentText } from "../lib/content-i18n";
 
 type WebSearch = AnalysisResult["webSearches"][number];
 
@@ -17,10 +17,12 @@ function Step({
 	step,
 	startedAt,
 	locale,
+	timed,
 }: {
 	step: ProgressStep;
 	startedAt: number;
 	locale: Locale;
+	timed: boolean;
 }) {
 	const { event } = step;
 	const line = eventLine(event, locale);
@@ -28,9 +30,11 @@ function Step({
 	const body = event.type === "thinking" ? thinkingParts(event.text).body : "";
 	return (
 		<li className="flex items-start gap-2">
-			<span className="w-8 shrink-0 text-right text-text-2 tabular-nums">
-				{elapsed(step.at, startedAt)}
-			</span>
+			{timed && (
+				<span className="w-8 shrink-0 text-right text-text-2 tabular-nums">
+					{elapsed(step.at, startedAt)}
+				</span>
+			)}
 			<span className="min-w-0 break-words">
 				<span className="block">{line}</span>
 				{body && (
@@ -53,11 +57,17 @@ export function ScanProgressView({
 	locale,
 	webSearches = [],
 	live,
+	summary = "ai.howAnalyzed",
+	timed = true,
 }: {
 	progress: ScanProgress | null;
 	locale: Locale;
 	webSearches?: WebSearch[];
 	live: boolean;
+	/** Titre du déroulé replié. */
+	summary?: ContentKey;
+	/** Faux pour un déroulé reconstruit (sans heures réelles) : le temps écoulé est masqué. */
+	timed?: boolean;
 }) {
 	const steps = progress?.steps ?? [];
 	const searched = steps.some((s) => s.event.type === "search");
@@ -75,6 +85,7 @@ export function ScanProgressView({
 						step={step}
 						startedAt={progress.startedAt}
 						locale={locale}
+						timed={timed}
 					/>
 				))}
 			{stored.map((search, index) => (
@@ -91,7 +102,7 @@ export function ScanProgressView({
 		// prend toute la largeur, la liste alignée à gauche.
 		<details className="ml-auto text-right text-[12px] leading-[1.4] open:w-full">
 			<summary className="cursor-pointer font-medium text-text-2 hover:text-text-1 focus-visible:rounded-xs focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden">
-				{contentText(locale, "ai.howAnalyzed")}
+				{contentText(locale, summary)}
 			</summary>
 			<div className="mt-2 text-left text-text-2">{list}</div>
 		</details>

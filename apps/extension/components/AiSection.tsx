@@ -3,6 +3,7 @@ import { type ReactNode, useId } from "react";
 // Erreurs qui demandent une reconnexion (RELOGIN_CODES) : on propose le bouton « Se connecter ».
 import { RELOGIN_CODES } from "../lib/content/access-policy";
 import type { ScanState } from "../lib/content/ai-client";
+import { identificationHeadline } from "../lib/content/identification-headline";
 import type { ScanProgress } from "../lib/content/scan-progress";
 import { aiErrorText, type ContentKey, contentText } from "../lib/content-i18n";
 import type { ContentAccess } from "../lib/messages";
@@ -270,8 +271,21 @@ function ResultView({
 	const hasSteps =
 		(progress?.steps.length ?? 0) > 0 || result.webSearches.length > 0;
 	const hasFooter = remaining !== null || hasSteps || mentions.length > 0;
+	// Produit identifié ou incertain : sa référence (ou « A ou B ? ») et le niveau.
+	const identification = result.identification;
+	const product =
+		identification && identification.status !== "none"
+			? identificationHeadline(identification, locale)
+			: null;
 	return (
 		<div className="flex flex-col gap-4">
+			{product && (
+				<p className="m-0 break-words text-text-1">
+					{contentText(locale, "ai.product")
+						.replace("{reference}", () => product.reference)
+						.replace("{level}", () => product.level)}
+				</p>
+			)}
 			<div className="flex flex-col gap-3">
 				{/* Verdict avant le score dans le DOM (lu comme la pilule : niveau, puis
 				    score), affiché à droite du nombre (`flex-row-reverse`). */}

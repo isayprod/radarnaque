@@ -23,7 +23,7 @@ import { AiSection } from "./AiSection";
 import { activeIn, BadgePill, focusPill, useLaunch } from "./BadgePill";
 import { DebugBoundary, DebugSection } from "./DebugSection";
 import { Icon } from "./Icon";
-import { IdentificationPanelBody } from "./IdentificationPanelBody";
+import { IdentificationSection } from "./IdentificationSection";
 import { IdentifyPill } from "./IdentifyPill";
 import { Logo } from "./Logo";
 import { LABEL_CLASS } from "./risk-styles";
@@ -293,7 +293,7 @@ export function RiskBadge({
 					onClose={closeToPill}
 				>
 					<AiErrorBoundary key={key} locale={locale}>
-						<IdentificationPanelBody
+						<IdentificationSection
 							locale={locale}
 							identification={scan.identification}
 							access={scan.access}

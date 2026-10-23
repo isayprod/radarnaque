@@ -152,6 +152,7 @@ describe("textes de la section IA", () => {
 			"ai.remaining": "Analyses restantes : {count}",
 			"ai.advice": "Conseil",
 			"ai.reasons": "Pourquoi",
+			"ai.product": "Produit : {reference} ({level})",
 			"ai.error.session_expired": "Session expirée, reconnectez-vous.",
 			"ai.error.unauthenticated": "Session expirée, reconnectez-vous.",
 			"ai.error.no_active_subscription":
