@@ -21,6 +21,7 @@ def _load_migration(filename: str):
     return module
 
 
+_0005 = _load_migration("0005_full_scans.py")
 _0009 = _load_migration("0009_prompt_attributes.py")
 _0011 = _load_migration("0011_identification_prompts.py")
 
@@ -54,7 +55,7 @@ async def test_each_step_has_active_v1(db):
 async def test_full_v3_activated_when_0009_active(db):
     assert await _rows(db, _FULL_ACTIVE) == [(3, _0011.FULL_PROMPT_V3)]
     assert await _rows(db, _FULL) == [
-        (1, (await _rows(db, _FULL))[0][1]),
+        (1, _0005.FULL_PROMPT_V1),
         (2, _0009.FULL_PROMPT_ATTRIBUTES),
         (3, _0011.FULL_PROMPT_V3),
     ]
@@ -83,7 +84,7 @@ async def test_full_v3_not_activated_when_admin_chose_another(db, alembic_config
         command.upgrade(alembic_config, "head")
         assert await _rows(db, _FULL_ACTIVE) == [(3, "prompt de l'admin")]
         assert await _rows(db, _FULL) == [
-            (1, (await _rows(db, _FULL))[0][1]),
+            (1, _0005.FULL_PROMPT_V1),
             (2, _0009.FULL_PROMPT_ATTRIBUTES),
             (3, "prompt de l'admin"),
             (4, _0011.FULL_PROMPT_V3),

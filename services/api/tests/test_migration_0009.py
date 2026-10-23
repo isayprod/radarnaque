@@ -48,11 +48,12 @@ def test_new_prompt_is_v1_plus_the_attributes():
 
 async def test_attributes_prompt_is_active_after_head_and_v1_unchanged(db):
     # 0011 a activé la v3 au-dessus de celle de 0009.
-    assert (await _rows(db, _ACTIVE))[0][0] == 3
-    assert [r[0] for r in await _rows(db, _FULL)][:2] == [1, 2]
-    full = await _rows(db, _FULL)
-    assert full[0][1] == _0005.FULL_PROMPT_V1
-    assert full[1][1] == _0009.FULL_PROMPT_ATTRIBUTES
+    assert await _rows(db, _ACTIVE) == [(3, _0011.FULL_PROMPT_V3)]
+    assert await _rows(db, _FULL) == [
+        (1, _0005.FULL_PROMPT_V1),
+        (2, _0009.FULL_PROMPT_ATTRIBUTES),
+        (3, _0011.FULL_PROMPT_V3),
+    ]
 
 
 async def test_downgrade_reactivates_v1_and_upgrade_restores(db, alembic_config):
@@ -64,7 +65,7 @@ async def test_downgrade_reactivates_v1_and_upgrade_restores(db, alembic_config)
         await db.rollback()
     finally:
         command.upgrade(alembic_config, "head")
-    assert (await _rows(db, _ACTIVE))[0][0] == 3
+    assert await _rows(db, _ACTIVE) == [(3, _0011.FULL_PROMPT_V3)]
 
 
 async def test_a_prompt_chosen_in_the_admin_stays_active(db, alembic_config):
