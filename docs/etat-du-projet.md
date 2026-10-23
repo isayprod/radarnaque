@@ -27,11 +27,12 @@ Radarnaque est une extension Chrome, Edge et Brave qui signale les annonces susp
 | 4a | RGPD : suppression du compte, purge à 12 mois, page `/privacy` à jour | `feat/phase-4a` (au-dessus de `feat/phase-3d`) | terminée, non poussée |
 | 4b, partie 1 | Administration : socle (SPA `apps/admin`, connexion, droits, journal), écrans Utilisateurs et IA | `feat/phase-4b` (au-dessus de `main`, où 4a est fusionnée) | terminée, non poussée |
 | 4b, partie 2 | Administration : Tableau de bord, Offre (dont `/pricing`) et Analyses | `feat/phase-4b-2` (au-dessus de `feat/phase-4b`) | terminée, non poussée |
-| Identification, partie 1 | Identification du produit, côté API (pipeline, base de critères, routes, quota, admin par étape) | `feat/identification` (au-dessus de `main`) | terminée, non poussée ; parties 2 (extension) et 3 (admin, site) à faire |
+| Identification, partie 1 | Identification du produit, côté API (pipeline, base de critères, routes, quota, admin par étape) | `main` | fusionnée |
+| Identification, partie 2 | Identification du produit dans l'extension (pilule, panneau, file d'attente, cartes) | `feat/identification-2` (au-dessus de `main`) | terminée, non poussée ; partie 3 (admin, site) à faire |
 | 5 | Paiement Stripe | — | à faire (les routes répondent 501) |
 | — | Passe de design (identité visuelle, maquettes) | — | à faire en dernier |
 
-Les phases 3b, 3c et 3d n'ont pas encore été essayées sur les vrais sites. Les vérifications à faire sont listées dans les suivis [3b](superpowers/plans/2026-10-18-phase-3b-suivi.md), [3c](superpowers/plans/2026-10-18-phase-3c-suivi.md), [3d](superpowers/plans/2026-10-19-phase-3d-suivi.md), [4a](superpowers/plans/2026-10-20-phase-4a-suivi.md), [4b partie 1](superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md) et [4b partie 2](superpowers/plans/2026-10-21-phase-4b-partie-2-suivi.md). Les phases 3d et 4a ont aussi une liste de corrections prévues avant leur fusion. L'identification (partie 1) a son [suivi](superpowers/plans/2026-10-23-identification-partie-1-suivi.md).
+Les phases 3b, 3c et 3d n'ont pas encore été essayées sur les vrais sites. Les vérifications à faire sont listées dans les suivis [3b](superpowers/plans/2026-10-18-phase-3b-suivi.md), [3c](superpowers/plans/2026-10-18-phase-3c-suivi.md), [3d](superpowers/plans/2026-10-19-phase-3d-suivi.md), [4a](superpowers/plans/2026-10-20-phase-4a-suivi.md), [4b partie 1](superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md) et [4b partie 2](superpowers/plans/2026-10-21-phase-4b-partie-2-suivi.md). Les phases 3d et 4a ont aussi une liste de corrections prévues avant leur fusion. L'identification a ses suivis : [partie 1](superpowers/plans/2026-10-23-identification-partie-1-suivi.md) et [partie 2](superpowers/plans/2026-10-23-identification-partie-2-suivi.md).
 
 ## Architecture
 
@@ -143,7 +144,17 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
 - **Réglages :** `identification_cache_ttl_hours`, `criteria_ttl_days`, `criteria_max_searches`, `criteria_max_pages`, `identify_retry_threshold`, `identify_image_side`, `scam_sends_photos`, `identify_escalation_model_id` (valeurs par défaut dans le [README](../README.md#identification-du-produit-api)).
 - **Admin :** l'écran IA a une section par étape (modèle actif, versions du prompt) et les nouveaux réglages ; le tableau de bord compte l'identification comme un scan et donne les coûts par étape. L'essai d'une étape, l'écran « Base de critères » et le détail d'une identification sont pour la partie 3.
 - **Outils :** le faux fournisseur répond aux trois étapes ; `pnpm e2e:identify` ; `pnpm eval:identify` évalue l'identification sur un jeu local (`services/api/evals/identify.jsonl`, jamais commité).
-- **Pas encore fait :** l'extension n'affiche rien de l'identification (partie 2) ; `/privacy` n'en parle pas encore (partie 3). L'API doit être déployée avant l'extension.
+- **Pas encore fait :** `/privacy` n'en parle pas encore (partie 3). L'API doit être déployée avant l'extension.
+
+### Identification du produit (partie 2, extension)
+- **Deux pilules :** « Identifier » (nommée « Identifier le produit ») puis « Analyser ». Au repos, le logo et « Identifier » ; en cours, la ligne d'état en direct ; ensuite le glyphe de confiance (● Sûr, ◐ Probable, ○ Incertain), la référence, le niveau et le pourcentage, sans couleur de risque. Deux candidats restants donnent « A ou B ? », aucun objet « Produit non identifié ».
+- **Panneau Identification :** à part du panneau d'analyse. Référence, niveau, critères (vu, contraire, non visible), candidats restants, accessoires, pages de référence (liens `https://` seulement) et déroulé replié. Pour un résultat incertain, l'encadré « À demander au vendeur » liste d'abord les critères « Non visibles sur les photos », puis la question, avec « Copier ».
+- **Quota :** « Identifier » consomme 1 analyse ; « Analyser » ensuite est incluse (« Inclus »), même quand il ne reste plus d'analyse. « Analyser » cliqué pendant une identification attend la fin de celle-ci.
+- **Analyse complète :** l'analyse porte l'identification du produit ; son panneau commence par « Produit : référence (niveau) » et l'infobulle d'une carte par « référence · niveau ».
+- **Conservation :** identification et analyse sont gardées 24 h côté navigateur, à une seule place par annonce, effacées à la déconnexion, caduques si l'annonce change. Le choix « identifié à la demande de l'utilisateur » est gardé tant que la fiche ne change pas.
+- **Flux :** le service worker coupe à 310 s (`SCAN_TIMEOUT_MS`). Il valide et borne l'identification avant de la relayer à la page.
+- **Galerie :** `pnpm --filter extension gallery` montre les nouveaux états en FR et NL.
+- **Pas encore fait :** les vérifications sur les vrais sites (voir le [suivi](superpowers/plans/2026-10-23-identification-partie-2-suivi.md)), et la partie 3 (admin, site).
 
 ### RGPD (phase 4a)
 - **Suppression du compte :**
@@ -245,8 +256,8 @@ Coût estimé avec `google/gemini-3.1-flash-lite` : environ 1,1 ¢ par analyse a
 
 | Partie | Tests | Commande |
 |---|---|---|
-| API | 1247 | `pnpm test:api` |
-| Extension | 1251 | `pnpm --filter extension test` |
+| API | 1256 | `pnpm test:api` |
+| Extension | 1384 | `pnpm --filter extension test` |
 | Auth | 89 | `pnpm --filter auth test` |
 | Site | 267 | `pnpm --filter site test` |
 | Admin | 132 | `pnpm --filter admin test` |

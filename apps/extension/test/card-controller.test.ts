@@ -36,7 +36,12 @@ import {
 	type DebugSink,
 } from "../lib/debug-log";
 import type { BgResponse, ContentAccess } from "../lib/messages";
-import { debugAnalysis, loadFixture, sampleAnalysis } from "./helpers";
+import {
+	debugAnalysis,
+	loadFixture,
+	sampleAnalysis,
+	sampleIdentification,
+} from "./helpers";
 
 const FB_SEARCH = "https://www.facebook.com/marketplace/brussels/";
 const FB_ITEM = "https://www.facebook.com/marketplace/item/9000000000000001/";
@@ -1091,6 +1096,36 @@ describe("createCardController — résultats gardés 24 h", () => {
 			fingerprint: listingFingerprint(scanned?.listing as never),
 			storedAt: expect.any(Number),
 		});
+	});
+
+	test("card scan stores the identification with the analysis", async () => {
+		const mem = memoryStore();
+		const doc = loadFixture("facebook/grid.html");
+		const withProduct = {
+			...sampleAnalysis,
+			identification: sampleIdentification,
+		};
+		const t = setup(doc, FB_SEARCH, [withCards], {
+			realScan: true,
+			aiResults: mem.store,
+		});
+		t.ai.scan.mockReturnValue({
+			done: Promise.resolve({ ok: true, data: withProduct }),
+			cancel: vi.fn(),
+		});
+		await t.controller.refresh();
+		const id = FB_IDS[0] as string;
+		t.lastView(id).onActivate();
+		await vi.waitFor(() => expect(mem.store.put).toHaveBeenCalledTimes(1));
+		expect(mem.store.put).toHaveBeenCalledWith(
+			"facebook.com",
+			id,
+			expect.objectContaining({
+				result: withProduct,
+				identification: sampleIdentification,
+				identifiedByUser: false,
+			}),
+		);
 	});
 
 	test("scan de carte en échec : rien n'est écrit", async () => {

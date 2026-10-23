@@ -12,7 +12,7 @@ import {
 import type { ScanState } from "../lib/content/ai-client";
 import { addEvent, startProgress } from "../lib/content/scan-progress";
 import { aiErrorText, contentText } from "../lib/content-i18n";
-import { sampleAnalysis } from "./helpers";
+import { sampleAnalysis, sampleIdentification } from "./helpers";
 
 afterEach(() => {
 	cleanup();
@@ -310,6 +310,46 @@ describe("CardBadge", () => {
 		const tooltip = screen.getByRole("tooltip", { hidden: true });
 		expect(tooltip.textContent).toContain(sampleAnalysis.summary.nl);
 		expect(tooltip.textContent).toContain(contentText("nl", "ai.partial"));
+	});
+
+	test("card tooltip shows the product line before the summary", () => {
+		const done = (identification: typeof sampleIdentification | null) =>
+			({
+				status: "done",
+				result: { ...sampleAnalysis, identification },
+				progress: null,
+			}) as ScanState;
+		const tip = () => screen.getByRole("tooltip", { hidden: true });
+		renderInLink(done(sampleIdentification));
+		const text = tip().textContent ?? "";
+		expect(text).toContain("Steam Deck OLED · Sûr");
+		expect(text.indexOf("Steam Deck OLED · Sûr")).toBeLessThan(
+			text.indexOf(sampleAnalysis.summary.fr),
+		);
+		cleanup();
+		const unsure = {
+			...sampleIdentification,
+			status: "uncertain" as const,
+			level: "uncertain" as const,
+			objects: [
+				{
+					...(sampleIdentification
+						.objects[0] as (typeof sampleIdentification)["objects"][number]),
+					reference: null,
+				},
+			],
+		};
+		renderInLink(done(unsure), "nl");
+		expect(tip().textContent).toContain("? · Onzeker");
+		cleanup();
+		// Pas d'identification, ou rien d'identifiable : pas de ligne produit.
+		renderInLink(done(null));
+		expect(tip().textContent).not.toContain(" · ");
+		cleanup();
+		renderInLink(
+			done({ ...sampleIdentification, status: "none", objects: [] }),
+		);
+		expect(tip().textContent).toBe(sampleAnalysis.summary.fr);
 	});
 
 	test("done professionnel : pro.notice sous le résumé, en FR et en NL", () => {
