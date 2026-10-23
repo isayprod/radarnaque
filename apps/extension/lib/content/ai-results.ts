@@ -152,17 +152,14 @@ function parseEntry(value: unknown): StoredAiEntry | null {
 			storedAt,
 		};
 	}
+	// Une identification illisible devient null, comme pour `v: 2`.
 	if (value.v !== 3 || typeof value.identifiedByUser !== "boolean") return null;
 	const result = value.result === null ? null : toAnalysis(value.result);
 	const identification =
 		value.identification === null
 			? null
 			: toIdentificationResult(value.identification);
-	if (
-		(value.result !== null && !result) ||
-		(value.identification !== null && !identification) ||
-		(!result && !identification)
-	)
+	if ((value.result !== null && !result) || (!result && !identification))
 		return null;
 	return {
 		v: 3,
@@ -326,11 +323,10 @@ export function createAiResultStore(
 					? previous?.result
 					: (entry.result ?? same?.result ?? null);
 				const identification = given ?? same?.identification ?? null;
-				const identifiedByUser = entry.identification
-					? entry.identifiedByUser
-					: embedded
-						? false
-						: (same?.identifiedByUser ?? false);
+				// Une fois l'annonce identifiée par l'utilisateur, le drapeau reste vrai
+				// tant que l'empreinte est la même.
+				const identifiedByUser =
+					entry.identifiedByUser || (same?.identifiedByUser ?? false);
 				if (!result && !identification) {
 					memory = map;
 					return;
