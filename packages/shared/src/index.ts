@@ -1,7 +1,15 @@
 import type { components } from "./api";
 
 export type { components, paths } from "./api";
-export type { ScanProgressEvent, SearchAspect } from "./stream";
+export type {
+	CriteriaCachedEvent,
+	IdentificationErrorEvent,
+	IdentificationEvent,
+	PageReadEvent,
+	ScanProgressEvent,
+	SearchAspect,
+	StreamStage,
+} from "./stream";
 
 export type Me = components["schemas"]["MeOut"];
 export type ScanIn = components["schemas"]["ScanIn"];

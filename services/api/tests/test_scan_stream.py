@@ -18,17 +18,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import ClientDisconnect
 
 from radarnaque_api.llm.client import Bilingual, LLMAnalysis, LLMError, LLMReason, LLMResult
-from radarnaque_api.llm.events import EventSink, SearchDone, SearchStarted, Thinking, Writing
+from radarnaque_api.llm.events import (
+    CriteriaCached,
+    EventSink,
+    PageRead,
+    SearchDone,
+    SearchStarted,
+    Thinking,
+    Writing,
+)
 from radarnaque_api.llm.tools import WebSearchTool
 from radarnaque_api.schemas import (
     AnalysisResultOut,
+    IdentificationOut,
     LocalizedTextOut,
     RemainingOut,
 )
 from radarnaque_api.search import SearchHit
 from radarnaque_api.services import scan_stream
 from radarnaque_api.services import scans as scans_service
-from radarnaque_api.services.scan_stream import Stage, encode_sse, sse_of, stream_scan
+from radarnaque_api.services.scan_stream import (
+    IdentificationFailed,
+    IdentificationReady,
+    Stage,
+    encode_sse,
+    sse_of,
+    stream_scan,
+)
 
 HITS = [
     SearchHit(title="iPhone 18 Pro", url="https://www.apple.com/be-fr/iphone", snippet="Prix"),
@@ -659,6 +675,63 @@ async def test_client_gone_before_the_stream_gives_back(
     assert len(given_back) == 1
 
 
-def test_sse_of_identification_stages():
+def test_sse_of_new_stages():
     for stage in ("reading_photos", "criteria", "identifying", "retrying"):
         assert sse_of(Stage(stage)) == f'event: stage\ndata: {{"stage":"{stage}"}}\n\n'
+
+
+def test_sse_of_page_read_and_criteria_cached():
+    assert sse_of(PageRead("example.com", True)) == (
+        'event: page_read\ndata: {"domain":"example.com","ok":true}\n\n'
+    )
+    assert sse_of(CriteriaCached(3)) == 'event: criteria_cached\ndata: {"count":3}\n\n'
+
+
+def _identification(**values) -> IdentificationOut:
+    defaults = dict(
+        identification_id=7,
+        status="none",
+        confidence=0,
+        level="uncertain",
+        objects=[],
+        seller_question=None,
+        title_mismatch=None,
+        photo_observations=[],
+        searches=[{"query": "q", "kind": "price", "pages_read": ["a.be"]}],
+        verified_criteria=False,
+        unsourced=False,
+        images_analyzed=2,
+        from_cache=False,
+        identified_at="2026-10-23T10:00:00Z",
+    )
+    return IdentificationOut(**{**defaults, **values})  # type: ignore[arg-type]
+
+
+def test_sse_of_identification_is_camel_case():
+    out = _parse(sse_of(IdentificationReady(_identification())))
+    assert out == [("identification", out[0][1])]
+    data = out[0][1]
+    assert data["identificationId"] == 7
+    assert data["imagesAnalyzed"] == 2
+    assert data["fromCache"] is False
+    assert data["searches"] == [{"query": "q", "kind": "price", "pagesRead": ["a.be"]}]
+    assert "debug" not in data
+    assert "identification_id" not in data
+
+
+def test_sse_of_identification_error():
+    assert sse_of(IdentificationFailed("llm_unavailable")) == (
+        'event: identification_error\ndata: {"code":"llm_unavailable"}\n\n'
+    )
+
+
+async def test_stream_of_identification_ends_with_result():
+    async def admitted(sink):
+        await sink(Stage("identifying"))
+        await sink(IdentificationFailed("llm_unavailable"))
+        return _identification()
+
+    events = await _collect(stream_scan(admitted))
+
+    assert [name for name, _ in events] == ["stage", "identification_error", "result"]
+    assert events[-1][1]["identificationId"] == 7  # type: ignore[index]
