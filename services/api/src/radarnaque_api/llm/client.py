@@ -24,7 +24,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, StringConstraints
 
 from radarnaque_api.llm.events import EventSink
-from radarnaque_api.llm.providers import ProviderConfig, ProviderError
+from radarnaque_api.llm.providers import ProviderConfig, ProviderError, ReasoningEffort
 from radarnaque_api.llm.streams import (
     InvalidResponse,
     Reasoning,
@@ -98,6 +98,21 @@ class LLMResult:
     rounds: int = 1
 
 
+@dataclass
+class StepResult[T: BaseModel]:
+    """Résultat d'un appel `complete` : la sortie validée, l'usage de tous les appels faits
+    (réponse refusée comprise), et le texte brut, le prompt système envoyé et les résumés de
+    réflexion pour le bloc debug."""
+
+    output: T
+    tokens_in: int
+    tokens_out: int
+    cost_usd_micros: int
+    raw_text: str = ""
+    system_prompt: str = ""
+    reasoning_text: str = ""
+
+
 LLMErrorCode = Literal["transport", "timeout", "invalid_response", "configuration"]
 
 _MESSAGES: dict[str, str] = {
@@ -130,6 +145,18 @@ class LLMClient(Protocol):
         tools: WebSearchTool | None = None,
         on_event: EventSink | None = None,
     ) -> LLMResult: ...
+
+    async def complete[T: BaseModel](
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        messages: list[dict],
+        output: type[T],
+        schema_name: str,
+        reasoning: ReasoningEffort | None = None,
+        on_event: EventSink | None = None,
+    ) -> StepResult[T]: ...
 
 
 # Mots-clés que la sortie structurée stricte d'OpenAI refuse ; Pydantic les vérifie de toute
@@ -173,13 +200,18 @@ def strict_json_schema(model: type[BaseModel]) -> dict[str, Any]:
 
 
 @cache
-def _strict_schema_cached() -> dict[str, Any]:
-    return strict_json_schema(LLMAnalysis)
+def _strict_schema_cached(model: type[BaseModel]) -> dict[str, Any]:
+    return strict_json_schema(model)
+
+
+def _schema_of(model: type[BaseModel]) -> dict[str, Any]:
+    """Copie du schéma strict de `model`, calculé une fois par type."""
+    return deepcopy(_strict_schema_cached(model))
 
 
 def strict_analysis_schema() -> dict[str, Any]:
     """Schéma JSON de `LLMAnalysis`, autonome (sans `$ref`) et fermé, accepté en mode strict."""
-    return deepcopy(_strict_schema_cached())
+    return _schema_of(LLMAnalysis)
 
 
 def _non_negative_number(value: Any) -> float | None:
@@ -200,11 +232,11 @@ def _micros(dollars: Any) -> int:
     return 0 if value is None else round(value * 1_000_000)
 
 
-def _validated(text: str) -> LLMAnalysis | None:
+def _validated[T: BaseModel](text: str, model: type[T]) -> T | None:
     if not text:
         return None
     try:
-        return LLMAnalysis.model_validate_json(text)
+        return model.model_validate_json(text)
     except ValueError:  # inclut ValidationError et les JSON illisibles
         return None
 
@@ -238,6 +270,19 @@ def response_text(response: Any) -> str:
     if isinstance(text, str):
         return text
     return output_text(getattr(response, "output", None) or [])
+
+
+@dataclass
+class _Done[T: BaseModel]:
+    """Fin de la boucle commune : la valeur validée, le texte reçu et l'usage cumulé."""
+
+    value: T
+    text: str
+    tokens_in: int
+    tokens_out: int
+    cost_usd_micros: int
+    reasoning_text: str
+    rounds: int
 
 
 class OpenAICompatibleClient:
@@ -285,24 +330,24 @@ class OpenAICompatibleClient:
             )
         return self._client
 
-    def _response_format(self) -> dict[str, Any]:
+    def _response_format(self, output: type[BaseModel], schema_name: str) -> dict[str, Any]:
         if self._provider.structured_output == "json_schema":
             return {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": SCHEMA_NAME,
+                    "name": schema_name,
                     "strict": True,
-                    "schema": strict_analysis_schema(),
+                    "schema": _schema_of(output),
                 },
             }
         return {"type": "json_object"}
 
-    def final_system_prompt(self, system_prompt: str) -> str:
+    def final_system_prompt(self, system_prompt: str, output: type[BaseModel] = LLMAnalysis) -> str:
         """Prompt système tel qu'envoyé au fournisseur : en mode `json_object`, le schéma exact
         de la réponse y est ajouté. Réutilisé par le bloc debug d'un scan servi par le cache."""
         if self._provider.structured_output == "json_schema":
             return system_prompt
-        schema = json.dumps(strict_analysis_schema(), ensure_ascii=False)
+        schema = json.dumps(_schema_of(output), ensure_ascii=False)
         return f"{system_prompt}\n\nSchéma JSON exact de la réponse :\n{schema}"
 
     def _cost(self, usage: Any, headers: httpx.Headers | None) -> int:
@@ -325,15 +370,84 @@ class OpenAICompatibleClient:
         tools: WebSearchTool | None = None,
         on_event: EventSink | None = None,
     ) -> LLMResult:
-        """Tours du modèle jusqu'à sa réponse finale. Au plus `max_searches + 2` tours : le
-        dernier possible est demandé sans outil (`tool_choice: "none"`), et un appel d'outil
-        reçu à ce tour est une réponse invalide. Une seule nouvelle tentative pour toute
-        l'analyse : d'une réponse invalide (même tour, même requête), ou d'une erreur de
-        transport tant que le tour n'a émis aucun événement."""
+        """Tours du modèle jusqu'à sa réponse finale, validée par `LLMAnalysis`. Au plus
+        `max_searches + 2` tours : le dernier possible est demandé sans outil
+        (`tool_choice: "none"`), et un appel d'outil reçu à ce tour est une réponse invalide.
+        Une seule nouvelle tentative pour toute l'analyse : d'une réponse invalide (même tour,
+        même requête), ou d'une erreur de transport tant que le tour n'a émis aucun événement."""
+        done = await self._run(
+            model=model,
+            system_prompt=system_prompt,
+            messages=messages,
+            output=LLMAnalysis,
+            schema_name=SCHEMA_NAME,
+            tools=tools,
+            reasoning=None,
+            on_event=on_event,
+        )
+        return LLMResult(
+            analysis=done.value,
+            tokens_in=done.tokens_in,
+            tokens_out=done.tokens_out,
+            cost_usd_micros=done.cost_usd_micros,
+            raw_text=done.text,
+            system_prompt=self.final_system_prompt(system_prompt),
+            searches=tools.records if tools else [],
+            search_traces=tools.traces if tools else [],
+            reasoning_text=done.reasoning_text,
+            rounds=done.rounds,
+        )
+
+    async def complete[T: BaseModel](
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        messages: list[dict],
+        output: type[T],
+        schema_name: str,
+        reasoning: ReasoningEffort | None = None,
+        on_event: EventSink | None = None,
+    ) -> StepResult[T]:
+        """Un seul tour, sans outil, dont la réponse est validée par `output` (une nouvelle
+        tentative, comme `analyze`). `reasoning` remplace le réglage du fournisseur (`"none"`
+        le retire) ; `None` le garde."""
+        done = await self._run(
+            model=model,
+            system_prompt=system_prompt,
+            messages=messages,
+            output=output,
+            schema_name=schema_name,
+            tools=None,
+            reasoning=reasoning,
+            on_event=on_event,
+        )
+        return StepResult(
+            output=done.value,
+            tokens_in=done.tokens_in,
+            tokens_out=done.tokens_out,
+            cost_usd_micros=done.cost_usd_micros,
+            raw_text=done.text,
+            system_prompt=self.final_system_prompt(system_prompt, output),
+            reasoning_text=done.reasoning_text,
+        )
+
+    async def _run[T: BaseModel](
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        messages: list[dict],
+        output: type[T],
+        schema_name: str,
+        tools: WebSearchTool | None,
+        reasoning: ReasoningEffort | None,
+        on_event: EventSink | None,
+    ) -> _Done[T]:
         client = self._openai()
-        request = self._request(model, system_prompt, messages)
+        request = self._request(model, system_prompt, messages, output, schema_name, reasoning)
         max_rounds = (tools.max_searches if tools else 0) + 2
-        reasoning = Reasoning()
+        thoughts = Reasoning()
         retries = ATTEMPTS - 1
         tokens_in = tokens_out = cost = 0
         round_no = 1
@@ -349,7 +463,7 @@ class OpenAICompatibleClient:
             try:
                 async with asyncio.timeout(TIMEOUT_S):
                     outcome = await self._round(
-                        client, self._round_request(request, tools, last), sink, reasoning
+                        client, self._round_request(request, tools, last), sink, thoughts
                     )
             except (InvalidResponse, openai.APIResponseValidationError):
                 code, retryable = "invalid_response", True
@@ -378,18 +492,15 @@ class OpenAICompatibleClient:
                     await self._answer_calls(request, outcome, tools)
                     round_no += 1
                     continue
-                analysis = None if outcome.calls else _validated(outcome.text)
-                if analysis is not None:
-                    return LLMResult(
-                        analysis=analysis,
+                value = None if outcome.calls else _validated(outcome.text, output)
+                if value is not None:
+                    return _Done(
+                        value=value,
+                        text=outcome.text,
                         tokens_in=tokens_in,
                         tokens_out=tokens_out,
                         cost_usd_micros=cost,
-                        raw_text=outcome.text,
-                        system_prompt=self.final_system_prompt(system_prompt),
-                        searches=tools.records if tools else [],
-                        search_traces=tools.traces if tools else [],
-                        reasoning_text=reasoning.text,
+                        reasoning_text=thoughts.text,
                         rounds=round_no,
                     )
                 code, retryable = "invalid_response", True
@@ -412,10 +523,19 @@ class OpenAICompatibleClient:
         else:
             self._chat_extend(request, outcome, outputs)
 
-    def _request(self, model: str, system_prompt: str, messages: list[dict]) -> dict[str, Any]:
+    def _request(
+        self,
+        model: str,
+        system_prompt: str,
+        messages: list[dict],
+        output: type[BaseModel],
+        schema_name: str,
+        reasoning: ReasoningEffort | None,
+    ) -> dict[str, Any]:
+        effort = self._provider.reasoning_effort if reasoning is None else reasoning
         if self._provider.api == "responses":
-            return self._responses_request(model, system_prompt, messages)
-        return self._chat_request(model, system_prompt, messages)
+            return self._responses_request(model, system_prompt, messages, output, effort)
+        return self._chat_request(model, system_prompt, messages, output, schema_name, effort)
 
     def _round_request(
         self, request: dict[str, Any], tools: WebSearchTool | None, last: bool
@@ -446,7 +566,12 @@ class OpenAICompatibleClient:
     # --- API Responses (en flux) ---------------------------------------------------------------
 
     def _responses_request(
-        self, model: str, system_prompt: str, messages: list[dict]
+        self,
+        model: str,
+        system_prompt: str,
+        messages: list[dict],
+        output: type[BaseModel],
+        effort: ReasoningEffort,
     ) -> dict[str, Any]:
         """Requête de l'API Responses : prompt système dans `instructions`, messages convertis
         dans `input`. Pas de `response_format` : le JSON est imposé par le prompt (schéma
@@ -455,7 +580,7 @@ class OpenAICompatibleClient:
         extra_body = self._provider.extra_body_dict()
         request: dict[str, Any] = {
             "model": model,
-            "instructions": self.final_system_prompt(system_prompt),
+            "instructions": self.final_system_prompt(system_prompt, output),
             "input": [
                 {"role": message["role"], "content": _responses_content(message["content"])}
                 for message in messages
@@ -466,7 +591,6 @@ class OpenAICompatibleClient:
             "max_output_tokens": MAX_TOKENS,
             "extra_body": extra_body or None,
         }
-        effort = self._provider.reasoning_effort
         if effort != "none":
             request["reasoning"] = {"effort": effort, "summary": "auto"}
         for param in self._provider.omit_params:
@@ -507,26 +631,33 @@ class OpenAICompatibleClient:
 
     # --- API Chat (en flux) ---------------------------------------------------------------------
 
-    def _chat_request(self, model: str, system_prompt: str, messages: list[dict]) -> dict[str, Any]:
+    def _chat_request(
+        self,
+        model: str,
+        system_prompt: str,
+        messages: list[dict],
+        output: type[BaseModel],
+        schema_name: str,
+        effort: ReasoningEffort,
+    ) -> dict[str, Any]:
         """Requête de l'API Chat, en flux avec l'usage en dernier morceau. `response_format` est
         gardé avec les outils (Gemini l'accepte via OpenRouter) ; en mode `json_object`, le
         schéma est dans le prompt système. Réflexion : `reasoning: { effort }` dans le corps,
         paramètre propre à OpenRouter."""
         extra_body = self._provider.extra_body_dict()
-        effort = self._provider.reasoning_effort
         if effort != "none":
             extra_body["reasoning"] = {"effort": effort}
         request: dict[str, Any] = {
             "model": model,
             "messages": [
-                {"role": "system", "content": self.final_system_prompt(system_prompt)},
+                {"role": "system", "content": self.final_system_prompt(system_prompt, output)},
                 *messages,
             ],
             "stream": True,
             "stream_options": {"include_usage": True},
             "temperature": TEMPERATURE,
             "max_tokens": MAX_TOKENS,
-            "response_format": self._response_format(),
+            "response_format": self._response_format(output, schema_name),
             "extra_body": extra_body or None,
         }
         for param in self._provider.omit_params:
