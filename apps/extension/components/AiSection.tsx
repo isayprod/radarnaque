@@ -36,7 +36,7 @@ export const WHITE_PILL_CLASS = `${PILL_BASE_CLASS} bg-white text-text-on-light 
 /**
  * Action secondaire (DESIGN.md, boutons « Secondary ») : transparente, bordure
  * `--border-strong`, texte `--text-1`. Une seule pilule blanche par vue : quand
- * l'erreur a sa propre action (formules, connexion), « Lancer une analyse IA »
+ * l'erreur a sa propre action (formules, connexion), « Analyser le risque »
  * passe en secondaire.
  */
 export const SECONDARY_PILL_CLASS = `${PILL_BASE_CLASS} border border-border-strong bg-transparent text-text-1 hover:bg-white/8`;
@@ -53,7 +53,7 @@ const META_CLASS = "m-0 text-[12px] leading-[1.4] text-text-2";
 
 /**
  * Analyse coupée en route (flux interrompu, délai dépassé) : le message, et
- * « Relancer » à la place de « Lancer une analyse IA ». Partagé avec la pastille.
+ * « Relancer » à la place de « Analyser le risque ». Partagé avec la pastille.
  */
 export const RELAUNCH_CODES: ReadonlySet<string> = new Set([
 	"stream_interrupted",
@@ -65,7 +65,12 @@ export interface AiSectionProps {
 	access: ContentAccess | "loading" | { error: string };
 	/** L'analyse IA de l'annonce : une seule action, une seule place. */
 	ai: ScanState;
+	/** Lance l'analyse : le parent la passe par `useLaunch` (règles d'accès). */
 	onScan(): void;
+	/** Plus d'analyse restante et aucune incluse : l'action est grisée. */
+	empty?: boolean;
+	/** L'analyse est incluse avec l'identification (acceptée à 0 restante). */
+	included?: boolean;
 	onLogin(): void;
 	loginUnavailable: boolean;
 	pricingUrl: string;
@@ -108,9 +113,12 @@ function SectionBody(props: AiSectionProps) {
 	const { locale, ai } = props;
 	if (ai.status !== "done")
 		return (
-			<AccessBody {...props}>
-				<ScanBlock {...props} />
-			</AccessBody>
+			<RiskAction
+				{...props}
+				onAnalyze={props.onScan}
+				empty={props.empty ?? false}
+				included={props.included ?? false}
+			/>
 		);
 	return (
 		<ResultView locale={locale} result={ai.result} progress={ai.progress} />
@@ -150,48 +158,6 @@ export function AccessBody(
 		return <ErrorNotice {...props} code="no_active_subscription" />;
 	}
 	return props.children;
-}
-
-/**
- * L'erreur de la dernière analyse (titre serif et son action), puis le bouton
- * d'analyse en pilule blanche, et le déroulé en direct.
- */
-function ScanBlock(props: AiSectionProps) {
-	const { locale, ai } = props;
-	const loading = ai.status === "loading";
-	const relaunch = ai.status === "error" && RELAUNCH_CODES.has(ai.code);
-	// L'erreur affichée a déjà sa pilule blanche (connexion, formules).
-	const errorHasAction = ai.status === "error" && hasOwnAction(ai.code);
-	let label = contentText(locale, "ai.run");
-	if (loading) label = contentText(locale, "ai.loading");
-	else if (relaunch) label = contentText(locale, "ai.retry");
-	return (
-		<div className="flex flex-col items-start">
-			{/* Région présente avant l'erreur, pour qu'elle soit annoncée. */}
-			<div aria-live="polite" className="w-full">
-				{ai.status === "error" && (
-					<div className="mb-3">
-						<ErrorNotice {...props} code={ai.code} />
-					</div>
-				)}
-			</div>
-			<button
-				type="button"
-				disabled={loading}
-				aria-busy={loading}
-				onClick={() => props.onScan()}
-				className={errorHasAction ? SECONDARY_PILL_CLASS : WHITE_PILL_CLASS}
-			>
-				{label}
-			</button>
-			{/* Hors de la région annoncée : le déroulé change sans cesse. */}
-			{loading && (
-				<div className="mt-3 w-full">
-					<ScanProgressView progress={ai.progress} locale={locale} live />
-				</div>
-			)}
-		</div>
-	);
 }
 
 /**
@@ -239,14 +205,16 @@ export function RiskAction(
 						</div>
 					)}
 				</div>
+				{/* `aria-disabled` plutôt que `disabled` pendant l'analyse : le bouton garde le focus clavier. */}
 				<button
 					type="button"
-					disabled={loading}
 					aria-busy={loading}
-					aria-disabled={empty ? true : undefined}
+					aria-disabled={empty || loading ? true : undefined}
 					aria-describedby={describedBy}
 					title={empty ? reason : included ? includedText : undefined}
-					onClick={() => props.onAnalyze()}
+					onClick={() => {
+						if (!loading) props.onAnalyze();
+					}}
 					className={`w-full ${errorHasAction ? SECONDARY_PILL_CLASS : WHITE_PILL_CLASS} aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:translate-y-0`}
 				>
 					{label}
