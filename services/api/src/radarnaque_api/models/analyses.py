@@ -10,6 +10,7 @@ from sqlalchemy import (
     UniqueConstraint,
     false,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -104,6 +105,11 @@ class LlmCall(Base):
         Index("ix_llm_calls_created_at", "created_at"),
         Index("ix_llm_calls_analysis_id", "analysis_id"),
         Index("ix_llm_calls_identification_id", "identification_id"),
+        Index(
+            "ix_llm_calls_criteria_set_id",
+            "criteria_set_id",
+            postgresql_where=text("criteria_set_id is not null"),
+        ),
         CheckConstraint(
             "step in ('read_photos', 'criteria', 'identify', 'scam')", name="ck_llm_calls_step"
         ),
