@@ -22,7 +22,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -33,6 +33,7 @@ from sqlalchemy.orm import aliased
 
 from radarnaque_api.auth.privileges import Privileges
 from radarnaque_api.errors import ApiError
+from radarnaque_api.identify.pipeline import IdentifySettings
 from radarnaque_api.images import (
     MAX_IMAGES,
     ImageFetchError,
@@ -49,6 +50,7 @@ from radarnaque_api.models import (
     Analysis,
     AppSettings,
     AuthUser,
+    ListingSnapshot,
     ScanEvent,
     ScanFailure,
     ScanResult,
@@ -81,11 +83,17 @@ from radarnaque_api.services.scan_store import (
 from radarnaque_api.services.scan_stream import ScanEvent as StreamEvent
 from radarnaque_api.services.scan_stream import ScanEventSink, Stage
 from radarnaque_api.services.subscriptions import get_active_subscription
-from radarnaque_api.services.usage import compute_usage, plan_features, plan_max_images
+from radarnaque_api.services.usage import (
+    compute_usage,
+    included_identify_event,
+    plan_features,
+    plan_max_images,
+)
 
 RATE_WINDOW = timedelta(minutes=1)
 SCAN_KIND = "full"  # type de scan unique ; `text` et `image` ne survivent que dans l'historique
 CARD_ICONS_FEATURE = "card_icons"
+ScanPurpose = Literal["identify", "analyze"]
 INTERNAL_FAILURE = "internal"
 ANALYSIS_TIMEOUT_S = 180  # toute l'analyse après l'admission : cache, photos, tours, recherches
 TIMEOUT_FAILURE = "timeout"
@@ -156,6 +164,10 @@ class _Admission:
     cache_ttl: timedelta
     max_images: int  # photos au plus, selon l'offre (avant la limite du fournisseur)
     max_searches: int  # recherches web au plus (`settings.max_web_searches`)
+    purpose: ScanPurpose
+    listing_id: int
+    included: bool  # `analyze` inclus dans un `identify` : il ne compte pas dans le quota
+    identify: IdentifySettings
 
 
 @dataclass(frozen=True)
@@ -229,20 +241,34 @@ async def _reserve(
     scan: ScanIn,
     at: datetime,
     rate_limit: int,
-) -> int:
-    """Étape 5, en une transaction. Un verrou consultatif propre à l'utilisateur couvre le
-    recomptage de la limite de requêtes et l'insertion de l'événement : des scans simultanés ne
-    la dépassent pas, admins compris. Puis l'abonnement actif est verrouillé (`FOR UPDATE`) le
-    temps de compter le quota. Un compte illimité (admin, superuser hors production) passe sans
-    abonnement ni comptage du quota, mais son événement est enregistré. Les deux verrous sont
+    *,
+    purpose: ScanPurpose,
+    listing_id: int,
+) -> tuple[int, int | None]:
+    """Étape 5, en une transaction ; renvoie `(event_id, included_by_event_id)`. Un verrou
+    consultatif propre à l'utilisateur couvre le recomptage de la limite de requêtes, la
+    recherche de l'`identify` à inclure et l'insertion de l'événement : des scans simultanés ne
+    dépassent pas la limite, admins compris, et deux `analyze` n'incluent pas le même `identify`.
+    Puis l'abonnement actif est verrouillé (`FOR UPDATE`) le temps de compter le quota. Un compte
+    illimité (admin, superuser hors production) passe sans abonnement ni comptage du quota, mais
+    son événement est enregistré, et jamais marqué inclus (rien à compter). Les deux verrous sont
     toujours pris dans cet ordre. Le superuser hors production n'est pas soumis à la limite :
-    il ne prend aucun des deux."""
-    if privileges.rate_limited:
+    il ne prend le verrou que pour un `analyze`, afin de lire de façon cohérente.
+
+    Un `analyze` qui trouve un `identify` à inclure (`included_identify_event`) passe même quand
+    le quota est épuisé, et ne compte pas (`compute_usage`)."""
+    if privileges.rate_limited or purpose == "analyze":
         await session.execute(
             select(func.pg_advisory_xact_lock(func.hashtextextended(f"rate:{user.id}", 0)))
         )
+    if privileges.rate_limited:
         await _check_rate_limit(session, user.id, rate_limit, at)
-    if not privileges.unlimited:
+    included_by = None
+    if purpose == "analyze":
+        included_by = await included_identify_event(session, user.id, listing_id, at)
+    if privileges.unlimited:
+        included_by = None
+    else:
         sub = (
             await session.execute(
                 select(Subscription)
@@ -253,24 +279,32 @@ async def _reserve(
         ).scalar_one_or_none()
         if sub is None:
             raise ScanError(402, "no_active_subscription", "Aucun abonnement actif.")
-        usage = await compute_usage(session, sub, at)
-        kind = usage.per_kind.get(SCAN_KIND)
-        if kind is None or kind.remaining <= 0:  # `remaining` tient déjà compte du plafond
-            raise ScanError(
-                402,
-                "quota_exhausted",
-                "Quota de scans atteint.",
-                {"plan": sub.plan, "scanKind": SCAN_KIND},
-            )
+        if included_by is None:
+            usage = await compute_usage(session, sub, at)
+            kind = usage.per_kind.get(SCAN_KIND)
+            if kind is None or kind.remaining <= 0:  # `remaining` tient déjà compte du plafond
+                raise ScanError(
+                    402,
+                    "quota_exhausted",
+                    "Quota de scans atteint.",
+                    {"plan": sub.plan, "scanKind": SCAN_KIND},
+                )
     event_id = (
         await session.execute(
             insert(ScanEvent)
-            .values(user_id=user.id, scan_kind=SCAN_KIND, trigger=scan.trigger, created_at=at)
+            .values(
+                user_id=user.id,
+                scan_kind=SCAN_KIND,
+                trigger=scan.trigger,
+                purpose=purpose,
+                included_by_event_id=included_by,
+                created_at=at,
+            )
             .returning(ScanEvent.id)
         )
     ).scalar_one()
     await session.commit()
-    return event_id
+    return event_id, included_by
 
 
 async def _admit(
@@ -279,6 +313,7 @@ async def _admit(
     privileges: Privileges,
     scan: ScanIn,
     now: Callable[[], datetime],
+    purpose: ScanPurpose = "analyze",
 ) -> _Admission:
     """Étapes 1 à 5. Une `ScanError` levée ici ne laisse aucun événement."""
     settings = (await session.execute(select(AppSettings))).scalar_one()
@@ -286,6 +321,7 @@ async def _admit(
     rate_limit = settings.rate_limit_per_minute
     cache_ttl = timedelta(hours=settings.cache_ttl_hours)
     max_searches = settings.max_web_searches
+    identify = IdentifySettings.of(settings)
     # Premier contrôle sans verrou, pour refuser tôt ; `_reserve` recompte sous verrou.
     if privileges.rate_limited:
         await _check_rate_limit(session, user.id, rate_limit, now())
@@ -299,7 +335,20 @@ async def _admit(
     site_id, suffixes = await _validated_site(session, scan)
     snapshot_id, digest = await upsert_snapshot(session, site_id, scan.listing, now())
     event_at = now()  # date de l'événement, et de l'analyse qu'il produira (règle R8)
-    event_id = await _reserve(session, user, privileges, scan, event_at, rate_limit)
+    listing_id = await session.scalar(
+        select(ListingSnapshot.listing_id).where(ListingSnapshot.id == snapshot_id)
+    )
+    assert listing_id is not None  # le snapshot vient d'être enregistré
+    event_id, included_by = await _reserve(
+        session,
+        user,
+        privileges,
+        scan,
+        event_at,
+        rate_limit,
+        purpose=purpose,
+        listing_id=listing_id,
+    )
     return _Admission(
         event_id=event_id,
         event_at=event_at,
@@ -309,6 +358,10 @@ async def _admit(
         cache_ttl=cache_ttl,
         max_images=max_images,
         max_searches=max_searches,
+        purpose=purpose,
+        listing_id=listing_id,
+        included=included_by is not None,
+        identify=identify,
     )
 
 
