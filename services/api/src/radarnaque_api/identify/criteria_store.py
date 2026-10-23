@@ -80,7 +80,9 @@ async def _view(session: AsyncSession, criteria_set: CriteriaSet) -> CriteriaSet
 async def valid_criteria(
     session: AsyncSession, key: str, at: datetime, ttl: timedelta
 ) -> CriteriaSetView | None:
-    """Jeu de critères du groupe, sauf s'il a expiré (un jeu `verified` n'expire jamais)."""
+    """Jeu de critères du groupe, sauf s'il a expiré (un jeu `verified` n'expire jamais).
+
+    L'appelant tient `lock_criteria` (même transaction) avant `valid_criteria` / `save_criteria`."""
     criteria_set = await session.scalar(
         select(CriteriaSet).where(CriteriaSet.candidates_key == key)
     )
@@ -101,8 +103,16 @@ async def save_criteria(
 ) -> CriteriaSetView:
     """Crée le jeu ou le rafraîchit sur place (critères remplacés, `status` gardé).
 
+    Un jeu `verified` (relu par un admin) n'est jamais remplacé : sa vue est renvoyée telle
+    quelle. L'appelant tient `lock_criteria` dans la même transaction.
+
     Les sources sont les numéros de page (1-based) de `pages` ; un numéro hors de `pages` (extrait
     de recherche, sans page) n'est pas une source valide."""
+    criteria_set = await session.scalar(
+        select(CriteriaSet).where(CriteriaSet.candidates_key == key)
+    )
+    if criteria_set is not None and criteria_set.status == "verified":
+        return await _view(session, criteria_set)
     known = {_normalize(c) for c in candidates}
     kept: list[tuple[ExtractedCriterion, list[PageText]]] = []
     for crit in extracted.criteria:
@@ -117,9 +127,6 @@ async def save_criteria(
         if len(kept) == MAX_CRITERIA:
             break
 
-    criteria_set = await session.scalar(
-        select(CriteriaSet).where(CriteriaSet.candidates_key == key)
-    )
     if criteria_set is None:
         criteria_set = CriteriaSet(
             candidates_key=key, candidates=candidates, created_at=at, refreshed_at=at

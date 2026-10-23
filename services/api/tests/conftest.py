@@ -84,7 +84,7 @@ def _clean_user_data(request: pytest.FixtureRequest) -> Iterator[None]:
             "truncate app.admin_actions, app.llm_calls,"
             " app.scan_results, app.scan_failures, app.scan_events,"
             " app.analysis_reason_texts, app.analysis_reasons, app.analysis_texts, app.analyses,"
-            " app.snapshot_images, app.listing_snapshots, app.listings,"
+            " app.criteria_sets, app.snapshot_images, app.listing_snapshots, app.listings,"
             ' app.subscriptions, auth."user" cascade'
         )
 

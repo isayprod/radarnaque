@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
 import pytest_asyncio
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -18,7 +18,15 @@ from radarnaque_api.identify.criteria_store import (
     valid_criteria,
 )
 from radarnaque_api.identify.schemas import CriteriaOut, ExpectedValue, ExtractedCriterion
-from radarnaque_api.models.identification import CriteriaSet, Criterion
+from radarnaque_api.models import Listing, ListingSnapshot
+from radarnaque_api.models.identification import (
+    CriteriaSet,
+    Criterion,
+    CriterionSource,
+    Identification,
+    IdentificationCheck,
+    IdentificationObject,
+)
 from radarnaque_api.pages import PageText
 
 T0 = datetime(2026, 10, 23, 10, 0, tzinfo=UTC)
@@ -123,21 +131,104 @@ async def test_expired_set_is_not_valid_but_verified_never_expires(engine: Async
     assert view is not None and view.status == "verified"
 
 
-async def test_refresh_replaces_criteria_and_keeps_verified_status(engine: AsyncEngine) -> None:
+async def test_refresh_replaces_criteria_and_sources_keeps_auto_status(
+    engine: AsyncEngine,
+) -> None:
     maker = async_sessionmaker(engine, expire_on_commit=False)
-    first = await save(maker, crit("ancien"))
+    first = await save(maker, crit("ancien", sources=[1, 2]))
+    later = T0 + timedelta(days=40)
+    second = await save(maker, crit("nouveau 1"), crit("nouveau 2"), at=later)
+    assert second.id == first.id and second.status == "auto"
+    assert [c.fr for c in second.criteria] == ["nouveau 1", "nouveau 2"]
+    async with maker() as session:
+        assert await session.scalar(select(func.count()).select_from(CriteriaSet)) == 1
+        assert await session.scalar(select(func.count()).select_from(Criterion)) == 2
+        assert await session.scalar(select(func.count()).select_from(CriterionSource)) == 2
+        assert (await session.scalar(select(CriteriaSet.refreshed_at))) == later
+
+
+async def test_verified_set_is_not_replaced(engine: AsyncEngine) -> None:
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    first = await save(maker, crit("relu"))
     async with maker() as session, session.begin():
         row = await session.scalar(select(CriteriaSet))
         assert row is not None
         row.status = "verified"
     later = T0 + timedelta(days=40)
-    second = await save(maker, crit("nouveau 1"), crit("nouveau 2"), at=later)
-    assert second.id == first.id and second.status == "verified"
-    assert [c.fr for c in second.criteria] == ["nouveau 1", "nouveau 2"]
+    second = await save(maker, crit("nouveau"), at=later)
+    assert second.status == "verified"
+    assert second.criteria == first.criteria and second.id == first.id
     async with maker() as session:
-        assert await session.scalar(select(func.count()).select_from(CriteriaSet)) == 1
-        assert await session.scalar(select(func.count()).select_from(Criterion)) == 2
-        assert (await session.scalar(select(CriteriaSet.refreshed_at))) == later
+        assert (await session.scalar(select(CriteriaSet.refreshed_at))) == T0
+
+
+async def test_mixed_sources_keep_only_pages(engine: AsyncEngine) -> None:
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    one_page = PAGES[:1]
+    async with maker() as session, session.begin():
+        view = await save_criteria(
+            session,
+            candidates_key(CANDIDATES),
+            CANDIDATES,
+            CriteriaOut(criteria=[crit(sources=[1, 3])]),
+            one_page,
+            T0,
+        )
+    assert view.criteria[0].sources == (("https://a.example/1", "Page A", "a.example"),)
+
+
+async def test_deleting_criterion_keeps_identification_check(engine: AsyncEngine) -> None:
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    view = await save(maker, crit("Écran"))
+    async with maker() as session, session.begin():
+        site_id = await session.scalar(text("select id from app.sites limit 1"))
+        listing = Listing(site_id=site_id, external_id="x")
+        session.add(listing)
+        await session.flush()
+        snapshot = ListingSnapshot(
+            listing_id=listing.id, content_hash="h", title="t", description="d"
+        )
+        session.add(snapshot)
+        await session.flush()
+        ident = Identification(
+            snapshot_id=snapshot.id,
+            config_hash="c",
+            input_hash="h",
+            status="identified",
+            confidence=50,
+        )
+        session.add(ident)
+        await session.flush()
+        obj = IdentificationObject(
+            identification_id=ident.id,
+            position=0,
+            role="main",
+            label="x",
+            confidence=50,
+            criteria_set_id=view.id,
+        )
+        session.add(obj)
+        await session.flush()
+        session.add(
+            IdentificationCheck(
+                object_id=obj.id,
+                position=0,
+                criterion_id=view.criteria[0].id,
+                text_fr="Écran",
+                text_nl="Écran nl",
+                decisive=True,
+                sources=[{"url": "https://a.example/1", "title": "Page A", "domain": "a.example"}],
+                observation="seen_match",
+                photo_index=1,
+            )
+        )
+    async with maker() as session, session.begin():
+        await session.execute(delete(Criterion))
+    async with maker() as session:
+        check = await session.scalar(select(IdentificationCheck))
+    assert check is not None and check.criterion_id is None
+    assert (check.text_fr, check.text_nl, check.decisive) == ("Écran", "Écran nl", True)
+    assert check.sources[0]["domain"] == "a.example"
 
 
 async def test_lock_serializes_two_sessions(engine: AsyncEngine) -> None:
