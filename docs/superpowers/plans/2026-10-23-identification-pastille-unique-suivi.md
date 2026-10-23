@@ -68,12 +68,19 @@ c'est le sujet suivant.
 
 ## Points mineurs reportés
 
-- Les tests de largeur et d'opacité de la ligne d'état ne regardent que des classes ; un garde-fou
-  sur `badge.css` (aucune animation de largeur) serait plus solide.
-- Le test du mouvement réduit de la ligne d'état est presque tautologique.
-- Le test « même texte » de la ligne d'état passe même sans attente réelle.
-- Un espace de 1,2 em reste à droite du texte quand la pilule est au repos.
-- Le panneau contient plusieurs régions `aria-live` (déjà le cas avant la refonte).
-- Les titres « Produit » et « Identification » (ce dernier lu seulement par les lecteurs d'écran)
-  sont redondants.
-- Les tests de la pilule du risque ont été adaptés après coup, sans passage par l'échec.
+La relecture finale de la branche et sa vague de corrections ont réglé : le bouton « Identifier le
+produit » du panneau passe par les mêmes règles que la pilule, la pilule d'erreur ouvre le panneau
+(le produit reste accessible), les régions annoncées du panneau, les titres en double, la largeur
+de la pilule pendant l'analyse. Restent :
+
+- Pendant l'analyse du risque, si l'identification n'est pas servie par le cache (annonce modifiée,
+  cache expiré), la ligne d'état reste sur « Démarrage de l'analyse… » le temps que le serveur refait
+  l'identification ; à observer sur les vrais sites.
+- Une analyse relancée après un changement de version de l'annonce n'affiche pas la progression de
+  l'identification refaite (cas rare).
+- Pendant l'analyse, la référence est bornée à 140 px (« Gazelle Orange C7 … ») ; environ 165 px
+  l'afficherait en entier, à ajuster après essai.
+- Un espace de 1,2 em reste à droite du texte quand la pilule est au repos sans « … » à la fin.
+- Le test du mouvement réduit de la ligne d'état est presque tautologique (le vrai garde-fou est le
+  test sur `badge.css`) ; le test « même texte » passe même sans attente.
+- Une partie des tests de la pilule ont été adaptés après coup, sans passage par l'échec.
