@@ -459,6 +459,24 @@ async def test_png_is_resized_to_768_jpeg(mock, http):
     assert image.mode == "RGB"
 
 
+async def test_fetch_images_respects_max_side(mock, http):
+    mock.get(URL).mock(return_value=httpx.Response(200, content=_image_bytes(2000, 1000)))
+
+    [encoded] = await fetch_images(
+        [URL], SUFFIXES, http=http, resolve=FakeResolver(), max_side=1280
+    )
+    image = _decode(encoded)
+
+    assert image.format == "JPEG"
+    assert image.size == (1280, 640)
+
+
+def test_default_max_side_is_768():
+    assert images.MAX_SIDE == 768
+    assert images._to_jpeg.__defaults__ == (768,)
+    assert fetch_images.__kwdefaults__["max_side"] == 768
+
+
 async def test_transparent_and_small_images_become_rgb_jpeg_without_upscaling(mock, http):
     mock.get(URL).mock(return_value=httpx.Response(200, content=_image_bytes(30, 50, "RGBA")))
 
