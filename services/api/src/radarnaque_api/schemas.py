@@ -304,6 +304,15 @@ class IdentificationSearchOut(CamelModel):
     pages_read: list[str]
 
 
+class PhotoObservationOut(CamelModel):
+    """Observation de `read_photos` utile à l'arnaque (photo de catalogue, capture d'écran,
+    filigrane, photos incohérentes, objet absent) ; `photo` : son numéro, ou `None`."""
+
+    photo: int | None
+    kind: Literal["catalog", "screenshot", "watermark", "inconsistency", "missing_object"]
+    note: str
+
+
 class IdentifyStepDebugOut(CamelModel):
     """Un appel au modèle d'une étape (`read_photos`, `criteria`, `identify`) : prompt système
     réellement envoyé, messages résumés (photos en `[image n : N octets]`), réponse brute, durée
@@ -330,7 +339,8 @@ class IdentifyDebugOut(CamelModel):
 class IdentificationOut(CamelModel):
     """Résultat d'une identification. `confidence`, `level` : ceux de l'objet principal (0 et
     `uncertain` pour le statut `none`). `verified_criteria` : les critères de l'objet principal
-    ont été relus par un admin ; `unsourced` : des critères non sourcés ont servi (§9)."""
+    étaient relus par un admin au moment de l'identification ; `unsourced` : des critères non
+    sourcés ont servi (§9)."""
 
     identification_id: int
     status: IdentificationStatus
@@ -339,6 +349,7 @@ class IdentificationOut(CamelModel):
     objects: list[IdentifiedObjectPublicOut]
     seller_question: LocalizedTextOut | None
     title_mismatch: str | None
+    photo_observations: list[PhotoObservationOut]
     searches: list[IdentificationSearchOut]
     verified_criteria: bool
     unsourced: bool

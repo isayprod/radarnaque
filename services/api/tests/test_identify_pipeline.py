@@ -11,7 +11,7 @@ import pytest_asyncio
 import respx
 from fake_llm import FakeLLM
 from PIL import Image
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from radarnaque_api.identify import pipeline as pipeline_module
 from radarnaque_api.identify.criteria_store import candidates_key
 from radarnaque_api.identify.payload import build_identify_messages, build_read_photos_messages
 from radarnaque_api.identify.pipeline import (
@@ -503,6 +504,29 @@ async def test_read_reference_found_in_results_gives_95(maker, llm, clients, ste
     assert run.confidence == 95 and run.objects[0].level == "sure"
 
 
+async def test_read_reference_floor_needs_identify_to_retain_the_designated_candidate(
+    maker, llm, clients, steps, suffixes
+):
+    llm.step_outputs[SCHEMA_READ_PHOTOS] = read_out(read_reference="Steam Deck OLED 1010")
+    llm.step_outputs[SCHEMA_IDENTIFY] = identify_out(LCD, checks_=[])
+    hits = dict(HITS)
+    hits[Q_REF] = [hit("https://www.steamdeck.com/fr/tech", "Steam Deck OLED 1010 : fiche")]
+    run = await pipeline(maker, llm, clients, steps, suffixes, backend=FakeBackend(hits))
+    # La référence lue désigne l'OLED, `identify` retient la LCD : aucun plancher.
+    assert run.objects[0].reference == LCD and run.confidence == 40
+
+
+async def test_partial_read_reference_designates_no_candidate(maker, llm, clients, steps, suffixes):
+    llm.step_outputs[SCHEMA_READ_PHOTOS] = read_out(read_reference="OLED")
+    llm.step_outputs[SCHEMA_IDENTIFY] = identify_out(checks_=[])
+    hits = dict(HITS)
+    hits[Q_REF] = [hit("https://www.steamdeck.com/fr/tech", "OLED")]
+    run = await pipeline(maker, llm, clients, steps, suffixes, backend=FakeBackend(hits))
+    # « OLED » ne contient aucun nom de candidat : `criteria` tourne, pas de plancher.
+    assert SCHEMA_CRITERIA in schemas_called(llm)
+    assert run.confidence == 40
+
+
 async def test_read_reference_absent_from_results_gets_no_floor(
     maker, llm, clients, steps, suffixes
 ):
@@ -540,8 +564,26 @@ async def test_listing_without_photos_runs_text_only_and_caps_confidence(
     assert not any("images.2dehands.com" in str(call.request.url) for call in mock.calls)
     sent = llm.step_calls[0]["messages"][0]["content"]
     assert [p["type"] for p in sent] == ["text"]
-    # Toutes les vérifications réussies (95), plafonnées à 85 : aucune photo, aucune référence lue.
-    assert run.images_analyzed == 0 and run.confidence == 85
+    # Sans photo, rien n'a été vu : chaque `seen_match` compte comme `not_visible`.
+    assert run.images_analyzed == 0
+    assert [c.observation for c in run.objects[0].checks] == ["not_visible", "not_visible"]
+    assert run.confidence == 40 and run.objects[0].level != "sure"
+
+
+async def test_seen_observation_without_valid_photo_is_not_visible(
+    maker, llm, clients, steps, suffixes
+):
+    llm.step_outputs[SCHEMA_IDENTIFY] = identify_out(
+        checks_=[
+            CheckOut(criterion=1, observation="seen_match", photo=None),
+            CheckOut(criterion=2, observation="seen_contrary", photo=7),
+        ]
+    )
+    run = await pipeline(maker, llm, clients, steps, suffixes)
+    assert [(c.observation, c.photo) for c in run.objects[0].checks] == [
+        ("not_visible", None),
+        ("not_visible", None),
+    ]
 
 
 async def test_criteria_llm_failure_falls_back_to_unsourced_hints(
@@ -680,6 +722,55 @@ async def test_model_cannot_inject_urls(maker, llm, clients, steps, suffixes):
     urls = [p.url for o in run.objects for p in o.pages]
     assert urls == ["https://www.steamdeck.com/fr/tech", "https://specs.example/steam-deck-oled"]
     assert not any("evil" in u or u.startswith("http:") for u in urls)
+    # Une URL écrite par le modèle dans `reference` ou `remaining` n'est jamais rendue.
+    assert run.objects[0].reference is None and run.objects[0].remaining == ()
+
+
+async def test_model_names_are_sanitized(maker, llm, clients, steps, suffixes):
+    llm.step_outputs[SCHEMA_IDENTIFY] = identify_out(
+        objects=[
+            IdentifiedObjectOut(
+                object=1,
+                checks=checks("seen_match", "seen_match"),
+                reference="X" * 200,
+                remaining=["www.evil.example", "<b>OLED</b>", OLED],
+                pages=[],
+            )
+        ]
+    )
+    run = await pipeline(maker, llm, clients, steps, suffixes)
+    main = run.objects[0]
+    assert main.reference == "X" * 120 and main.remaining == (OLED,)
+
+
+@pytest.mark.parametrize(
+    ("raw", "cleaned"),
+    [
+        ("  Steam Deck OLED  ", OLED),
+        ("voir https://evil.example", None),
+        ("javascript://x", None),
+        ("WWW.evil.example", None),
+        ("Steam Deck\x07", None),
+        ("Steam\u0085Deck", None),
+        ("<img src=x>", None),
+        ("", None),
+        (None, None),
+        ("Y" * 121, "Y" * 120),
+    ],
+)
+def test_clean_name(raw, cleaned):
+    assert pipeline_module._clean_name(raw) == cleaned
+
+
+async def test_unparsable_result_hosts_do_not_fail_the_identification(
+    maker, llm, clients, steps, suffixes
+):
+    hits = dict(HITS)
+    hits[Q_REF] = [hit("https://xn--zz.com/a"), hit("https://exa\u200bmple.com/a")]
+    llm.step_outputs[SCHEMA_IDENTIFY] = identify_out(pages=[1, 2])
+    run = await pipeline(maker, llm, clients, steps, suffixes, backend=FakeBackend(hits))
+    assert run.status == "identified"
+    assert {p.domain for p in run.objects[0].pages} <= {"xn--zz.com", "exa\u200bmple.com"}
 
 
 async def test_targets_main_and_most_valuable_accessory(maker, llm, clients, steps, suffixes):
@@ -738,7 +829,7 @@ async def test_save_and_load_round_trip_with_llm_calls_per_step(
     run = await pipeline(maker, llm, clients, steps, suffixes, scan=scan)
     key = IdentificationKey(
         snapshot_id=await snapshot_of(maker, scan),
-        config_hash=config_hash(steps),
+        config_hash=config_hash(steps, escalation_model_id=None),
         input_hash=identify_input_hash(scan, 2, 1280),
     )
     async with maker() as session, session.begin():
@@ -784,6 +875,9 @@ async def test_save_and_load_round_trip_with_llm_calls_per_step(
     dumped = out.model_dump(mode="json", by_alias=True)
     assert {"identificationId", "sellerQuestion", "verifiedCriteria", "identifiedAt"} <= set(dumped)
     assert dumped["searches"][2]["pagesRead"] == ["versus.example"]
+    assert dumped["photoObservations"] == [
+        {"photo": 1, "kind": "catalog", "note": "photo du fabricant"}
+    ]
 
     async with maker() as session:
         calls = (
@@ -794,21 +888,24 @@ async def test_save_and_load_round_trip_with_llm_calls_per_step(
             )
         ).all()
         set_id = await session.scalar(select(CriteriaSet.id))
+    # La ligne `criteria` est écrite avec les critères, avant l'identification.
     assert calls == [
-        ("read_photos", identification_id, None),
         ("criteria", None, set_id),
+        ("read_photos", identification_id, None),
         ("identify", identification_id, None),
     ]
     async with maker() as session:
         row = await session.get(Identification, identification_id)
         assert row is not None
-        assert row.tokens_in == sum(c.tokens_in for c in run.calls)
-        assert row.cost_usd_micros == sum(c.cost_usd_micros for c in run.calls)
+        own = [c for c in run.calls if c.step != "criteria"]
+        assert row.tokens_in == sum(c.tokens_in for c in own)
+        assert row.cost_usd_micros == sum(c.cost_usd_micros for c in own)
         assert row.photo_observations == [
             {"photo": 1, "kind": "catalog", "note": "photo du fabricant"}
         ]
 
-    # Rafraîchissement sur place : même ligne, contenu remplacé, un appel de plus par étape.
+    # Rafraîchissement sur place : même ligne, contenu remplacé ; les appels du `run` déjà
+    # enregistrés (`criteria`) ne sont pas dupliqués.
     async with maker() as session, session.begin():
         refreshed = await save_identification(session, key, run, T0 + timedelta(days=8))
     assert refreshed == identification_id
@@ -816,7 +913,7 @@ async def test_save_and_load_round_trip_with_llm_calls_per_step(
     assert await count(maker, IdentificationObject) == 1
     assert await count(maker, IdentificationCheck) == 2
     assert await count(maker, IdentificationSearch) == 4
-    assert await count(maker, LlmCall) == 6
+    assert await count(maker, LlmCall) == 5
 
     # Les vérifications gardent leur copie du critère : la base peut changer après coup.
     async with maker() as session, session.begin():
@@ -842,7 +939,9 @@ async def test_save_nothing_status(maker, llm, clients, steps, suffixes):
         title_mismatch=None,
     )
     run = await pipeline(maker, llm, clients, steps, suffixes, scan=scan)
-    key = IdentificationKey(await snapshot_of(maker, scan), config_hash(steps), "x")
+    key = IdentificationKey(
+        await snapshot_of(maker, scan), config_hash(steps, escalation_model_id=None), "x"
+    )
     async with maker() as session, session.begin():
         identification_id = await save_identification(session, key, run, T0)
     async with maker() as session:
@@ -866,12 +965,68 @@ async def test_verified_criteria_reported(maker, llm, clients, steps, suffixes):
     scan = scan_in()
     run = await pipeline(maker, llm, clients, steps, suffixes, scan=scan)
     assert SCHEMA_CRITERIA not in schemas_called(llm)
-    key = IdentificationKey(await snapshot_of(maker, scan), config_hash(steps), "x")
+    key = IdentificationKey(
+        await snapshot_of(maker, scan), config_hash(steps, escalation_model_id=None), "x"
+    )
     async with maker() as session, session.begin():
         identification_id = await save_identification(session, key, run, T0)
     async with maker() as session:
         out = await load_identification(session, identification_id)
     assert out.verified_criteria and out.confidence == 45  # 40 + bonus de 5
+
+
+async def test_verified_criteria_is_a_snapshot(maker, llm, clients, steps, suffixes):
+    scan = scan_in()
+    run = await pipeline(maker, llm, clients, steps, suffixes, scan=scan)
+    key = IdentificationKey(
+        await snapshot_of(maker, scan), config_hash(steps, escalation_model_id=None), "x"
+    )
+    async with maker() as session, session.begin():
+        identification_id = await save_identification(session, key, run, T0)
+    async with maker() as session, session.begin():
+        await session.execute(update(CriteriaSet).values(status="verified"))
+    async with maker() as session:
+        out = await load_identification(session, identification_id)
+    assert not out.verified_criteria and out.confidence == 95
+
+
+async def test_check_of_a_criterion_replaced_meanwhile_keeps_its_copy(
+    maker, llm, clients, steps, suffixes
+):
+    scan = scan_in()
+    run = await pipeline(maker, llm, clients, steps, suffixes, scan=scan)
+    # Un autre scan rafraîchit l'ensemble entre le pipeline et l'enregistrement.
+    async with maker() as session, session.begin():
+        await session.execute(delete(Criterion).where(Criterion.position == 1))
+    key = IdentificationKey(
+        await snapshot_of(maker, scan), config_hash(steps, escalation_model_id=None), "x"
+    )
+    async with maker() as session, session.begin():
+        identification_id = await save_identification(session, key, run, T0)
+    async with maker() as session:
+        rows = (
+            await session.execute(
+                select(IdentificationCheck.text_fr, IdentificationCheck.criterion_id).order_by(
+                    IdentificationCheck.position
+                )
+            )
+        ).all()
+        out = await load_identification(session, identification_id)
+    assert [(text, cid is None) for text, cid in rows] == [
+        ("Anneau du joystick", True),
+        ("Étui de transport", False),
+    ]
+    assert [c.text.fr for c in out.objects[0].checks] == ["Anneau du joystick", "Étui de transport"]
+
+
+async def test_criteria_call_recorded_even_if_identify_fails(maker, llm, clients, steps, suffixes):
+    llm.step_errors[SCHEMA_IDENTIFY] = LLMError("transport")
+    with pytest.raises(LLMError):
+        await pipeline(maker, llm, clients, steps, suffixes)
+    async with maker() as session:
+        calls = (await session.execute(select(LlmCall.step, LlmCall.criteria_set_id))).all()
+        set_id = await session.scalar(select(CriteriaSet.id))
+    assert calls == [("criteria", set_id)] and set_id is not None
 
 
 def test_identification_digest_follows_the_result():
@@ -897,6 +1052,7 @@ def test_identification_digest_follows_the_result():
             ],
             "seller_question": None,
             "title_mismatch": None,
+            "photo_observations": [],
             "searches": [],
             "verified_criteria": False,
             "unsourced": False,
@@ -914,6 +1070,8 @@ def test_identification_digest_follows_the_result():
         out(status="uncertain"),
         out(title_mismatch="autre"),
         out(objects=[]),
+        out(objects=[out().objects[0].model_copy(update={"remaining": [OLED, LCD]})]),
+        out(photo_observations=[{"photo": None, "kind": "screenshot", "note": "capture"}]),
     ]
     assert base not in {identification_digest(o) for o in changed}
 
@@ -926,8 +1084,11 @@ async def test_active_steps_and_config_hash(maker, steps):
     assert all(s.system_prompt and s.step == code for code, s in steps.items())
     changed = dict(steps)
     changed["criteria"] = replace(steps["criteria"], prompt_version_id=999)
-    assert config_hash(steps) == config_hash(dict(reversed(list(steps.items()))))
-    assert config_hash(changed) != config_hash(steps)
+    base = config_hash(steps, escalation_model_id=None)
+    assert config_hash(dict(reversed(list(steps.items()))), escalation_model_id=None) == base
+    assert config_hash(changed, escalation_model_id=None) != base
+    # Le modèle de la relance change le résultat : il entre dans l'empreinte.
+    assert config_hash(steps, escalation_model_id=steps["identify"].model_id) != base
 
 
 async def test_identify_settings_read_from_the_settings_row(maker):

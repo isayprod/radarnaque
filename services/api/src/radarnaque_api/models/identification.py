@@ -102,6 +102,8 @@ class Identification(Base):
     seller_question_nl: Mapped[str | None]
     retried: Mapped[bool] = mapped_column(server_default=false())
     unsourced: Mapped[bool] = mapped_column(server_default=false())
+    # Critères de l'objet principal relus par un admin, au moment de l'identification.
+    verified_criteria: Mapped[bool] = mapped_column(server_default=false())
     images_analyzed: Mapped[int] = mapped_column(server_default="0")
     tokens_in: Mapped[int] = mapped_column(server_default="0")
     tokens_out: Mapped[int] = mapped_column(server_default="0")
