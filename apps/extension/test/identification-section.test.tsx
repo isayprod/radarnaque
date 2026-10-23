@@ -358,6 +358,60 @@ describe("IdentificationSection : none, accessoires, pages", () => {
 	});
 });
 
+describe("IdentificationSection : critères non visibles", () => {
+	const withChecks = (status: IdentificationResult["status"] = "uncertain") =>
+		({
+			...uncertain,
+			status,
+			objects: [
+				{
+					...(uncertain.objects[0] as IdentificationResult["objects"][number]),
+					checks: [
+						{
+							text: { fr: "Capacité", nl: "Capaciteit" },
+							observation: "not_visible",
+							photo: null,
+							sources: [],
+						},
+						{
+							text: { fr: "Coloris", nl: "Kleur" },
+							observation: "seen_match",
+							photo: 1,
+							sources: [],
+						},
+						{
+							text: { fr: "Numéro de série", nl: "Serienummer" },
+							observation: "not_visible",
+							photo: null,
+							sources: [],
+						},
+					],
+				},
+			],
+		}) as IdentificationResult;
+
+	test("incertain : « Non visible sur les photos » au-dessus de la question, FR et NL", () => {
+		setup(doneState(withChecks()));
+		const line = screen.getByText(
+			"Non visible sur les photos : Capacité, Numéro de série",
+		);
+		const question = screen.getByText("Quelle est la capacité ?");
+		expect(
+			line.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		cleanup();
+		setup(doneState(withChecks()), { locale: "nl" });
+		expect(
+			screen.getByText("Niet zichtbaar op de foto's: Capaciteit, Serienummer"),
+		).not.toBeNull();
+	});
+
+	test("incertain sans critère non visible : rien", () => {
+		setup(doneState(uncertain));
+		expect(screen.queryByText(/Non visible sur les photos/)).toBeNull();
+	});
+});
+
 describe("IdentificationSection : pied", () => {
 	test("analyses restantes : celles du résultat, sinon de l'accès ; rien si illimité", () => {
 		setup(doneState({ ...sampleIdentification, remaining: { scans: 7 } }));
@@ -369,6 +423,11 @@ describe("IdentificationSection : pied", () => {
 		setup(doneState(sampleIdentification), {
 			access: { ...active, remaining: { scans: null } },
 		});
+		expect(screen.queryByText(/Analyses restantes/)).toBeNull();
+	});
+
+	test("le résultat porte un décompte illimité (null) : l'accès n'est pas repris", () => {
+		setup(doneState({ ...sampleIdentification, remaining: { scans: null } }));
 		expect(screen.queryByText(/Analyses restantes/)).toBeNull();
 	});
 
