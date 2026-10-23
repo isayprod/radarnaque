@@ -757,10 +757,74 @@ async def test_model_names_are_sanitized(maker, llm, clients, steps, suffixes):
         ("", None),
         (None, None),
         ("Y" * 121, "Y" * 120),
+        ("javascript:alert(1)", None),
+        ("DATA:text/html,x", None),
+        ("mailto:a@b.be", None),
+        ("Note : écran rayé", "Note : écran rayé"),
     ],
 )
 def test_clean_name(raw, cleaned):
     assert pipeline_module._clean_name(raw) == cleaned
+
+
+def test_clean_sentence_is_longer_but_drops_any_url():
+    assert pipeline_module._clean_sentence("Q" * 301) == "Q" * 300
+    assert pipeline_module._clean_sentence("Voir https://evil.example pour la boîte") is None
+    assert pipeline_module._clean_sentence("Écrivez-moi sur www.evil.example") is None
+    assert pipeline_module._clean_sentence("  Une photo de la boîte ?  ") == (
+        "Une photo de la boîte ?"
+    )
+
+
+async def test_free_texts_are_sanitized(maker, llm, clients, steps, suffixes):
+    """Les textes libres écrits par le modèle et rendus à l'extension passent le même filtre que
+    les noms : une phrase qui contient une URL disparaît, une phrase trop longue est coupée."""
+    llm.step_outputs[SCHEMA_READ_PHOTOS] = read_out(
+        obj(OLED, LCD, category="<b>Console</b>"),
+        obj(
+            "www.evil.example",
+            "Manette A",
+            role="accessory",
+            value="low",
+            category="Manette https://evil.example",
+        ),
+        title_mismatch="T" * 400,
+        photo_observations=[
+            PhotoObservation(photo=1, kind="catalog", note="photo du fabricant"),
+            PhotoObservation(photo=2, kind="watermark", note="Filigrane <script>x</script>"),
+            PhotoObservation(photo=None, kind="screenshot", note="Voir http://evil.example"),
+        ],
+    )
+    out = identify_out()
+    llm.step_outputs[SCHEMA_IDENTIFY] = out.model_copy(
+        update={
+            "seller_question": Bilingual(
+                fr="Envoyez une photo sur www.evil.example", nl="Stuur een foto van de doos"
+            )
+        }
+    )
+    scan = scan_in()
+    run = await pipeline(maker, llm, clients, steps, suffixes, scan=scan)
+    assert run.read_photos is not None and run.identify is not None
+    assert run.read_photos.title_mismatch == "T" * 300
+    assert [o.note for o in run.read_photos.photo_observations] == ["photo du fabricant"]
+    assert run.identify.seller_question is None
+    main, accessory = run.objects
+    # Catégorie refusée : le premier candidat acceptable la remplace.
+    assert main.label == OLED and accessory.label == "Manette A"
+    # Sans réponse d'`identify` pour l'accessoire, ses candidats sont filtrés eux aussi.
+    assert accessory.remaining == ("Manette A",)
+
+    key = IdentificationKey(
+        await snapshot_of(maker, scan), config_hash(steps, escalation_model_id=None), "x"
+    )
+    async with maker() as session, session.begin():
+        identification_id = await save_identification(session, key, run, T0)
+    async with maker() as session:
+        loaded = await load_identification(session, identification_id)
+    # Les requêtes (`searches`) passent par `clean_query` : hors du périmètre de ce filtre.
+    dumped = json.dumps(loaded.model_dump(mode="json", exclude={"searches"}))
+    assert "evil" not in dumped and "<" not in dumped
 
 
 async def test_unparsable_result_hosts_do_not_fail_the_identification(
