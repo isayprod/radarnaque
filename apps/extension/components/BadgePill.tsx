@@ -38,12 +38,25 @@ const BADGE_PILL_BASE_CLASS = `${PILL_CLASS} h-7 min-w-0 gap-2 px-3 text-[13px] 
 // message se tronquent).
 export const BADGE_PILL_CLASS = `${BADGE_PILL_BASE_CLASS} max-w-[340px]`;
 
-// Pilule « Produit identifié » : au plus 400 px, pour que la référence reste
-// lisible à côté du niveau et de « Analyser le risque ».
+// Pilule « Produit identifié », et analyse du risque en cours avec sa
+// référence : au plus 400 px, pour que la référence reste lisible à côté du
+// niveau et de « Analyser le risque », ou de la ligne d'état.
 const PRODUCT_PILL_CLASS = `${BADGE_PILL_BASE_CLASS} max-w-[400px]`;
 
+// États d'une pilule cliquable (survol, grisée).
+const ACTION_STATES_CLASS =
+	"cursor-pointer hover:border-border-strong aria-disabled:cursor-default aria-disabled:text-text-3 aria-disabled:hover:border-white/12";
+
 // Pilule cliquable : repos, analyse en cours, résultat.
-export const ACTION_PILL_CLASS = `${BADGE_PILL_CLASS} cursor-pointer hover:border-border-strong aria-disabled:cursor-default aria-disabled:text-text-3 aria-disabled:hover:border-white/12`;
+export const ACTION_PILL_CLASS = `${BADGE_PILL_CLASS} ${ACTION_STATES_CLASS}`;
+
+// Analyse du risque en cours avec la référence du produit : 400 px, comme la
+// pilule « Produit identifié » qu'elle remplace.
+const ANALYZING_PILL_CLASS = `${PRODUCT_PILL_CLASS} ${ACTION_STATES_CLASS}`;
+
+// Référence pendant l'analyse du risque : largeur bornée qui ne rétrécit pas ;
+// la ligne d'état absorbe le dépassement.
+const ANALYZING_REFERENCE_CLASS = "max-w-[140px] shrink-0 truncate";
 
 // Action dans la pilule : « Relancer », « Identifier » ou « Analyser le risque »,
 // soulignée. Grisée (`aria-disabled`), elle n'est plus soulignée.
@@ -56,6 +69,12 @@ export const INLINE_ACTION_CLASS =
 // bord mort (WCAG 2.5.8).
 const PRODUCT_CLASS =
 	"-ml-3 inline-flex min-w-0 cursor-pointer items-center gap-2 self-stretch rounded-l-pill pl-3 text-text-1 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
+
+// Partie message de la pilule d'erreur de l'analyse du risque : comme la partie
+// produit, elle ouvre ou ferme le panneau ; sans action à droite, elle prend
+// aussi le padding droit (`-mr-3 pr-3`), toute la pilule.
+const ERROR_TOGGLE_CLASS = PRODUCT_CLASS;
+const ERROR_TOGGLE_ALONE_CLASS = `${PRODUCT_CLASS} -mr-3 rounded-r-pill pr-3`;
 
 // « Analyser le risque » dans la pilule « Produit identifié » : comme la partie
 // produit, toute la hauteur et le padding droit de la pilule.
@@ -70,9 +89,28 @@ const SEPARATOR_CLASS = "h-3.5 w-px shrink-0 bg-white/12";
  */
 const PILL_FOCUSABLE = "button, a[href], [tabindex]";
 
-/** Donne le focus à la pilule contenue dans `container` ; faux s'il n'y a rien à focaliser. */
-export function focusPill(container: HTMLElement | null): boolean {
-	const target = container?.querySelector<HTMLElement>(PILL_FOCUSABLE);
+/**
+ * Partie message de la pilule d'erreur (`data-error-toggle`) : elle ouvre le
+ * panneau, mais quand l'élément change, l'action à côté (« Relancer »,
+ * « Analyser le risque ») passe avant elle.
+ */
+const PILL_ACTION_FIRST =
+	"button:not([data-error-toggle]), a[href], [tabindex]";
+
+/**
+ * Donne le focus à la pilule contenue dans `container` ; faux s'il n'y a rien à
+ * focaliser. `opener` : la fermeture du panneau, qui rend le focus au bouton
+ * qui l'ouvre (`aria-expanded`) ; sinon l'action de la pilule d'erreur passe
+ * avant son message.
+ */
+export function focusPill(
+	container: HTMLElement | null,
+	opener = false,
+): boolean {
+	const target =
+		container?.querySelector<HTMLElement>(
+			opener ? "[aria-expanded]" : PILL_ACTION_FIRST,
+		) ?? container?.querySelector<HTMLElement>(PILL_FOCUSABLE);
 	if (!target) return false;
 	target.focus();
 	return true;
@@ -313,7 +351,12 @@ export function errorAction({
 }): ReactNode {
 	if (RELAUNCH_CODES.has(code) && !empty)
 		return (
-			<button type="button" onClick={onLaunch} className={INLINE_ACTION_CLASS}>
+			<button
+				type="button"
+				aria-describedby={describedBy}
+				onClick={onLaunch}
+				className={INLINE_ACTION_CLASS}
+			>
 				{contentText(locale, "ai.retry")}
 			</button>
 		);
@@ -343,27 +386,58 @@ export function errorAction({
 
 /**
  * Pilule d'erreur : le logo atténué, le message (`error`, null panneau ouvert),
- * un séparateur et l'action. Sans action, elle peut recevoir le focus elle-même
- * (hors de l'ordre de tabulation) : la fermeture du panneau ou la perte de
- * l'action l'y met. Jamais vide : le logo reste.
+ * un séparateur et l'action. Avec `onToggle` (erreur de l'analyse du risque),
+ * le logo et le message forment un bouton qui ouvre ou ferme le panneau, où le
+ * produit identifié reste lisible ; nommé par le message, ou par `label`
+ * panneau ouvert. Sans `onToggle` ni action, elle peut recevoir le focus
+ * elle-même (hors de l'ordre de tabulation) : la fermeture du panneau ou la
+ * perte de l'action l'y met. Jamais vide : le logo reste.
  */
 export function ErrorPill({
 	error,
 	action,
+	onToggle,
+	open = false,
+	label,
 }: {
 	error: string | null;
 	action: ReactNode;
+	/** Ouvre ou ferme le panneau (partie message). */
+	onToggle?: () => void;
+	open?: boolean;
+	/** Nom du bouton de la partie message quand le message est masqué. */
+	label?: string;
 }) {
-	return (
-		<span
-			tabIndex={action === null ? -1 : undefined}
-			className={BADGE_PILL_CLASS}
-		>
+	const content = (
+		<>
 			<Logo size={16} className="shrink-0 opacity-60" />
 			{error !== null && (
 				<span title={error} className="min-w-0 truncate text-text-2">
 					{error}
 				</span>
+			)}
+		</>
+	);
+	return (
+		<span
+			tabIndex={action === null && !onToggle ? -1 : undefined}
+			className={BADGE_PILL_CLASS}
+		>
+			{onToggle ? (
+				<button
+					type="button"
+					data-error-toggle=""
+					aria-expanded={open}
+					aria-label={error === null ? label : undefined}
+					onClick={onToggle}
+					className={
+						action === null ? ERROR_TOGGLE_ALONE_CLASS : ERROR_TOGGLE_CLASS
+					}
+				>
+					{content}
+				</button>
+			) : (
+				content
 			)}
 			{error !== null && action !== null && (
 				<span aria-hidden="true" className={SEPARATOR_CLASS} />
@@ -539,10 +613,13 @@ function pillStep(scan: AiScan): PillStep {
  * 2. résultat du risque : point, niveau, score ; le clic ouvre ou ferme le
  *    panneau ;
  * 3. analyse du risque en cours : le logo animé, « {référence courte} · {ligne
- *    d'état} » (la ligne seule sans référence), même clic ;
- * 4. analyse du risque en échec : le logo atténué, son texte (sauf panneau
- *    ouvert, qui l'affiche déjà), puis « Relancer » (analyse coupée en route) ou
- *    « Analyser le risque » ;
+ *    d'état} » (la ligne seule sans référence), même clic ; avec la référence,
+ *    400 px comme le produit, la référence bornée et la ligne tronquée ;
+ * 4. analyse du risque en échec : le logo atténué et son texte (sauf panneau
+ *    ouvert, qui l'affiche déjà), un bouton qui ouvre ou ferme le panneau (le
+ *    produit identifié y reste lisible), puis « Relancer » (analyse coupée en
+ *    route) ou « Analyser le risque », décrits par « Inclus avec
+ *    l'identification » quand l'analyse est incluse ;
  * 5. produit identifié (`ProductPill`) : glyphe, référence courte (ou « A ou
  *    B ? ») et niveau, sans le pourcentage (dans le panneau), ou « Produit non
  *    identifié », dans un bouton qui ouvre ou ferme le panneau ; un séparateur ;
@@ -552,8 +629,9 @@ function pillStep(scan: AiScan): PillStep {
  *    restante, mais focusable, la raison lue avec elle ; un lien vers les
  *    formules sans abonnement ;
  * 6. identification en cours : le logo animé et sa ligne d'état, même clic ;
- * 7. identification en échec : comme l'erreur du risque, l'action étant
- *    « Identifier » (ou « Relancer ») ;
+ * 7. identification en échec : le logo atténué, son texte, puis « Identifier »
+ *    (ou « Relancer ») ; sans bouton de panneau, qui ne montrerait que la même
+ *    erreur ;
  * 8. repos : le logo et « Identifier », nommé « Identifier le produit » ; un
  *    lien vers les formules sans abonnement ; grisé sans analyse restante.
  * Chaque action passe par `onIdentify` ou `onAnalyze`, qui suivent les règles
@@ -680,12 +758,16 @@ export function BadgePill({
 				aria-busy={true}
 				aria-label={ariaLabel}
 				onClick={onToggle}
-				className={ACTION_PILL_CLASS}
+				className={
+					step === "analyzing" && headline
+						? ANALYZING_PILL_CLASS
+						: ACTION_PILL_CLASS
+				}
 			>
 				<Logo size={16} animated className="shrink-0" />
 				{step === "analyzing" && headline && (
 					<>
-						<span data-reference="" className="min-w-0 truncate">
+						<span data-reference="" className={ANALYZING_REFERENCE_CLASS}>
 							{headline.short}
 						</span>
 						<span aria-hidden="true" className="shrink-0 text-text-3">
@@ -701,6 +783,9 @@ export function BadgePill({
 		pill = (
 			<ErrorPill
 				error={error}
+				onToggle={onToggle}
+				open={open}
+				label={ariaLabel}
 				action={errorAction({
 					code: failed,
 					empty: emptyAnalyze,

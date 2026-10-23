@@ -156,18 +156,22 @@ function Panel({
 /**
  * « Détail du produit » sous le résultat du risque : un `<details>` natif,
  * fermé par défaut, au clavier (Entrée, Espace) sans code. Le triangle est un
- * simple glyphe qui tourne à l'ouverture.
+ * simple glyphe qui tourne à l'ouverture. Le `<summary>` (`summaryId`) nomme
+ * la section du produit qu'il contient.
  */
 function ProductDetail({
 	locale,
+	summaryId,
 	children,
 }: {
 	locale: Locale;
+	summaryId: string;
 	children: ReactNode;
 }) {
 	return (
 		<details className="group mt-4 border-t border-border-subtle pt-3">
 			<summary
+				id={summaryId}
 				className={`${LABEL_CLASS} flex cursor-pointer list-none items-center gap-1.5 rounded-xs hover:text-text-1 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden [&::-webkit-details-marker]:hidden`}
 			>
 				<span
@@ -212,10 +216,11 @@ export function RiskBadge({
 	useKeepInView(panelRef, open);
 	const close = useCallback(() => setOpen(false), []);
 	// « Fermer », ou Escape avec le focus dans la pastille : le focus revient à la
-	// pilule (son bouton, son action, ou la pilule d'erreur elle-même), avant que
-	// le panneau, qui peut le contenir, ne disparaisse.
+	// pilule (le bouton qui ouvre le panneau, sinon son action, ou la pilule
+	// d'erreur elle-même), avant que le panneau, qui peut le contenir, ne
+	// disparaisse.
 	const closeToPill = useCallback(() => {
-		focusPill(pillRef.current);
+		focusPill(pillRef.current, true);
 		setOpen(false);
 	}, []);
 	const openPanel = useCallback(() => setOpen(true), []);
@@ -274,6 +279,10 @@ export function RiskBadge({
 		scan.analysisIncluded,
 	);
 	const toggle = useCallback(() => setOpen((value) => !value), []);
+	// Titres visibles qui nomment la section du produit : « Produit », ou le
+	// `<summary>` de « Détail du produit ».
+	const productTitleId = useId();
+	const detailId = useId();
 	// Contenu du panneau (spec §3), selon l'étape. Chaque écran d'accès
 	// (déconnecté, sans abonnement, erreur) n'est montré qu'une fois :
 	// - produit pas encore identifié : la section Identification seule ;
@@ -287,16 +296,23 @@ export function RiskBadge({
 		!("error" in scan.access) &&
 		scan.access.status === "noSubscription";
 	const emptyAnalyze = noScansLeft(scan.access) && !scan.analysisIncluded;
-	const identificationSection = (hideRemaining: boolean) => (
+	// « Identifier le produit » du panneau : la même action que la pilule, par
+	// `useLaunch` (accès, connexion, quota), grisée sans analyse restante.
+	const identificationSection = (
+		hideRemaining: boolean,
+		labelledBy?: string,
+	) => (
 		<IdentificationSection
 			locale={locale}
 			identification={scan.identification}
 			access={scan.access}
-			onIdentify={() => scan.identify()}
+			onIdentify={identify}
+			empty={noScansLeft(scan.access)}
 			onLogin={scan.login}
 			loginUnavailable={scan.loginUnavailable}
 			pricingUrl={scan.pricingUrl}
 			hideRemaining={hideRemaining}
+			labelledBy={labelledBy}
 		/>
 	);
 	const aiSection = (
@@ -318,8 +334,8 @@ export function RiskBadge({
 			<>
 				{aiSection}
 				{identified && (
-					<ProductDetail locale={locale}>
-						{identificationSection(true)}
+					<ProductDetail locale={locale} summaryId={detailId}>
+						{identificationSection(true, detailId)}
 					</ProductDetail>
 				)}
 			</>
@@ -327,12 +343,12 @@ export function RiskBadge({
 	} else if (identified) {
 		content = (
 			<div className="flex flex-col gap-4">
-				<section className="flex flex-col gap-2">
-					<h3 className={LABEL_CLASS}>
+				<div className="flex flex-col gap-2">
+					<h3 id={productTitleId} className={LABEL_CLASS}>
 						{contentText(locale, "identify.product")}
 					</h3>
-					{identificationSection(false)}
-				</section>
+					{identificationSection(false, productTitleId)}
+				</div>
 				<RiskAction
 					locale={locale}
 					access={scan.access}

@@ -38,10 +38,14 @@ function setup(
 		locale = "fr",
 		access = active,
 		hideRemaining = false,
+		empty,
+		labelledBy,
 	}: {
 		locale?: Locale;
 		access?: ContentAccess;
 		hideRemaining?: boolean;
+		empty?: boolean;
+		labelledBy?: string;
 	} = {},
 ) {
 	const props = {
@@ -53,6 +57,8 @@ function setup(
 		loginUnavailable: false,
 		pricingUrl: PRICING,
 		hideRemaining,
+		empty,
+		labelledBy,
 	};
 	return { ...render(<IdentificationSection {...props} />), props };
 }
@@ -549,9 +555,67 @@ describe("IdentificationSection : accès et erreurs", () => {
 		expect(screen.getByRole("button", { name: "Se connecter" })).not.toBeNull();
 	});
 
+	test("plus d'analyse restante (`empty`) : « Identifier le produit » grisé, focusable, raison lue avec lui", () => {
+		setup({ status: "error", code: "analysis_failed" }, { empty: true });
+		const button = screen.getByRole("button", {
+			name: contentText("fr", "identify.launch"),
+		});
+		expect(button.getAttribute("aria-disabled")).toBe("true");
+		expect(button.hasAttribute("disabled")).toBe(false);
+		expect(button.className).toContain("aria-disabled:opacity-40");
+		expect(
+			document.getElementById(button.getAttribute("aria-describedby") ?? "")
+				?.textContent,
+		).toBe(contentText("fr", "ai.noScansLeft"));
+	});
+
+	test("identification en cours : bouton aria-disabled (jamais disabled, il garde le focus), clic ignoré", async () => {
+		const user = userEvent.setup();
+		const { props } = setup({ status: "loading", progress: startProgress(0) });
+		const button = screen.getByRole("button", {
+			name: contentText("fr", "identify.launch"),
+		});
+		expect(button.getAttribute("aria-busy")).toBe("true");
+		expect(button.getAttribute("aria-disabled")).toBe("true");
+		expect(button.hasAttribute("disabled")).toBe(false);
+		button.focus();
+		await user.click(button);
+		expect(props.onIdentify).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(button);
+	});
+
+	test("erreur : une seule alerte, sans région aria-live autour", () => {
+		const { container } = setup({ status: "error", code: "analysis_failed" });
+		expect(screen.getAllByRole("alert")).toHaveLength(1);
+		expect(container.querySelector("[aria-live]")).toBeNull();
+	});
+
 	test("déconnecté : phrase et connexion", () => {
 		setup({ status: "idle" }, { access: { status: "signedOut" } as never });
 		expect(screen.getByRole("button", { name: "Se connecter" })).not.toBeNull();
+	});
+});
+
+describe("IdentificationSection : titre fourni par le panneau (labelledBy)", () => {
+	test("sans labelledBy : titre caché « Identification » qui nomme la section", () => {
+		setup(doneState(sampleIdentification));
+		expect(
+			screen.getByRole("region", {
+				name: contentText("fr", "identify.title"),
+			}),
+		).not.toBeNull();
+	});
+
+	test("avec labelledBy : aucun titre caché, la section est nommée par le titre visible du parent", () => {
+		render(<h3 id="titre-visible">{contentText("fr", "identify.product")}</h3>);
+		setup(doneState(sampleIdentification), { labelledBy: "titre-visible" });
+		expect(
+			screen.queryByRole("heading", { name: "Identification" }),
+		).toBeNull();
+		const region = screen.getByRole("region", {
+			name: contentText("fr", "identify.product"),
+		});
+		expect(region.getAttribute("aria-labelledby")).toBe("titre-visible");
 	});
 });
 
