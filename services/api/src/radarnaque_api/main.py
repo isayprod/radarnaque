@@ -17,6 +17,7 @@ from radarnaque_api.db import make_engine
 from radarnaque_api.errors import install_error_handlers
 from radarnaque_api.llm.client import LLMClientFactory
 from radarnaque_api.llm.providers import ensure_models_use_known_providers, load_providers
+from radarnaque_api.pages import make_http_client
 from radarnaque_api.routes import (
     admin_ai,
     admin_analyses,
@@ -123,8 +124,9 @@ def create_app(
         # résoudrait l'hôte à la place de la vérification SSRF), ni redirection automatique
         # (fetch_images vérifie chaque saut), ni en-têtes, cookies ou authentification partagés.
         app.state.http_images = httpx.AsyncClient(trust_env=False, follow_redirects=False)
-        # Client dédié au lecteur de pages (pages.py) : mêmes garanties, sans proxy ni redirection.
-        app.state.http_pages = httpx.AsyncClient(trust_env=False, follow_redirects=False)
+        # Client dédié au lecteur de pages (pages.py) : sans proxy, redirection, cookie ni connexion
+        # gardée (voir make_http_client).
+        app.state.http_pages = make_http_client()
         # Client dédié à SearXNG, seul hôte que l'API appelle pour la recherche : pas de proxy de
         # l'environnement ni de redirection. Absent (None) quand SEARCH_BACKEND vaut "none".
         app.state.http_search = (

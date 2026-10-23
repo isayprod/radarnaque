@@ -6,11 +6,29 @@ import httpx
 import pytest
 import respx
 
-from radarnaque_api.pages import PageText, read_page, read_pages, wrap_page
+from radarnaque_api import pages
+from radarnaque_api.pages import (
+    USER_AGENT,
+    PageText,
+    make_http_client,
+    read_page,
+    read_pages,
+    wrap_page,
+)
 
 URL = "https://example.com/produit?id=1"
 PUBLIC = "93.184.216.34"
 HTML = {"content-type": "text/html; charset=utf-8"}
+
+
+def _ok(content: bytes | str, headers: dict[str, str] | None = None) -> httpx.Response:
+    return httpx.Response(200, content=content, headers=headers or HTML)
+
+
+def _leak(mock: respx.MockRouter) -> respx.Route:
+    """Route fourre-tout, à ajouter en dernier : toute requête qui part est comptée. Sans elle,
+    respx lève avant d'enregistrer la requête et `read_page` avale l'erreur : test vide."""
+    return mock.route().mock(return_value=_ok("<p>PARTI</p>"))
 
 
 class FakeResolver:
@@ -25,7 +43,7 @@ class FakeResolver:
 
 @pytest.fixture
 async def http() -> AsyncIterator[httpx.AsyncClient]:
-    async with httpx.AsyncClient(follow_redirects=True) as client:
+    async with make_http_client() as client:  # exactement le client de production
         yield client
 
 
@@ -33,10 +51,6 @@ async def http() -> AsyncIterator[httpx.AsyncClient]:
 def mock() -> Iterator[respx.MockRouter]:
     with respx.mock(assert_all_called=False) as router:
         yield router
-
-
-def _ok(content: bytes | str, headers: dict[str, str] | None = None) -> httpx.Response:
-    return httpx.Response(200, content=content, headers=headers or HTML)
 
 
 async def test_reads_html_and_strips_scripts(mock, http):
@@ -63,9 +77,10 @@ async def test_reads_html_and_strips_scripts(mock, http):
     ],
 )
 async def test_refuses_http_scheme_and_other_ports(mock, http, url):
-    resolve = FakeResolver()
+    leak, resolve = _leak(mock), FakeResolver()
     assert await read_page(url, http=http, resolve=resolve) is None
-    assert len(mock.calls) == 0
+    assert leak.call_count == 0
+    assert resolve.calls == []
 
 
 @pytest.mark.parametrize(
@@ -80,15 +95,23 @@ async def test_refuses_http_scheme_and_other_ports(mock, http, url):
     ],
 )
 async def test_refuses_private_addresses(mock, http, url):
+    leak = _leak(mock)
     resolve = FakeResolver({"internal.example": ["192.168.1.10"]})
     assert await read_page(url, http=http, resolve=resolve) is None
-    assert len(mock.calls) == 0
+    assert leak.call_count == 0
+
+
+async def test_refuses_public_ip_literal(mock, http):
+    leak = _leak(mock)
+    assert await read_page(f"https://{PUBLIC}/", http=http, resolve=FakeResolver()) is None
+    assert leak.call_count == 0
 
 
 async def test_refuses_name_with_one_private_address(mock, http):
+    leak = _leak(mock)
     resolve = FakeResolver({"example.com": [PUBLIC, "10.0.0.1"]})
     assert await read_page(URL, http=http, resolve=resolve) is None
-    assert len(mock.calls) == 0
+    assert leak.call_count == 0
 
 
 async def test_redirect_to_private_address_is_refused(mock, http):
@@ -96,8 +119,10 @@ async def test_redirect_to_private_address_is_refused(mock, http):
     mock.route(host=PUBLIC).mock(
         return_value=httpx.Response(302, headers={"location": "https://intranet.example/x"})
     )
+    leak = _leak(mock)
     assert await read_page(URL, http=http, resolve=resolve) is None
     assert len(mock.calls) == 1  # seule la première requête est partie
+    assert leak.call_count == 0
 
 
 async def test_redirect_is_followed_up_to_two_times(mock, http):
@@ -139,6 +164,20 @@ async def test_ipv6_address_is_bracketed(mock, http):
 async def test_body_over_1mb_is_cut_off(mock, http):
     mock.route().mock(return_value=_ok(b"a" * (1024 * 1024 + 1)))
     assert await read_page(URL, http=http, resolve=FakeResolver()) is None
+
+
+async def test_streamed_body_over_1mb_without_content_length_is_cut_off(mock, http):
+    sent = 0
+
+    async def stream() -> AsyncIterator[bytes]:
+        nonlocal sent
+        for _ in range(100):
+            sent += 64 * 1024
+            yield b"a" * 64 * 1024
+
+    mock.route().mock(return_value=httpx.Response(200, headers=HTML, content=stream()))
+    assert await read_page(URL, http=http, resolve=FakeResolver()) is None
+    assert sent < 100 * 64 * 1024  # lecture interrompue au plafond, pas au bout du flux
 
 
 async def test_gzip_response_cannot_exceed_1mb(mock, http):
@@ -212,3 +251,47 @@ def test_wrap_page_escapes_closing_tag():
     wrapped = wrap_page(1, page)
     assert wrapped.lower().count("</page_web") == 1
     assert wrapped.endswith("</page_web>")
+
+
+def test_wrap_page_escapes_opening_tag():
+    page = PageText(URL, "example.com", '<page_web n="9">', 'x < PAGE_WEB domaine="y">')
+    wrapped = wrap_page(1, page)
+    assert wrapped.lower().count("<page_web") == 1
+
+
+async def test_page_request_has_fixed_user_agent(mock, http):
+    route = mock.route().mock(return_value=_ok("<p>ok</p>"))
+    await read_page(URL, http=http, resolve=FakeResolver())
+    assert route.calls[0].request.headers["user-agent"] == USER_AGENT
+
+
+async def test_page_timeout_is_enforced(mock, http, monkeypatch):
+    monkeypatch.setattr(pages, "PAGE_TIMEOUT_S", 0.2)
+
+    async def slow(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(30)
+        return _ok("<p>lent</p>")
+
+    mock.route().mock(side_effect=slow)
+    started = asyncio.get_running_loop().time()
+    assert await read_page(URL, http=http, resolve=FakeResolver()) is None
+    assert asyncio.get_running_loop().time() - started < 3
+
+
+def test_client_keeps_no_connection_alive():
+    client = make_http_client()
+    assert client._transport._pool._max_keepalive_connections == 0  # noqa: SLF001
+    assert client.follow_redirects is False
+    assert client.trust_env is False
+
+
+async def test_client_never_stores_cookies(mock):
+    mock.route(path="/a").mock(
+        return_value=_ok("<p>a</p>", {**HTML, "set-cookie": "sid=1; Path=/; Secure"})
+    )
+    route = mock.route(path="/b").mock(return_value=_ok("<p>b</p>"))
+    async with make_http_client() as client:
+        assert await read_page("https://example.com/a", http=client, resolve=FakeResolver())
+        assert await read_page("https://example.com/b", http=client, resolve=FakeResolver())
+    assert "cookie" not in route.calls[0].request.headers
+    assert len(client.cookies.jar) == 0
