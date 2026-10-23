@@ -699,6 +699,23 @@ async def test_settings_new_fields_bounds(client, db, bearer, admin):
     assert (await _overview(client, bearer, admin))["settings"] == current
 
 
+async def test_settings_escalation_model_with_unknown_provider_is_422(client, db, bearer, admin):
+    current = (await _overview(client, bearer, admin))["settings"]
+    orphan = await _scalar(
+        db, "insert into app.models(provider, slug) values ('disparu', 'x/relance') returning id"
+    )
+    await db.commit()
+    r = await _patch(client, bearer, admin, {"identifyEscalationModelId": orphan})
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "invalid_value"
+    assert r.json()["error"]["message"] == (
+        "Le fournisseur de ce modèle n'est plus dans providers.toml."
+    )
+    assert r.json()["error"]["details"] == {"field": "identifyEscalationModelId"}
+    assert await _count_actions(db) == 0
+    assert (await _overview(client, bearer, admin))["settings"] == current
+
+
 async def test_settings_new_fields_journal_and_escalation_clear(client, db, bearer, admin):
     model = await _add_model(client, bearer, admin)
     await db.rollback()

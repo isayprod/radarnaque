@@ -514,9 +514,16 @@ async def activate_step_prompt(
     )
 
 
-async def update_settings(session: AsyncSession, *, admin_id: str, changes: AiSettingsIn) -> None:
+async def update_settings(
+    session: AsyncSession,
+    *,
+    admin_id: str,
+    providers: Mapping[str, ProviderConfig],
+    changes: AiSettingsIn,
+) -> None:
     """Applique les champs fournis et réellement changés ; une ligne de journal par champ.
-    Corps vide ou sans changement : rien n'est écrit."""
+    Corps vide ou sans changement : rien n'est écrit. Modèle de relance inconnu ou dont le
+    fournisseur a été retiré de `providers.toml` : 422."""
     row = (
         await session.execute(
             select(AppSettings)
@@ -526,13 +533,22 @@ async def update_settings(session: AsyncSession, *, admin_id: str, changes: AiSe
     ).scalar_one()
     wanted: dict[str, Any] = {f: getattr(changes, f) for f in SETTING_FIELDS}
     escalation = wanted["identify_escalation_model_id"]
-    if escalation is not None and await session.get(Model, escalation) is None:
-        raise ApiError(
-            422,
-            "invalid_value",
-            "Modèle de relance inconnu.",
-            {"field": "identifyEscalationModelId"},
-        )
+    if escalation is not None:
+        model = await session.get(Model, escalation)
+        if model is None:
+            raise ApiError(
+                422,
+                "invalid_value",
+                "Modèle de relance inconnu.",
+                {"field": "identifyEscalationModelId"},
+            )
+        if model.provider not in providers:
+            raise ApiError(
+                422,
+                "invalid_value",
+                "Le fournisseur de ce modèle n'est plus dans providers.toml.",
+                {"field": "identifyEscalationModelId"},
+            )
     for field in SETTING_FIELDS:
         new = wanted[field]
         old = getattr(row, field)
