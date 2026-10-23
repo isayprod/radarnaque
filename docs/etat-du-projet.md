@@ -27,10 +27,11 @@ Radarnaque est une extension Chrome, Edge et Brave qui signale les annonces susp
 | 4a | RGPD : suppression du compte, purge à 12 mois, page `/privacy` à jour | `feat/phase-4a` (au-dessus de `feat/phase-3d`) | terminée, non poussée |
 | 4b, partie 1 | Administration : socle (SPA `apps/admin`, connexion, droits, journal), écrans Utilisateurs et IA | `feat/phase-4b` (au-dessus de `main`, où 4a est fusionnée) | terminée, non poussée |
 | 4b, partie 2 | Administration : Tableau de bord, Offre (dont `/pricing`) et Analyses | `feat/phase-4b-2` (au-dessus de `feat/phase-4b`) | terminée, non poussée |
+| Identification, partie 1 | Identification du produit, côté API (pipeline, base de critères, routes, quota, admin par étape) | `feat/identification` (au-dessus de `main`) | terminée, non poussée ; parties 2 (extension) et 3 (admin, site) à faire |
 | 5 | Paiement Stripe | — | à faire (les routes répondent 501) |
 | — | Passe de design (identité visuelle, maquettes) | — | à faire en dernier |
 
-Les phases 3b, 3c et 3d n'ont pas encore été essayées sur les vrais sites. Les vérifications à faire sont listées dans les suivis [3b](superpowers/plans/2026-10-18-phase-3b-suivi.md), [3c](superpowers/plans/2026-10-18-phase-3c-suivi.md), [3d](superpowers/plans/2026-10-19-phase-3d-suivi.md), [4a](superpowers/plans/2026-10-20-phase-4a-suivi.md), [4b partie 1](superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md) et [4b partie 2](superpowers/plans/2026-10-21-phase-4b-partie-2-suivi.md). Les phases 3d et 4a ont aussi une liste de corrections prévues avant leur fusion.
+Les phases 3b, 3c et 3d n'ont pas encore été essayées sur les vrais sites. Les vérifications à faire sont listées dans les suivis [3b](superpowers/plans/2026-10-18-phase-3b-suivi.md), [3c](superpowers/plans/2026-10-18-phase-3c-suivi.md), [3d](superpowers/plans/2026-10-19-phase-3d-suivi.md), [4a](superpowers/plans/2026-10-20-phase-4a-suivi.md), [4b partie 1](superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md) et [4b partie 2](superpowers/plans/2026-10-21-phase-4b-partie-2-suivi.md). Les phases 3d et 4a ont aussi une liste de corrections prévues avant leur fusion. L'identification (partie 1) a son [suivi](superpowers/plans/2026-10-23-identification-partie-1-suivi.md).
 
 ## Architecture
 
@@ -132,6 +133,18 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
   - `account/delete` n'est accepté que d'une page de l'extension (la popup) ;
   - le service worker est le seul à détenir la session et le JWT.
 
+### Identification du produit (partie 1, API)
+- **Principe :** avant l'analyse anti-arnaque, l'API identifie le produit vendu en trois étapes, chacune avec son modèle et son prompt versionné (écran IA de l'admin) : `read_photos` (lit les photos, propose jusqu'à trois candidats), `criteria` (cherche sur le web les critères qui distinguent les candidats, avec leurs sources) et `identify` (vérifie ces critères sur les photos). L'indice de confiance (Sûr, Probable, Incertain) est calculé par l'API, jamais recopié du modèle. Voir la [spécification](superpowers/specs/2026-10-23-identification-produit-design.md).
+- **Routes :** `POST /api/identify/stream` (événements `stage` `reading_photos`, `criteria`, `identifying`, `retrying`, `criteria_cached`, `page_read`, `identification`, puis `result` ou `error`) et `POST /api/identify` (sans flux). Même admission, mêmes refus JSON et mêmes remboursements que le scan.
+- **Scan :** `POST /api/scans(/stream)` identifie d'abord l'annonce (80 s au plus), puis analyse ; l'analyse reçoit l'identification. Un échec n'est qu'un événement `identification_error`. Le scan est borné à 190 s en tout (l'extension installée coupe à 200 s).
+- **Base de critères partagée :** critères par ensemble de candidats, sources enregistrées (url, titre, domaine), renouvelés au bout de `criteria_ttl_days`. Les identifications sont en cache (`identification_cache_ttl_hours`) et autonomes : ce qu'elles ont montré ne change pas si la base change.
+- **Lecteur de pages :** le serveur lit des pages publiques (HTTPS, adresses publiques seulement, sans cookie ni redirection non vérifiée) pour les critères et la relance.
+- **Quota :** « identifier » consomme 1 analyse ; l'analyse qui suit (même utilisateur, même annonce, moins de 24 h) est incluse, une fois par identification (`scan_events.included`).
+- **Réglages :** `identification_cache_ttl_hours`, `criteria_ttl_days`, `criteria_max_searches`, `criteria_max_pages`, `identify_retry_threshold`, `identify_image_side`, `scam_sends_photos`, `identify_escalation_model_id` (valeurs par défaut dans le [README](../README.md#identification-du-produit-api)).
+- **Admin :** l'écran IA a une section par étape (modèle actif, versions du prompt) et les nouveaux réglages ; le tableau de bord compte l'identification comme un scan et donne les coûts par étape. L'essai d'une étape, l'écran « Base de critères » et le détail d'une identification sont pour la partie 3.
+- **Outils :** le faux fournisseur répond aux trois étapes ; `pnpm e2e:identify` ; `pnpm eval:identify` évalue l'identification sur un jeu local (`services/api/evals/identify.jsonl`, jamais commité).
+- **Pas encore fait :** l'extension n'affiche rien de l'identification (partie 2) ; `/privacy` n'en parle pas encore (partie 3). L'API doit être déployée avant l'extension.
+
 ### RGPD (phase 4a)
 - **Suppression du compte :**
   - `DELETE /api/me` (`204` sans corps, `401 unauthenticated` si l'utilisateur est absent) supprime l'utilisateur dans une seule transaction ;
@@ -232,13 +245,13 @@ Coût estimé avec `google/gemini-3.1-flash-lite` : environ 1,1 ¢ par analyse a
 
 | Partie | Tests | Commande |
 |---|---|---|
-| API | 989 | `pnpm test:api` |
-| Extension | 1085 | `pnpm --filter extension test` |
+| API | 1247 | `pnpm test:api` |
+| Extension | 1251 | `pnpm --filter extension test` |
 | Auth | 89 | `pnpm --filter auth test` |
-| Site | 78 | `pnpm --filter site test` |
-| Admin | 127 | `pnpm --filter admin test` |
-| Scripts | 16 | `pnpm test:scripts` |
-| Bout en bout | connexion et scan (en flux) | `pnpm e2e:login`, `pnpm e2e:scan` |
+| Site | 267 | `pnpm --filter site test` |
+| Admin | 132 | `pnpm --filter admin test` |
+| Scripts | 24 | `pnpm test:scripts` |
+| Bout en bout | connexion, scan (en flux) et identification | `pnpm e2e:login`, `pnpm e2e:scan`, `pnpm e2e:identify` |
 
 À chaque phase :
 - une relecture par tâche ;
@@ -253,8 +266,8 @@ Coût estimé avec `google/gemini-3.1-flash-lite` : environ 1,1 ¢ par analyse a
   - **ton abonnement ChatGPT**, via `npx openai-oauth`, avec le modèle `gpt-6-luna` : c'est lui qui réfléchit et cherche le mieux en dev.
 - **Réflexion :** `reasoning_effort` (`none`, `low`, `medium`, `high`) est une option de chaque fournisseur de `services/api/providers.toml`. Redémarrer l'API après l'avoir changée.
 - **Sans recherche web :** `SEARCH_BACKEND=none` dans `infra/.env` retire l'outil de recherche.
-- **Essayer le flux :** `pnpm e2e:scan` affiche chaque événement à son arrivée ; `--no-stream` utilise la route sans flux.
-- **Base de dev :** l'API applique les migrations au démarrage (`pnpm dev:api`). La migration 0005 de la phase 3d crée le type `full`, retire les quotas `text` et `image` et ajoute `plans.max_images`. La migration 0006 de la phase 4a ajoute `subscriptions.purged_scans`. La migration 0007 de la phase 4b crée `admin_actions` et `llm_calls`. La migration 0008 (partie 2) ajoute `listings.url`. La migration 0009 ajoute une version du prompt `full` qui cite les caractéristiques de l'annonce (`attributes` : année, kilométrage…) et ne l'active que si la v1 livrée est encore active.
+- **Essayer le flux :** `pnpm e2e:scan` et `pnpm e2e:identify` affichent chaque événement à son arrivée ; `--no-stream` utilise la route sans flux.
+- **Base de dev :** l'API applique les migrations au démarrage (`pnpm dev:api`). La migration 0005 de la phase 3d crée le type `full`, retire les quotas `text` et `image` et ajoute `plans.max_images`. La migration 0006 de la phase 4a ajoute `subscriptions.purged_scans`. La migration 0007 de la phase 4b crée `admin_actions` et `llm_calls`. La migration 0008 (partie 2) ajoute `listings.url`. La migration 0009 ajoute une version du prompt `full` qui cite les caractéristiques de l'annonce (`attributes` : année, kilométrage…) et ne l'active que si la v1 livrée est encore active. La migration 0010 (identification) crée `pipeline_steps`, la base de critères (`criteria_sets`, `criteria`, `criteria_sources`), les tables des identifications (`identifications`, `identification_objects`, `identification_checks`, `identification_pages`, `identification_searches`, `identification_results`), les nouveaux réglages de `settings`, `scan_events.purpose`, `scan_events.included` et `scan_events.included_by_event_id`, et `llm_calls.step`. La migration 0011 ajoute les prompts v1 des trois étapes et une version du prompt `full` qui s'appuie sur le bloc `<identification>` (activée seulement si la 0009 est encore active).
 - **Purge :** `PURGE_ENABLED=false` dans `infra/.env` coupe la tâche de fond en dev ; `radarnaque-purge` fait une passe à la main et affiche `scan_events supprimés : N, admin_actions : N, llm_calls : N` (voir le [README](../README.md)).
 - **Admin :** `http://localhost:8080/admin/` ; `pnpm admin:grant <email>` donne le rôle admin à un compte existant (voir le [README](../README.md#administration-phase-4b)).
 
@@ -272,3 +285,4 @@ Coût estimé avec `google/gemini-3.1-flash-lite` : environ 1,1 ¢ par analyse a
 10. Essayer l'admin (partie 1) sur la vraie pile, avec les vérifications du [suivi 4b partie 1](superpowers/plans/2026-10-21-phase-4b-partie-1-suivi.md) : connexion par lien et par code, essais du modèle et de la recherche, en-têtes de Caddy, présence de `scripts/` dans l'image auth.
 11. Essayer la partie 2 de l'admin sur la vraie pile, avec les vérifications du [suivi 4b partie 2](superpowers/plans/2026-10-21-phase-4b-partie-2-suivi.md) : Tableau de bord sur la base de dev, graphique dans le navigateur, modifications de l'offre, `/pricing` en FR et NL, en-tête de cache derrière Caddy, détail d'une analyse, boîte de confirmation au clavier.
 12. Faire la passe de design.
+13. Identification (partie 1) : essayer sur la vraie pile avec les vérifications du [suivi](superpowers/plans/2026-10-23-identification-partie-1-suivi.md) (OpenRouter et modèles vision, SearXNG, lecture de pages derrière le pare-feu, coût par étape), puis faire les parties 2 (extension, avec `SCAN_TIMEOUT_MS` à environ 310 s) et 3 (admin, `/privacy`).
