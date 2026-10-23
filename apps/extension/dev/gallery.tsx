@@ -34,6 +34,7 @@ import {
 } from "../lib/content/ai-results";
 import { addEvent, startProgress } from "../lib/content/scan-progress";
 import { shadowCssOf } from "../lib/content/ui-context";
+import { type ContentKey, contentText } from "../lib/content-i18n";
 import type { Listing } from "../lib/listing/types";
 import type { BgResponse, ContentAccess } from "../lib/messages";
 import type { RiskReport } from "../lib/rules/score";
@@ -437,55 +438,85 @@ function fakeStore(
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Attend qu'un élément du shadow root existe (au plus 3 s). */
-async function waitFor<T extends Element>(
-	root: ShadowRoot,
-	selector: string,
-): Promise<T> {
+/** Attend qu'`find` rende quelque chose (au plus 3 s). */
+async function waitUntil<T>(find: () => T | null | undefined): Promise<T> {
 	for (let i = 0; i < 60; i++) {
-		const found = root.querySelector<T>(selector);
+		const found = find();
 		if (found) return found;
 		await sleep(50);
 	}
-	throw new Error(`galerie : ${selector} introuvable`);
+	throw new Error("galerie : élément introuvable");
 }
 
-/** La pilule unique de la fiche (les états de la galerie sont refaits ensuite). */
-const ANALYZE = "[data-pill]";
+/** Attend qu'un élément du shadow root existe (au plus 3 s). */
+const waitFor = <T extends Element>(root: ShadowRoot, selector: string) =>
+	waitUntil(() => root.querySelector<T>(selector));
+
+/** Les boutons de la pilule unique de la fiche. */
+const PILL_BUTTONS = "[data-pill] button";
 
 /**
- * Clic sur l'action de la pilule, une fois qu'elle est rendue : « Identifier »
- * au repos, « Analyser le risque » une fois le produit identifié (le seul
- * bouton sans `aria-expanded`).
+ * Clic sur l'action de la pilule nommée `key` (« Identifier le produit »,
+ * « Analyser le risque ») : on l'attend par son nom, car au montage la pilule
+ * est d'abord au repos, puis reprend l'identification du magasin.
  */
-const clickPill = async (
-	root: ShadowRoot,
-	selector = `${ANALYZE} button:not([aria-expanded])`,
-) => (await waitFor<HTMLElement>(root, selector)).click();
+const clickAction =
+	(locale: Locale, key: ContentKey) => async (root: ShadowRoot) => {
+		const name = contentText(locale, key);
+		const button = await waitUntil(() =>
+			Array.from(root.querySelectorAll<HTMLElement>(PILL_BUTTONS)).find(
+				(el) =>
+					(el.getAttribute("aria-label") ?? el.textContent)?.trim() === name,
+			),
+		);
+		button.click();
+	};
 
-const IDENTIFY = "[data-pill]";
+/** Ouvre le panneau avec la partie produit ou la pilule de résultat (replié). */
+const openPanel = async (root: ShadowRoot) =>
+	(
+		await waitFor<HTMLElement>(root, `${PILL_BUTTONS}[aria-expanded='false']`)
+	).click();
 
-const clickIdentify = async (root: ShadowRoot) =>
-	clickPill(root, `${IDENTIFY} button`);
+/** Ouvre le panneau pendant que l'analyse du risque tourne. */
+const openWhileLoading = async (root: ShadowRoot) =>
+	(
+		await waitFor<HTMLElement>(
+			root,
+			`${PILL_BUTTONS}[aria-expanded='false'][aria-busy='true']`,
+		)
+	).click();
 
-/** Ouvre le panneau sur un produit déjà identifié (magasin). */
-const openIdentification = async (root: ShadowRoot) =>
-	clickPill(root, `${IDENTIFY} button[aria-expanded='false']`);
+/** Ouvre le panneau d'un résultat du risque (la pilule affiche « n/100 »). */
+const openResult = async (root: ShadowRoot) =>
+	(
+		await waitUntil(() =>
+			Array.from(
+				root.querySelectorAll<HTMLElement>(
+					`${PILL_BUTTONS}[aria-expanded='false']`,
+				),
+			).find((el) => el.textContent?.includes("/100")),
+		)
+	).click();
 
-/** Lance l'analyse, puis ouvre le panneau sur son résultat. */
-async function launchThenOpen(root: ShadowRoot) {
-	await clickPill(root);
-	await clickPill(
-		root,
-		`${ANALYZE} button[aria-describedby][aria-expanded='false']`,
-	);
-}
+/** Déplie « Détail du produit » (son `<details>` est celui du panneau, pas ceux du déroulé). */
+const openDetail = (locale: Locale) => async (root: ShadowRoot) => {
+	const name = contentText(locale, "identify.detail");
+	(
+		await waitUntil(() =>
+			Array.from(root.querySelectorAll<HTMLElement>("details > summary")).find(
+				(el) => el.textContent?.includes(name),
+			),
+		)
+	).click();
+};
 
-/** Lance l'analyse et ouvre le panneau pendant qu'elle tourne. */
-async function launchAndOpenWhileLoading(root: ShadowRoot) {
-	await clickPill(root);
-	await clickPill(root, `${ANALYZE} button[aria-busy='true']`);
-}
+/** Enchaîne des scénarios, dans l'ordre. */
+const steps =
+	(...scripts: Array<(root: ShadowRoot) => Promise<void>>) =>
+	async (root: ShadowRoot) => {
+		for (const script of scripts) await script(root);
+	};
 
 /** Affiche l'infobulle d'une icône de carte (survol simulé). */
 async function hoverCard(root: ShadowRoot) {
@@ -549,17 +580,24 @@ function loadingState(events: ScanProgressEvent[]): ScanState {
 	return { status: "loading", progress };
 }
 
-const PILLS: Stage[] = [
+/** Produit identifié par l'utilisateur, gardé par le magasin (sans analyse). */
+const IDENTIFIED = {
+	storedIdentification: IDENTIFICATIONS.sure,
+	identifiedByUser: true,
+} as const;
+
+/** Pilule : repos, identification, et ses issues. */
+const IDENTIFY_PILLS: Stage[] = [
 	{
 		id: "pill-idle",
-		label: "pilule au repos",
+		label: "repos : Identifier",
 		render: (locale) => ({
 			node: badge("repos", locale, { access: active(3) }),
 		}),
 	},
 	{
 		id: "pill-empty",
-		label: "pilule au repos, sans analyse restante",
+		label: "repos, sans analyse restante (Identifier grisé)",
 		render: (locale) => ({
 			node: badge(
 				"vide",
@@ -570,122 +608,26 @@ const PILLS: Stage[] = [
 		}),
 	},
 	{
-		id: "pill-loading",
-		label: "pilule en cours (attente après 4 s)",
-		render: (locale) => ({
-			node: badge("cours", locale, {
-				access: active(3),
-				events: SEARCHES.slice(0, 2),
-			}),
-			script: clickPill,
-		}),
-	},
-	{
-		id: "pill-loading-long",
-		label: "pilule en cours, ligne d'état de 200 caractères",
-		render: (locale) => ({
-			node: badge("long", locale, {
-				access: active(3),
-				events: [{ type: "search", id: 1, query: LONG_QUERY, aspect: "scam" }],
-			}),
-			script: clickPill,
-		}),
-	},
-	{
-		id: "pill-low",
-		label: "pilule, résultat faible",
-		render: (locale) => ({
-			node: badge(
-				"faible",
-				locale,
-				{ access: active(3) },
-				{ stored: RESULTS.low },
-			),
-		}),
-	},
-	{
-		id: "pill-medium",
-		label: "pilule, résultat moyen",
-		render: (locale) => ({
-			node: badge(
-				"moyen",
-				locale,
-				{ access: active(3) },
-				{ stored: { ...RESULTS.medium, professional: false } },
-			),
-		}),
-	},
-	{
-		id: "pill-high",
-		label: "pilule, résultat élevé",
-		render: (locale) => ({
-			node: badge(
-				"eleve",
-				locale,
-				{ access: active(3) },
-				{ stored: RESULTS.high },
-			),
-		}),
-	},
-	{
-		id: "pill-error-relaunch",
-		label: "pilule en erreur (analyse interrompue)",
-		render: (locale) => ({
-			node: badge("interrompue", locale, {
-				access: active(3),
-				events: SEARCHES.slice(0, 1),
-				outcome: { ok: false, error: { code: "stream_interrupted" } },
-			}),
-			script: clickPill,
-		}),
-	},
-	{
-		id: "pill-error-launch",
-		label: "pilule en erreur (message long, « Analyser »)",
-		render: (locale) => ({
-			node: badge("erreur", locale, {
-				access: active(3),
-				outcome: { ok: false, error: { code: "analysis_failed" } },
-			}),
-			script: clickPill,
-		}),
-	},
-];
-
-const IDENTIFY_PILLS: Stage[] = [
-	{
-		id: "identify-idle",
-		label: "pilule Identifier au repos",
-		render: (locale) => ({
-			node: badge("identifier-repos", locale, { access: active(3) }),
-		}),
-	},
-	{
 		id: "identify-loading",
-		label: "pilule Identifier en cours",
+		label: "identification en cours",
 		render: (locale) => ({
 			node: badge("identifier-cours", locale, {
 				access: active(3),
 				identifyEvents: SEARCHES.slice(0, 3),
 			}),
-			script: clickIdentify,
+			script: clickAction(locale, "identify.launch"),
 		}),
 	},
 	{
 		id: "identify-sure",
-		label: "pilule Identifier, Sûr",
+		label: "produit identifié, Sûr",
 		render: (locale) => ({
-			node: badge(
-				"identifier-sur",
-				locale,
-				{ access: active(3) },
-				{ storedIdentification: IDENTIFICATIONS.sure, identifiedByUser: true },
-			),
+			node: badge("identifier-sur", locale, { access: active(3) }, IDENTIFIED),
 		}),
 	},
 	{
 		id: "identify-uncertain",
-		label: "pilule Identifier, Incertain (A ou B ?)",
+		label: "produit identifié, Incertain (A ou B ?)",
 		render: (locale) => ({
 			node: badge(
 				"identifier-incertain",
@@ -700,7 +642,7 @@ const IDENTIFY_PILLS: Stage[] = [
 	},
 	{
 		id: "identify-none",
-		label: "pilule Identifier, produit non identifié",
+		label: "produit non identifié",
 		render: (locale) => ({
 			node: badge(
 				"identifier-aucun",
@@ -712,27 +654,39 @@ const IDENTIFY_PILLS: Stage[] = [
 	},
 	{
 		id: "identify-error",
-		label: "pilule Identifier en erreur",
+		label: "erreur d'identification (Relancer)",
 		render: (locale) => ({
 			node: badge("identifier-erreur", locale, {
 				access: active(3),
 				identifyEvents: SEARCHES.slice(0, 1),
 				identifyOutcome: { ok: false, error: { code: "stream_interrupted" } },
 			}),
-			script: clickIdentify,
+			script: clickAction(locale, "identify.launch"),
 		}),
 	},
 	{
 		id: "analyze-included",
-		label: "« Analyser » inclus (identification faite, quota à 0)",
+		label: "« Analyser le risque » inclus (identification faite, quota à 0)",
 		render: (locale) => ({
 			node: badge(
 				"analyser-inclus",
 				locale,
 				{ access: active(0) },
+				{ ...IDENTIFIED, cachedAccess: active(0) },
+			),
+		}),
+	},
+	{
+		id: "analyze-empty",
+		label: "« Analyser le risque » grisé (identification reprise, quota à 0)",
+		render: (locale) => ({
+			node: badge(
+				"analyser-grise",
+				locale,
+				{ access: active(0) },
 				{
 					storedIdentification: IDENTIFICATIONS.sure,
-					identifiedByUser: true,
+					identifiedByUser: false,
 					cachedAccess: active(0),
 				},
 			),
@@ -740,24 +694,107 @@ const IDENTIFY_PILLS: Stage[] = [
 	},
 ];
 
-const PANELS: Stage[] = [
+/** Pilule : analyse du risque, résultat et erreurs (produit déjà identifié). */
+const RISK_PILLS: Stage[] = [
 	{
-		id: "panel-identify-sure",
-		label: "panneau Identification, Sûr",
-		kind: "tall",
+		id: "risk-loading",
+		label: "analyse du risque en cours",
 		render: (locale) => ({
 			node: badge(
-				"panneau-id-sur",
+				"cours",
 				locale,
-				{ access: active(3) },
-				{ storedIdentification: IDENTIFICATIONS.sure, identifiedByUser: true },
+				{ access: active(3), events: SEARCHES.slice(0, 2) },
+				IDENTIFIED,
 			),
-			script: openIdentification,
+			script: clickAction(locale, "ai.analyzeRisk"),
 		}),
 	},
 	{
-		id: "panel-identify-uncertain",
-		label: "panneau Identification, Incertain",
+		id: "risk-loading-long",
+		label: "analyse en cours, ligne d'état de 200 caractères",
+		render: (locale) => ({
+			node: badge(
+				"long",
+				locale,
+				{
+					access: active(3),
+					events: [
+						{ type: "search", id: 1, query: LONG_QUERY, aspect: "scam" },
+					],
+				},
+				IDENTIFIED,
+			),
+			script: clickAction(locale, "ai.analyzeRisk"),
+		}),
+	},
+	...(["low", "medium", "high"] as const).map(
+		(level): Stage => ({
+			id: `risk-${level}`,
+			label: `résultat du risque, ${{ low: "faible", medium: "moyen", high: "élevé" }[level]}`,
+			render: (locale) => ({
+				node: badge(
+					`resultat-${level}`,
+					locale,
+					{ access: active(3) },
+					{
+						...IDENTIFIED,
+						stored:
+							level === "medium"
+								? { ...RESULTS.medium, professional: false }
+								: RESULTS[level],
+					},
+				),
+			}),
+		}),
+	),
+	{
+		id: "risk-error-relaunch",
+		label: "erreur d'analyse, interrompue (Relancer)",
+		render: (locale) => ({
+			node: badge(
+				"interrompue",
+				locale,
+				{
+					access: active(3),
+					events: SEARCHES.slice(0, 1),
+					outcome: { ok: false, error: { code: "stream_interrupted" } },
+				},
+				IDENTIFIED,
+			),
+			script: clickAction(locale, "ai.analyzeRisk"),
+		}),
+	},
+	{
+		id: "risk-error-launch",
+		label: "erreur d'analyse, message long (Analyser le risque)",
+		render: (locale) => ({
+			node: badge(
+				"erreur",
+				locale,
+				{
+					access: active(3),
+					outcome: { ok: false, error: { code: "analysis_failed" } },
+				},
+				IDENTIFIED,
+			),
+			script: clickAction(locale, "ai.analyzeRisk"),
+		}),
+	},
+];
+
+const PANELS: Stage[] = [
+	{
+		id: "panel-before",
+		label: "panneau avant l'analyse : produit, puis « Analyser le risque »",
+		kind: "tall",
+		render: (locale) => ({
+			node: badge("panneau-avant", locale, { access: active(3) }, IDENTIFIED),
+			script: openPanel,
+		}),
+	},
+	{
+		id: "panel-before-uncertain",
+		label: "panneau avant l'analyse, produit Incertain",
 		kind: "tall",
 		render: (locale) => ({
 			node: badge(
@@ -769,20 +806,40 @@ const PANELS: Stage[] = [
 					identifiedByUser: true,
 				},
 			),
-			script: openIdentification,
+			script: openPanel,
+		}),
+	},
+	{
+		id: "panel-after",
+		label: "panneau après l'analyse, « Détail du produit » ouvert",
+		kind: "tall",
+		render: (locale) => ({
+			node: badge(
+				"panneau-apres",
+				locale,
+				{ access: active(3) },
+				{ ...IDENTIFIED, stored: RESULTS.high },
+			),
+			script: steps(openResult, openDetail(locale)),
 		}),
 	},
 	{
 		id: "panel-high",
-		label: "panneau, résultat élevé",
+		label: "panneau, du clic sur Identifier au résultat élevé",
 		kind: "tall",
 		render: (locale) => ({
 			node: badge("panneau-eleve", locale, {
 				access: active(3),
+				identifyEvents: SEARCHES.slice(0, 1),
+				identifyOutcome: { ok: true, data: IDENTIFICATIONS.sure },
 				events: SEARCHES,
 				outcome: { ok: true, data: RESULTS.high },
 			}),
-			script: launchThenOpen,
+			script: steps(
+				clickAction(locale, "identify.launch"),
+				clickAction(locale, "ai.analyzeRisk"),
+				openResult,
+			),
 		}),
 	},
 	{
@@ -794,9 +851,9 @@ const PANELS: Stage[] = [
 				"panneau-pro",
 				locale,
 				{ access: active(3) },
-				{ stored: RESULTS.medium, professional: true },
+				{ ...IDENTIFIED, stored: RESULTS.medium, professional: true },
 			),
-			script: (root) => clickPill(root),
+			script: openResult,
 		}),
 	},
 	{
@@ -808,20 +865,25 @@ const PANELS: Stage[] = [
 				access: { status: "signedOut" },
 				loginFails: true,
 			}),
-			script: clickPill,
+			script: clickAction(locale, "identify.launch"),
 		}),
 	},
 	{
 		id: "panel-error-pricing",
-		label: "panneau, erreur avec lien vers les formules",
+		label: "panneau, erreur d'analyse avec lien vers les formules",
 		kind: "tall",
 		render: (locale) => ({
-			node: badge("panneau-formule", locale, {
-				access: active(3),
-				events: SEARCHES.slice(0, 1),
-				outcome: { ok: false, error: { code: "feature_not_in_plan" } },
-			}),
-			script: launchAndOpenWhileLoading,
+			node: badge(
+				"panneau-formule",
+				locale,
+				{
+					access: active(3),
+					events: SEARCHES.slice(0, 3),
+					outcome: { ok: false, error: { code: "feature_not_in_plan" } },
+				},
+				IDENTIFIED,
+			),
+			script: steps(clickAction(locale, "ai.analyzeRisk"), openWhileLoading),
 		}),
 	},
 	{
@@ -829,12 +891,17 @@ const PANELS: Stage[] = [
 		label: "panneau, session expirée pendant l'analyse",
 		kind: "tall",
 		render: (locale) => ({
-			node: badge("panneau-session", locale, {
-				access: active(3),
-				events: SEARCHES.slice(0, 1),
-				outcome: { ok: false, error: { code: "session_expired" } },
-			}),
-			script: launchAndOpenWhileLoading,
+			node: badge(
+				"panneau-session",
+				locale,
+				{
+					access: active(3),
+					events: SEARCHES.slice(0, 3),
+					outcome: { ok: false, error: { code: "session_expired" } },
+				},
+				IDENTIFIED,
+			),
+			script: steps(clickAction(locale, "ai.analyzeRisk"), openWhileLoading),
 		}),
 	},
 ];
@@ -996,8 +1063,8 @@ function renderStage(stage: Stage, locale: Locale, grid: HTMLElement) {
 }
 
 const GROUPS: Array<[string, Stage[]]> = [
-	["Pilule de la fiche", PILLS],
-	["Pilule Identifier", IDENTIFY_PILLS],
+	["Pilule : identification", IDENTIFY_PILLS],
+	["Pilule : analyse du risque", RISK_PILLS],
 	["Panneau", PANELS],
 	["Icônes des cartes", CARDS],
 ];

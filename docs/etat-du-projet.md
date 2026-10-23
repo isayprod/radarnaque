@@ -29,6 +29,7 @@ Radarnaque est une extension Chrome, Edge et Brave qui signale les annonces susp
 | 4b, partie 2 | Administration : Tableau de bord, Offre (dont `/pricing`) et Analyses | `feat/phase-4b-2` (au-dessus de `feat/phase-4b`) | terminée, non poussée |
 | Identification, partie 1 | Identification du produit, côté API (pipeline, base de critères, routes, quota, admin par étape) | `main` | fusionnée |
 | Identification, partie 2 | Identification du produit dans l'extension (pilule, panneau, file d'attente, cartes) | `feat/identification-2` (au-dessus de `main`) | terminée, non poussée ; partie 3 (admin, site) à faire |
+| Identification, pastille unique | Une seule pilule et un seul panneau : identification, puis analyse du risque | `feat/identification-pastille` (au-dessus de `feat/identification-2`) | terminée, non poussée ; vérifications sur les vrais sites à faire |
 | 5 | Paiement Stripe | — | à faire (les routes répondent 501) |
 | — | Passe de design (identité visuelle, maquettes) | — | à faire en dernier |
 
@@ -114,7 +115,7 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
   - d'un conseil adapté à la catégorie.
 
 ### Analyses IA, dans l'extension (phases 3b, 3c et 3d)
-- **Sur une annonce :** la pastille a un bouton « Analyser avec l'IA », et le panneau « Lancer une analyse IA ». Le résultat, en FR ou NL, **remplace** l'analyse locale : la pastille affiche alors le score IA avec la mention « IA ».
+- **Sur une annonce :** la pilule unique propose « Identifier », puis « Analyser le risque » ; le panneau a le même bouton. Le résultat, en FR ou NL, **remplace** l'analyse locale : la pastille affiche alors le score IA avec la mention « IA ».
 - **Lancement depuis la pastille :**
   - connecté, le bouton lance l'analyse tout de suite ;
   - non connecté, il ouvre la popup de connexion ;
@@ -147,14 +148,14 @@ Extension (WXT, React)  ──►  Caddy (une seule origine)  ──►  auth  (
 - **Pas encore fait :** `/privacy` n'en parle pas encore (partie 3). L'API doit être déployée avant l'extension.
 
 ### Identification du produit (partie 2, extension)
-- **Deux pilules :** « Identifier » (nommée « Identifier le produit ») puis « Analyser ». Au repos, le logo et « Identifier » ; en cours, la ligne d'état en direct ; ensuite le glyphe de confiance (● Sûr, ◐ Probable, ○ Incertain), la référence, le niveau et le pourcentage, sans couleur de risque. Deux candidats restants donnent « A ou B ? », aucun objet « Produit non identifié ».
-- **Panneau Identification :** à part du panneau d'analyse. Référence, niveau, critères (vu, contraire, non visible), candidats restants, accessoires, pages de référence (liens `https://` seulement) et déroulé replié. Pour un résultat incertain, l'encadré « À demander au vendeur » liste d'abord les critères « Non visibles sur les photos », puis la question, avec « Copier ».
-- **Quota :** « Identifier » consomme 1 analyse ; « Analyser » ensuite est incluse (« Inclus »), même quand il ne reste plus d'analyse. « Analyser » cliqué pendant une identification attend la fin de celle-ci.
+- **Une seule pilule (refonte « pastille unique », qui remplace les deux pilules « Identifier » et « Analyser ») :** au repos, le logo et « Identifier » ; en cours, la ligne d'état en direct ; ensuite le glyphe de confiance (● Sûr, ◐ Probable, ○ Incertain), la référence et le niveau (sans pourcentage), puis l'action « Analyser le risque » dans la même pilule. Deux candidats restants donnent « A ou B ? », aucun objet « Produit non identifié ». L'analyse du risque et son résultat gardent la pilule de risque d'avant.
+- **Un seul panneau, « Analyse Radarnaque » :** avant l'identification, la section Identification ; produit identifié, la section « Produit » (référence, niveau et pourcentage, critères, candidats restants, accessoires, pages de référence en `https://` seulement, déroulé replié) puis « Analyser le risque » ; risque analysé, le risque puis « Détail du produit » replié. Pour un résultat incertain, l'encadré « À demander au vendeur » liste les critères « Non visibles sur les photos », puis la question, avec « Copier ». Chaque lancement de l'analyse, dans la pilule ou dans le panneau, suit les mêmes règles d'accès.
+- **Quota :** « Identifier » consomme 1 analyse ; « Analyser le risque » ensuite est inclus (« Inclus avec l'identification »), même quand il ne reste plus d'analyse ; il est grisé sans inclusion ni analyse restante.
 - **Analyse complète :** l'analyse porte l'identification du produit ; son panneau commence par « Produit : référence (niveau) » et l'infobulle d'une carte par « référence · niveau ».
 - **Conservation :** identification et analyse sont gardées 24 h côté navigateur, à une seule place par annonce, effacées à la déconnexion, caduques si l'annonce change. Le choix « identifié à la demande de l'utilisateur » est gardé tant que la fiche ne change pas.
 - **Flux :** le service worker coupe à 310 s (`SCAN_TIMEOUT_MS`). Il valide et borne l'identification avant de la relayer à la page.
-- **Galerie :** `pnpm --filter extension gallery` montre les nouveaux états en FR et NL.
-- **Pas encore fait :** les vérifications sur les vrais sites (voir le [suivi](superpowers/plans/2026-10-23-identification-partie-2-suivi.md)), et la partie 3 (admin, site).
+- **Galerie :** `pnpm --filter extension gallery` montre tous les états de la pilule unique et du panneau (avant, après avec « Détail du produit ») en FR et NL.
+- **Pas encore fait :** les vérifications sur les vrais sites (voir le [suivi de la pastille unique](superpowers/plans/2026-10-23-identification-pastille-unique-suivi.md)), la régression « Vespa 946 Cheval » à traiter ensuite, et la partie 3 (admin, site).
 
 ### RGPD (phase 4a)
 - **Suppression du compte :**
