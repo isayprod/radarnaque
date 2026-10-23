@@ -48,7 +48,6 @@ type AiErrorKey = `ai.error.${(typeof AI_ERROR_CODES)[number]}`;
 // Textes de la section IA du panneau. `ai.remaining` utilise `{count}`.
 type AiKey =
 	| "ai.title"
-	| "ai.run"
 	| "ai.analyzeRisk"
 	| "ai.launchShort"
 	| "ai.retry"
@@ -162,7 +161,6 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"severity.warning": "Attention",
 		"severity.info": "Info",
 		"ai.title": "Analyse IA",
-		"ai.run": "Lancer une analyse IA",
 		"ai.analyzeRisk": "Analyser le risque",
 		"ai.launchShort": "Analyser",
 		"ai.retry": "Relancer",
@@ -286,7 +284,6 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"severity.warning": "Let op",
 		"severity.info": "Info",
 		"ai.title": "AI-analyse",
-		"ai.run": "AI-analyse starten",
 		"ai.analyzeRisk": "Risico analyseren",
 		"ai.launchShort": "Analyseren",
 		"ai.retry": "Opnieuw proberen",

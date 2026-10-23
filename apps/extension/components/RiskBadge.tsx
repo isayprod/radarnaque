@@ -304,7 +304,9 @@ export function RiskBadge({
 			locale={locale}
 			access={scan.access}
 			ai={scan.ai}
-			onScan={() => scan.scan()}
+			onScan={analyze}
+			empty={emptyAnalyze && !noSubscription}
+			included={scan.analysisIncluded && !noSubscription}
 			onLogin={scan.login}
 			loginUnavailable={scan.loginUnavailable}
 			pricingUrl={scan.pricingUrl}

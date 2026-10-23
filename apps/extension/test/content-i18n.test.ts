@@ -132,7 +132,6 @@ describe("textes de la section IA", () => {
 	test("les textes FR imposés", () => {
 		const expected: Record<string, string> = {
 			"ai.title": "Analyse IA",
-			"ai.run": "Lancer une analyse IA",
 			"ai.analyzeRisk": "Analyser le risque",
 			"ai.launchShort": "Analyser",
 			"ai.retry": "Relancer",

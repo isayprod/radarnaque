@@ -119,7 +119,7 @@ describe("AiSection : accès", () => {
 		expect(login.getAttribute("type")).toBe("button");
 		await user.click(login);
 		expect(props.onLogin).toHaveBeenCalledTimes(1);
-		expect(queryButton("Lancer une analyse IA")).toBeNull();
+		expect(queryButton("Analyser le risque")).toBeNull();
 		expect(
 			screen.queryByText(contentText("fr", "ai.loginFallback")),
 		).toBeNull();
@@ -146,7 +146,7 @@ describe("AiSection : accès", () => {
 		expect(link.getAttribute("href")).toBe(PRICING);
 		expect(link.getAttribute("target")).toBe("_blank");
 		expect(link.getAttribute("rel")).toBe("noopener");
-		expect(queryButton("Lancer une analyse IA")).toBeNull();
+		expect(queryButton("Analyser le risque")).toBeNull();
 	});
 
 	test("no photo-scan button : une seule action, quel que soit le plan", async () => {
@@ -157,12 +157,10 @@ describe("AiSection : accès", () => {
 			{ ...standard, unlimited: true, remaining: { scans: null } },
 		]) {
 			const { props, unmount } = setup({ access });
-			expect(button("Lancer une analyse IA").getAttribute("type")).toBe(
-				"button",
-			);
+			expect(button("Analyser le risque").getAttribute("type")).toBe("button");
 			expect(screen.getAllByRole("button")).toHaveLength(1);
 			expect(screen.queryByText(/photos/)).toBeNull();
-			await user.click(button("Lancer une analyse IA"));
+			await user.click(button("Analyser le risque"));
 			expect(props.onScan).toHaveBeenCalledTimes(1);
 			unmount();
 		}
@@ -182,8 +180,10 @@ describe("AiSection : analyse", () => {
 			ai: { status: "loading", progress },
 		});
 		const running = button("Analyse en cours…");
-		expect(running.hasAttribute("disabled")).toBe(true);
-		expect(queryButton("Lancer une analyse IA")).toBeNull();
+		// `aria-disabled` : le bouton garde le focus clavier pendant l'analyse.
+		expect(running.hasAttribute("disabled")).toBe(false);
+		expect(running.getAttribute("aria-disabled")).toBe("true");
+		expect(queryButton("Analyser le risque")).toBeNull();
 		await user.click(running);
 		expect(props.onScan).not.toHaveBeenCalled();
 		// Déroulé en direct : déplié, sans « Comment l'IA a analysé ».
@@ -244,7 +244,7 @@ describe("AiSection : analyse", () => {
 	test("done : le résultat remplace le bouton d'analyse texte", () => {
 		setup({ ai: done() });
 		expect(screen.getByText(result.summary.fr)).not.toBeNull();
-		expect(queryButton("Lancer une analyse IA")).toBeNull();
+		expect(queryButton("Analyser le risque")).toBeNull();
 	});
 
 	test("done : le texte de l'IA est rendu en texte, jamais en HTML", () => {
@@ -349,6 +349,16 @@ describe("AiSection : analyse", () => {
 	});
 });
 
+describe("AiSection : résultat sans identification", () => {
+	test("analyse terminée seule : le risque, sans « Détail du produit » ni bouton", () => {
+		const { container } = setup({ ai: done() });
+		expect(screen.getByText(result.summary.fr)).not.toBeNull();
+		expect(screen.queryByText("Détail du produit")).toBeNull();
+		expect(container.querySelector("details")).toBeNull();
+		expect(screen.queryAllByRole("button")).toHaveLength(0);
+	});
+});
+
 describe("AiSection : erreurs", () => {
 	test("quota_exhausted : message et lien vers pricingUrl", () => {
 		setup({ ai: { status: "error", code: "quota_exhausted" } });
@@ -387,8 +397,8 @@ describe("AiSection : erreurs", () => {
 			),
 		).not.toBeNull();
 		expect(screen.queryByRole("link")).toBeNull();
-		const retry = button("Lancer une analyse IA");
-		expect(retry.hasAttribute("disabled")).toBe(false);
+		const retry = button("Analyser le risque");
+		expect(retry.getAttribute("aria-disabled")).toBeNull();
 		await user.click(retry);
 		expect(props.onScan).toHaveBeenCalledTimes(1);
 	});
@@ -401,7 +411,7 @@ describe("AiSection : erreurs", () => {
 			expect(screen.getByRole("alert").textContent).toBe(
 				contentText("fr", `ai.error.${code}` as never),
 			);
-			expect(queryButton("Lancer une analyse IA")).toBeNull();
+			expect(queryButton("Analyser le risque")).toBeNull();
 			await user.click(button("Relancer"));
 			expect(props.onScan).toHaveBeenCalledTimes(1);
 		},
@@ -668,9 +678,9 @@ describe("AiSection : design du panneau", () => {
 		).toBeTruthy();
 	});
 
-	test("accès actif au repos : « Lancer une analyse IA » en pilule blanche", () => {
+	test("accès actif au repos : « Analyser le risque » en pilule blanche", () => {
 		setup();
-		expectWhitePill(button("Lancer une analyse IA"));
+		expectWhitePill(button("Analyser le risque"));
 	});
 
 	/** Pilule secondaire (DESIGN.md §3) : transparente, bordure --border-strong, texte --text-1. */
@@ -691,17 +701,17 @@ describe("AiSection : design du panneau", () => {
 		["quota_exhausted", "link", "Voir les formules"],
 		["session_expired", "button", "Se connecter"],
 	] as const)(
-		"erreur %s avec sa propre action : une seule pilule blanche, « Lancer une analyse IA » en secondaire",
+		"erreur %s avec sa propre action : une seule pilule blanche, « Analyser le risque » en secondaire",
 		(code, role, name) => {
 			setup({ ai: { status: "error", code } });
 			expectWhitePill(screen.getByRole(role, { name }));
-			expectSecondaryPill(button("Lancer une analyse IA"));
+			expectSecondaryPill(button("Analyser le risque"));
 		},
 	);
 
-	test("erreur sans action propre : « Lancer une analyse IA » reste la pilule blanche", () => {
+	test("erreur sans action propre : « Analyser le risque » reste la pilule blanche", () => {
 		setup({ ai: { status: "error", code: "analysis_failed" } });
-		expectWhitePill(button("Lancer une analyse IA"));
+		expectWhitePill(button("Analyser le risque"));
 	});
 
 	test("survol des pilules : pas de déplacement si l'utilisateur réduit les animations", () => {
@@ -710,8 +720,8 @@ describe("AiSection : design du panneau", () => {
 			"motion-reduce:hover:translate-y-0",
 		);
 		// La pilule secondaire ne se soulève jamais.
-		expect(button("Lancer une analyse IA").className).not.toContain(
-			"translate",
+		expect(button("Analyser le risque").className).not.toContain(
+			"hover:-translate",
 		);
 	});
 
@@ -798,11 +808,10 @@ describe("RiskAction : « Analyser le risque » du panneau", () => {
 	const action = () =>
 		screen.getByRole("button", { name: "Analyser le risque" });
 
-	test("pilule blanche pleine largeur, clic = onAnalyze, jamais « Lancer une analyse IA »", async () => {
+	test("pilule blanche pleine largeur, clic = onAnalyze", async () => {
 		const onAnalyze = render1();
 		expect(action().className).toContain("w-full");
 		expect(action().className).toContain("bg-white");
-		expect(screen.queryByText("Lancer une analyse IA")).toBeNull();
 		await userEvent.setup().click(action());
 		expect(onAnalyze).toHaveBeenCalledTimes(1);
 	});

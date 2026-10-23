@@ -809,9 +809,6 @@ describe("RiskBadge : analyse IA", () => {
 		await within(dialog).findByText(contentText("fr", "ai.loginHint"));
 		expect(ai.access).toHaveBeenCalledTimes(2);
 		expect(
-			screen.queryByRole("button", { name: contentText("fr", "ai.run") }),
-		).toBeNull();
-		expect(
 			screen.getAllByRole("button", { name: contentText("fr", "ai.login") }),
 		).toHaveLength(1);
 	});
@@ -2674,18 +2671,13 @@ describe("RiskBadge : une seule pilule, identification puis risque", () => {
 		expect(label?.textContent).toBe(contentText("fr", "identify.product"));
 		expect(label?.className).toContain("uppercase");
 		expect(region?.textContent).toBe(contentText("fr", "identify.title"));
-		// Puis le bouton pleine largeur, sans l'ancien « Lancer une analyse IA ».
+		// Puis le bouton pleine largeur, sans l'ancien bouton d'analyse.
 		const action = within(dialog).getByRole("button", { name: LAUNCH });
 		expect(action.className).toContain("w-full");
 		expect(
 			(label as HTMLElement).compareDocumentPosition(action) &
 				Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
-		expect(
-			within(dialog).queryByRole("button", {
-				name: contentText("fr", "ai.run"),
-			}),
-		).toBeNull();
 		// Aucune couleur sémantique du risque avant l'analyse.
 		for (const element of Array.from(dialog.querySelectorAll("*")))
 			expect(element.getAttribute("class") ?? "").not.toMatch(
@@ -2895,6 +2887,62 @@ describe("RiskBadge : une seule pilule, identification puis risque", () => {
 		expect(within(dialog).queryByRole("button", { name: LAUNCH })).toBeNull();
 	});
 
+	test("erreur d'analyse sans identification (annonce modifiée) : le panneau relance par le même bouton, sans ancien chemin", async () => {
+		const user = userEvent.setup();
+		scanReply.mockResolvedValueOnce({
+			ok: false,
+			error: { code: "analysis_failed" },
+		});
+		const accessCache = cached(active);
+		const view = await renderIdentified({ accessCache });
+		await user.click(product());
+		await user.click(
+			within(screen.getByRole("dialog")).getByRole("button", { name: LAUNCH }),
+		);
+		await vi.waitFor(() => expect(ai.scan).toHaveBeenCalledTimes(1));
+		await within(screen.getByRole("dialog")).findByText(
+			aiErrorText("fr", "analysis_failed"),
+		);
+		// Nouvelle version de l'annonce : l'identification est abandonnée, l'erreur reste.
+		view.rerender(
+			<RiskBadge
+				report={high}
+				listing={{ ...listing, title: "Vélo (prix baissé)" }}
+				locale="fr"
+				ai={ai}
+				accessCache={accessCache}
+				aiResults={storeWith(identifiedEntry())}
+			/>,
+		);
+		const dialog = screen.getByRole("dialog");
+		expect(within(dialog).queryByText("Détail du produit")).toBeNull();
+		expect(
+			within(dialog).queryByRole("button", { name: /Lancer une analyse/ }),
+		).toBeNull();
+		// Le même bouton que celui de la pilule, par `useLaunch` : un seul.
+		await user.click(within(dialog).getByRole("button", { name: LAUNCH }));
+		await vi.waitFor(() => expect(ai.scan).toHaveBeenCalledTimes(2));
+	});
+
+	test("analyse en cours : le bouton du panneau garde le focus, et un clic est ignoré", async () => {
+		const user = userEvent.setup();
+		pendingScan();
+		await renderIdentified({ accessCache: cached(active) });
+		await user.click(product());
+		const dialog = screen.getByRole("dialog");
+		const action = within(dialog).getByRole("button", { name: LAUNCH });
+		await user.click(action);
+		const running = within(dialog).getByRole("button", {
+			name: contentText("fr", "ai.loading"),
+		});
+		expect(running).toBe(action);
+		expect(running.getAttribute("aria-disabled")).toBe("true");
+		expect(document.activeElement).toBe(running);
+		await user.click(running);
+		expect(ai.scan).toHaveBeenCalledTimes(1);
+		expect(document.activeElement).toBe(running);
+	});
+
 	test("analyse du risque en cours : le panneau montre son déroulé", async () => {
 		const user = userEvent.setup();
 		pendingScan();
@@ -2907,8 +2955,8 @@ describe("RiskBadge : une seule pilule, identification puis risque", () => {
 		expect(
 			within(dialog)
 				.getByRole("button", { name: contentText("fr", "ai.loading") })
-				.hasAttribute("disabled"),
-		).toBe(true);
+				.getAttribute("aria-disabled"),
+		).toBe("true");
 	});
 
 	test("nl : partie produit « Identificatie: … Zeker », panneau en néerlandais", async () => {
