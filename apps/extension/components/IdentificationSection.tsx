@@ -176,7 +176,16 @@ function CheckItem({ check, locale }: { check: Check; locale: Locale }) {
 }
 
 /** Question au vendeur dans un encadré, avec « Copier » (« Copié » pendant 2 s). */
-function SellerQuestion({ locale, text }: { locale: Locale; text: string }) {
+function SellerQuestion({
+	locale,
+	text,
+	missing,
+}: {
+	locale: Locale;
+	text: string;
+	/** Critères non visibles sur les photos, dits au-dessus de la question. */
+	missing: string[];
+}) {
 	const [copied, setCopied] = useState(false);
 	const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	// Faux après le démontage : une copie terminée ensuite ne fait plus rien.
@@ -209,6 +218,14 @@ function SellerQuestion({ locale, text }: { locale: Locale; text: string }) {
 	return (
 		<div className="flex flex-col items-start gap-2 rounded-sm bg-white/5 px-3 py-2.5">
 			<p className={LABEL_CLASS}>{contentText(locale, "identify.askSeller")}</p>
+			{missing.length > 0 && (
+				<p className={`${META_CLASS} break-words`}>
+					{contentText(locale, "identify.notVisibleList").replace(
+						"{list}",
+						() => missing.join(", "),
+					)}
+				</p>
+			)}
 			<p className="m-0 break-words text-text-1">{text}</p>
 			<button
 				type="button"
@@ -265,11 +282,13 @@ function ResultView({
 	const question = result.sellerQuestion?.[locale] ?? "";
 	// `null` : illimité ou sans plafond (rien à dire, jamais « 0 »). Le résultat
 	// porte le décompte du serveur ; à défaut (repris du magasin), l'accès lu.
-	const remaining =
-		result.remaining?.scans ??
-		(access !== "loading" && !("error" in access) && access.status === "active"
+	const accessRemaining =
+		access !== "loading" && !("error" in access) && access.status === "active"
 			? access.remaining.scans
-			: null);
+			: null;
+	// Le repli sur l'accès ne vaut que si le résultat n'a pas de décompte : un
+	// `scans` nul dans le résultat dit « illimité » (comme `AiSection`).
+	const remaining = result.remaining ? result.remaining.scans : accessRemaining;
 	const live = progress && progress.steps.length > 0 ? progress : null;
 	const shownProgress = live ?? progressFromSearches(result.searches);
 	const hasSteps = shownProgress.steps.length > 0;
@@ -345,7 +364,19 @@ function ResultView({
 					</ul>
 				</div>
 			)}
-			{question && <SellerQuestion locale={locale} text={question} />}
+			{question && (
+				<SellerQuestion
+					locale={locale}
+					text={question}
+					missing={
+						result.status === "uncertain" && main
+							? main.checks
+									.filter((check) => check.observation === "not_visible")
+									.map((check) => check.text[locale])
+							: []
+					}
+				/>
+			)}
 			{accessories.length > 0 && (
 				<div className="flex flex-col gap-1.5">
 					<p className={LABEL_CLASS}>

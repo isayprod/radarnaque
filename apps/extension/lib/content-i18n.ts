@@ -92,6 +92,7 @@ type IdentifyKey =
 	| "identify.check.notVisible"
 	| "identify.candidates"
 	| "identify.askSeller"
+	| "identify.notVisibleList"
 	| "identify.copy"
 	| "identify.copied"
 	| "identify.accessories"
@@ -216,6 +217,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"identify.check.notVisible": "Non visible",
 		"identify.candidates": "Candidats restants",
 		"identify.askSeller": "À demander au vendeur",
+		"identify.notVisibleList": "Non visible sur les photos : {list}",
 		"identify.copy": "Copier",
 		"identify.copied": "Copié",
 		"identify.accessories": "Accessoires",
@@ -335,6 +337,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"identify.check.notVisible": "Niet zichtbaar",
 		"identify.candidates": "Overige kandidaten",
 		"identify.askSeller": "Te vragen aan de verkoper",
+		"identify.notVisibleList": "Niet zichtbaar op de foto's: {list}",
 		"identify.copy": "Kopiëren",
 		"identify.copied": "Gekopieerd",
 		"identify.accessories": "Accessoires",
