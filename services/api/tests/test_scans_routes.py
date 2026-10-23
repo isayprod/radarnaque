@@ -590,7 +590,7 @@ async def test_scan_response_has_debug_only_for_a_superuser(client, bearer, make
     assert r.status_code == 200, r.text
     debug = r.json()["debug"]
     assert debug["llmCalled"] is True and debug["fromCache"] is False
-    assert debug["promptVersion"] == {"scanKind": "full", "version": 2}
+    assert debug["promptVersion"] == {"scanKind": "full", "version": 3}
     assert debug["analysisId"] == r.json()["analysisId"]
     assert "Bearer" not in r.text  # le JWT reçu n'est jamais renvoyé
 

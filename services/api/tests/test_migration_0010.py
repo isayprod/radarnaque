@@ -57,12 +57,12 @@ async def test_upgrade_creates_tables_and_seeds_steps(db):
     ][0]
     assert await _rows(
         db,
-        "select code, active_model_id, active_prompt_version_id from app.pipeline_steps"
+        "select code, active_model_id, active_prompt_version_id is not null from app.pipeline_steps"
         " order by code",
     ) == [
-        ("criteria", full_model, None),
-        ("identify", full_model, None),
-        ("read_photos", full_model, None),
+        ("criteria", full_model, True),  # prompts créés par 0011
+        ("identify", full_model, True),
+        ("read_photos", full_model, True),
     ]
     tables = await _rows(
         db,
@@ -131,7 +131,7 @@ async def test_prompt_version_needs_exactly_one_owner(db):
 async def test_step_prompt_versions_are_unique_per_step(db):
     await db.rollback()
     insert = text(
-        "insert into app.prompt_versions(step, version, system_prompt) values ('criteria', 1, 'x')"
+        "insert into app.prompt_versions(step, version, system_prompt) values ('criteria', 99, 'x')"
     )
     await db.execute(insert)
     with pytest.raises(IntegrityError):
