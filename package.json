@@ -28,6 +28,8 @@
 		"dev:stop": "docker compose -f infra/docker-compose.dev.yml stop caddy searxng postgres",
 		"e2e:login": "tsx scripts/e2e-login.ts",
 		"e2e:scan": "tsx scripts/e2e-scan.ts",
+		"e2e:identify": "tsx scripts/e2e-identify.ts",
+		"eval:identify": "cd services/api && uv run --env-file ../../infra/.env radarnaque-eval-identify evals/identify.jsonl",
 		"llm:stub": "node scripts/llm-stub.mjs",
 		"typecheck:scripts": "tsc -p scripts"
 	},
