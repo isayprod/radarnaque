@@ -40,29 +40,49 @@
 	--tw-ring-shadow: 0 0 transparent;
 }
 
-/* Analyse en cours : points de suspension après 4 s sans événement (`is-waiting`).
+/* Analyse en cours : trois points de largeur fixe (`.rq-dots`, toujours présents),
+   invisibles au repos ; après 4 s sans événement (`is-waiting`) seule leur opacité
+   s'anime, sans jamais changer la largeur de la pastille.
    Le logo animé et le reflet de la ligne d'état viennent de motion.css. */
-@keyframes radarnaque-dots {
-	to {
-		width: 1.2em;
+@keyframes radarnaque-dot {
+	0%,
+	100% {
+		opacity: 0.15;
+	}
+	40% {
+		opacity: 1;
 	}
 }
 
-.radarnaque-status.is-waiting::after {
-	content: "...";
-	display: inline-block;
-	overflow: hidden;
-	width: 0;
-	vertical-align: bottom;
-	animation: radarnaque-dots 1.2s steps(4, end) infinite;
+.radarnaque-status .rq-dots {
+	opacity: 0;
 }
 
-/* Animations réduites : les points ne s'animent plus, l'attente reste indiquée par
-   des points fixes (motion.css coupe déjà la rotation du logo et le reflet). */
+/* Le point est du contenu CSS : le texte de la ligne reste celui de l'événement. */
+.radarnaque-status .rq-dots > span::before {
+	content: ".";
+}
+
+.radarnaque-status.is-waiting .rq-dots {
+	opacity: 1;
+}
+
+.radarnaque-status.is-waiting .rq-dots > span {
+	animation: radarnaque-dot 1.2s ease-in-out infinite;
+}
+
+.radarnaque-status.is-waiting .rq-dots > span:nth-child(2) {
+	animation-delay: 0.2s;
+}
+
+.radarnaque-status.is-waiting .rq-dots > span:nth-child(3) {
+	animation-delay: 0.4s;
+}
+
+/* Animations réduites : points fixes, l'attente reste indiquée (motion.css coupe déjà
+   la rotation du logo et le reflet). */
 @media (prefers-reduced-motion: reduce) {
-	.radarnaque-status.is-waiting::after {
-		content: "…";
-		width: auto;
+	.radarnaque-status.is-waiting .rq-dots > span {
 		animation: none;
 	}
 }

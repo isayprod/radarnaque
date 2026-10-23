@@ -48,8 +48,9 @@ export function useThrottled(text: string, ms = ANNOUNCE_MS): string {
 
 /**
  * Ligne d'état visible : le texte balayé par un reflet (`rq-shimmer`, coupé si
- * l'utilisateur réduit les animations), tronqué s'il est trop long, et des points
- * de suspension pendant une attente (`is-waiting`). Masquée aux lecteurs d'écran,
+ * l'utilisateur réduit les animations), tronqué s'il est trop long, et trois points
+ * de largeur fixe, toujours présents, dont l'opacité s'anime pendant une attente
+ * (`is-waiting`) : la pastille ne change jamais de largeur. Masquée aux lecteurs d'écran,
  * qui ont leur propre région `aria-live` ralentie.
  */
 export function LiveLine({
@@ -62,9 +63,17 @@ export function LiveLine({
 	return (
 		<span
 			aria-hidden="true"
-			className={`radarnaque-status inline-flex min-w-0 items-baseline text-text-2${waiting ? " is-waiting" : ""}`}
+			className={`radarnaque-status inline-flex max-w-[220px] min-w-0 items-baseline text-text-2${waiting ? " is-waiting" : ""}`}
 		>
 			<span className="rq-shimmer min-w-0 truncate">{text}</span>
+			<span
+				aria-hidden="true"
+				className="rq-dots inline-block w-[1.2em] shrink-0"
+			>
+				<span />
+				<span />
+				<span />
+			</span>
 		</span>
 	);
 }
