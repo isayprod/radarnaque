@@ -1,4 +1,8 @@
-import type { Locale, ScanProgressEvent } from "@radarnaque/shared";
+import type {
+	IdentificationResult,
+	Locale,
+	ScanProgressEvent,
+} from "@radarnaque/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiSectionProps } from "../../components/AiSection";
 import { PUBLIC_URL } from "../config";
@@ -13,6 +17,8 @@ import {
 import {
 	type AiClient,
 	CANCELLED,
+	type IdentifyHandle,
+	type IdentifyState,
 	type ScanHandle,
 	type ScanState,
 	scanOutcome,
@@ -43,6 +49,17 @@ interface Slots {
 	 * revient à `idle` et la pastille à « Analyser » (I2).
 	 */
 	doneFingerprint: string | null;
+	/** L'identification du produit : une seule place, à côté de l'analyse. */
+	identification: IdentifyState;
+	/** Empreinte de l'annonce identifiée pour l'état `done` (même règle que l'analyse). */
+	identifiedFingerprint: string | null;
+	/** L'identification `done` vient d'un « Identifier » de l'utilisateur. */
+	identifiedByUser: boolean;
+	/**
+	 * « Analyser » demandé pendant l'identification : l'empreinte de l'annonce
+	 * identifiée. La file ne vaut que tant que l'annonce affichée a cette empreinte.
+	 */
+	queuedFingerprint: string | null;
 	/**
 	 * Relance sans cache en cours (superuser) : le résultat affiché reste en
 	 * place, seul le bouton de la section Debug l'indique.
@@ -65,10 +82,20 @@ interface Slots {
 interface Scope {
 	key: string;
 	/**
-	 * Analyse en cours (une à la fois) : annulée au changement d'annonce et au
-	 * démontage, ce qui ferme son port et rend le scan côté serveur.
+	 * Analyse ou identification en cours (une à la fois) : annulée au changement
+	 * d'annonce et au démontage, ce qui ferme son port et rend le scan côté serveur.
 	 */
-	inflight: ScanHandle | null;
+	inflight: ScanHandle | IdentifyHandle | null;
+	/**
+	 * Identification en cours : l'empreinte de l'annonce identifiée ; null sinon.
+	 * « Analyser » est alors mis en file.
+	 */
+	identifying: string | null;
+	/**
+	 * « Analyser » mis en file pendant l'identification. La portée étant remplacée
+	 * au changement d'annonce, la file d'une autre annonce est oubliée avec elle.
+	 */
+	queued: boolean;
 	/** Une lecture de l'accès est en cours. */
 	reading: boolean;
 	/** Numéro de la dernière lecture de l'accès : seules ses réponses comptent. */
@@ -78,6 +105,24 @@ interface Scope {
 }
 
 const IDLE: ScanState = { status: "idle" };
+const IDENTIFY_IDLE: IdentifyState = { status: "idle" };
+
+/** Étapes de l'identification dans le flux d'une analyse. */
+const IDENTIFY_STAGES: ReadonlySet<string> = new Set([
+	"reading_photos",
+	"criteria",
+	"identifying",
+	"retrying",
+]);
+
+/**
+ * Événement de progression de l'identification dans le flux d'une analyse : il
+ * alimente la pilule « Identifier », pas le déroulé de l'analyse.
+ */
+const isIdentifyProgress = (e: ScanProgressEvent): boolean =>
+	e.type === "criteria_cached" ||
+	e.type === "page_read" ||
+	(e.type === "stage" && IDENTIFY_STAGES.has(e.stage));
 
 const freshSlots = (
 	key: string,
@@ -88,22 +133,48 @@ const freshSlots = (
 	access,
 	ai: IDLE,
 	doneFingerprint: null,
+	identification: IDENTIFY_IDLE,
+	identifiedFingerprint: null,
+	identifiedByUser: false,
+	queuedFingerprint: null,
 	rescanning: false,
 	rescanError: null,
 	loginUnavailable: false,
 	restoring,
 });
 
-/** Un état `done` d'une autre version de l'annonce revient à `idle` (I2). */
+/**
+ * Un état `done` d'une autre version de l'annonce revient à `idle` (I2), pour
+ * l'analyse comme pour l'identification ; la file d'« Analyser » est oubliée.
+ */
 function dropStale(slots: Slots, fingerprint: string): Slots {
-	if (slots.ai.status !== "done" || slots.doneFingerprint === fingerprint)
-		return slots;
-	return { ...slots, ai: IDLE, doneFingerprint: null };
+	const staleAi =
+		slots.ai.status === "done" && slots.doneFingerprint !== fingerprint;
+	const staleIdentification =
+		slots.identification.status === "done" &&
+		slots.identifiedFingerprint !== fingerprint;
+	const staleQueue =
+		slots.queuedFingerprint !== null && slots.queuedFingerprint !== fingerprint;
+	if (!staleAi && !staleIdentification && !staleQueue) return slots;
+	return {
+		...slots,
+		...(staleAi ? { ai: IDLE, doneFingerprint: null } : {}),
+		...(staleIdentification
+			? {
+					identification: IDENTIFY_IDLE,
+					identifiedFingerprint: null,
+					identifiedByUser: false,
+				}
+			: {}),
+		...(staleQueue ? { queuedFingerprint: null } : {}),
+	};
 }
 
 const freshScope = (key: string): Scope => ({
 	key,
 	inflight: null,
+	identifying: null,
+	queued: false,
 	reading: false,
 	accessSeq: 0,
 	storeRead: false,
@@ -126,7 +197,25 @@ export interface AiScan {
 	 * panneau passe à `active` sans rechargement.
 	 */
 	loadAccess(): void;
+	/**
+	 * Lance l'analyse. Pendant une identification, elle est mise en file
+	 * (`queued`) et part à la fin de l'identification, réussie ou non.
+	 */
 	scan(): void;
+	/** L'identification du produit : `loading` porte sa propre progression. */
+	identification: IdentifyState;
+	/**
+	 * Lance l'identification seule ; rien si une identification ou une analyse
+	 * est déjà en cours.
+	 */
+	identify(): void;
+	/** « Analyser » demandé pendant une identification, en attente de sa fin. */
+	queued: boolean;
+	/**
+	 * L'identification affichée vient d'un « Identifier » de l'utilisateur et
+	 * aucune analyse n'est faite : l'analyse est incluse avec l'identification.
+	 */
+	analysisIncluded: boolean;
 	/**
 	 * Superuser : relance l'analyse avec `noCache: true`. Le résultat affiché
 	 * reste en place pendant la relance (`rescanning`) ; il est remplacé par un
@@ -192,6 +281,9 @@ export function useAiScan(
 	// Même annonce, autre version (prix, description…) : l'ancien verdict IA
 	// n'est plus affiché, sans un rendu avec lui.
 	const fingerprint = listingFingerprint(view.listing);
+	// La file d'« Analyser » ne vaut que pour la version identifiée de l'annonce.
+	if (scopeRef.current.queued && scopeRef.current.identifying !== fingerprint)
+		scopeRef.current.queued = false;
 	const fresh = dropStale(slots, fingerprint);
 	if (fresh !== slots) {
 		slots = fresh;
@@ -264,6 +356,35 @@ export function useAiScan(
 		[patch],
 	);
 
+	/**
+	 * État de l'identification. Un `done` retient l'empreinte de l'annonce
+	 * identifiée et `byUser` (« Identifier » de l'utilisateur) ; `onlyIfIdle` :
+	 * pas d'écrasement d'une identification en cours ou finie.
+	 */
+	const setIdentification = useCallback(
+		(
+			scope: Scope,
+			state: IdentifyState,
+			identified?: string,
+			byUser = false,
+			onlyIfIdle = false,
+		) =>
+			patch(scope, (prev) =>
+				onlyIfIdle && prev.identification.status !== "idle"
+					? prev
+					: {
+							...prev,
+							identification: state,
+							identifiedFingerprint:
+								state.status === "done" && identified !== undefined
+									? identified
+									: null,
+							identifiedByUser: state.status === "done" && byUser,
+						},
+			),
+		[patch],
+	);
+
 	// Une seule lecture du magasin par annonce (portée), jamais un scan.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: `key` déclenche la lecture pour chaque annonce
 	useEffect(() => {
@@ -273,15 +394,25 @@ export function useAiScan(
 		const { site, externalId } = viewRef.current.listing;
 		const adopt = (entry: StoredAiResult | null) => {
 			const current = listingFingerprint(viewRef.current.listing);
-			// Résultat partiel (carte) ou annonce changée depuis l'analyse : pastille au repos.
-			if (
-				!entry?.result ||
-				entry.result.partial ||
-				entry.fingerprint !== current
-			)
-				return;
-			// I1 : jamais le quota restant de l'époque. Un scan en cours ou fini
-			// (pas `idle`) l'emporte sur l'entrée lue. Aucun déroulé n'est gardé.
+			// Annonce changée depuis l'analyse ou l'identification : pilules au repos.
+			if (!entry || entry.fingerprint !== current) return;
+			// Identification et analyse reprises séparément. I1 : jamais le quota
+			// restant de l'époque. Une requête en cours ou finie (pas `idle`)
+			// l'emporte sur l'entrée lue. Aucun déroulé n'est gardé.
+			if (entry.identification)
+				setIdentification(
+					scope,
+					{
+						status: "done",
+						result: withoutRemaining(entry.identification),
+						progress: null,
+					},
+					entry.fingerprint,
+					entry.identifiedByUser,
+					true,
+				);
+			// Résultat partiel (carte) : pastille « Analyser ».
+			if (!entry.result || entry.result.partial) return;
 			setAi(
 				scope,
 				{
@@ -299,7 +430,7 @@ export function useAiScan(
 			patch(scope, (prev) => ({ ...prev, restoring: false }));
 		};
 		void aiResults.get(site, externalId).then(settled, () => settled(null));
-	}, [aiResults, key, setAi, patch]);
+	}, [aiResults, key, setAi, setIdentification, patch]);
 
 	const readAccess = useCallback(
 		(scope: Scope) => {
@@ -336,27 +467,60 @@ export function useAiScan(
 		if (access) patch(scope, (prev) => ({ ...prev, access }));
 	}, [readAccess, patch, cache, key]);
 
+	/** La requête d'un clic : l'annonce et le rapport les plus récents. */
+	const requestFor = useCallback((noCache: boolean): ScanRequest => {
+		const { listing, report } = viewRef.current;
+		return {
+			listing,
+			signals: report.signals,
+			rulesVersion: report.rulesVersion,
+			trigger: "button",
+			// Fiche lue en entier : `partial` ne vaut vrai que pour un scan depuis une carte.
+			partial: false,
+			// Clé absente d'un scan ordinaire : le serveur l'ignore de toute façon
+			// pour un compte qui n'est pas superuser.
+			...(noCache ? { noCache: true } : {}),
+		};
+	}, []);
+
+	/**
+	 * Fin d'une requête, réussie ou non : session expirée (R8), l'accès en cache
+	 * ne vaut plus, pour les icônes de cartes aussi ; puis l'accès est relu.
+	 */
+	const afterRequest = useCallback(
+		(scope: Scope, state: ScanState | IdentifyState) => {
+			if (state.status === "error" && RELOGIN_CODES.has(state.code))
+				cache.invalidate();
+			// Quota consommé, session expirée (R3 : l'accès relu dit alors signedOut) :
+			// l'accès est relu après chaque requête, réussie ou non, même actif en cache.
+			if (current(scope)) readAccess(scope);
+		},
+		[cache, current, readAccess],
+	);
+
 	const run = useCallback(
 		(noCache: boolean) => {
 			const scope = scopeRef.current;
+			if (!current(scope)) return;
+			// « Analyser » pendant une identification : mis en file, sans requête.
+			if (scope.identifying !== null) {
+				if (noCache) return;
+				scope.queued = true;
+				const queuedFingerprint = scope.identifying;
+				patch(scope, (prev) => ({ ...prev, queuedFingerprint }));
+				return;
+			}
 			// Une analyse en cours (scan ou relance) : pas de seconde (double clic).
-			if (scope.inflight || !current(scope)) return;
-			const { listing, report } = viewRef.current;
-			const request: ScanRequest = {
-				listing,
-				signals: report.signals,
-				rulesVersion: report.rulesVersion,
-				trigger: "button",
-				// Fiche lue en entier : `partial` ne vaut vrai que pour un scan depuis une carte.
-				partial: false,
-				// Clé absente d'un scan ordinaire : le serveur l'ignore de toute façon
-				// pour un compte qui n'est pas superuser.
-				...(noCache ? { noCache: true } : {}),
-			};
+			if (scope.inflight) return;
+			const request = requestFor(noCache);
+			const { listing } = request;
 			const analysed = listingFingerprint(listing);
 			// Suivie ici, hors de l'état React : le résultat final la garde (déroulé
 			// du panneau), y compris celui d'une relance.
 			let progress = startProgress(Date.now());
+			// Progression de l'identification faite par le pipeline de l'analyse : le
+			// déroulé de la pilule « Identifier », à part de celui de l'analyse.
+			let identifyProgress = startProgress(Date.now());
 			if (noCache) {
 				// Relance : le résultat affiché reste en place (pas de retour à
 				// « Analyser »), seul le bouton de la section Debug change.
@@ -368,9 +532,73 @@ export function useAiScan(
 			} else setAi(scope, { status: "loading", progress });
 			debugLog?.group("scan demandé", request);
 
+			/**
+			 * Identification `done` venue de l'analyse. Pour la même empreinte, une
+			 * identification de l'utilisateur le reste.
+			 */
+			const identified = (result: IdentificationResult) => {
+				const seen = identifyProgress.steps.length > 0;
+				const followed = identifyProgress;
+				patch(scope, (prev) => ({
+					...prev,
+					identification: {
+						status: "done",
+						result,
+						progress: seen
+							? followed
+							: prev.identification.status === "done"
+								? prev.identification.progress
+								: null,
+					},
+					identifiedFingerprint: analysed,
+					identifiedByUser:
+						prev.identification.status === "done" &&
+						prev.identifiedFingerprint === analysed &&
+						prev.identifiedByUser,
+				}));
+			};
+			/**
+			 * État de l'identification pendant l'analyse, sauf si elle est déjà
+			 * `done` (reprise, ou identifiée avant) : elle n'est pas remise en cours.
+			 */
+			const identifying = (state: IdentifyState) =>
+				patch(scope, (prev) =>
+					prev.identification.status === "done"
+						? prev
+						: {
+								...prev,
+								identification: state,
+								identifiedFingerprint: null,
+								identifiedByUser: false,
+							},
+				);
+			/** L'identification encore en cours à la fin de l'analyse prend `state`. */
+			const settleIdentifying = (state: IdentifyState) =>
+				patch(scope, (prev) =>
+					prev.identification.status === "loading"
+						? { ...prev, identification: state }
+						: prev,
+				);
+
 			const onEvent = (e: ScanProgressEvent) => {
 				// Événement d'une annonce quittée, ou après le démontage : ignoré.
 				if (!current(scope)) return;
+				if (
+					e.type === "identification" ||
+					e.type === "identification_error" ||
+					isIdentifyProgress(e)
+				) {
+					// Relance sans cache : l'identification affichée n'est pas touchée.
+					if (noCache) return;
+					identifyProgress = addEvent(identifyProgress, e, Date.now());
+					if (e.type === "identification") {
+						const { type: _, ...result } = e;
+						identified(result);
+					} else if (e.type === "identification_error")
+						identifying({ status: "error", code: e.code });
+					else identifying({ status: "loading", progress: identifyProgress });
+					return;
+				}
 				progress = addEvent(progress, e, Date.now());
 				if (noCache) return;
 				const loading: ScanState = { status: "loading", progress };
@@ -385,12 +613,13 @@ export function useAiScan(
 				if (state.status === "error" && state.code === CANCELLED) return;
 				debugLog?.group("scan reçu", scanOutcome(state));
 				// Gardé 24 h, même si l'annonce affichée a changé entre-temps :
-				// l'entrée porte l'empreinte de l'annonce lue au clic.
+				// l'entrée porte l'empreinte de l'annonce lue au clic. L'analyse ne
+				// change pas `identifiedByUser` (le magasin le garde pour la même empreinte).
 				if (state.status === "done")
 					void aiResults
 						?.put(listing.site, listing.externalId, {
 							result: state.result,
-							identification: null,
+							identification: state.result.identification ?? null,
 							identifiedByUser: false,
 							fingerprint: analysed,
 							storedAt: Date.now(),
@@ -407,13 +636,16 @@ export function useAiScan(
 						rescanError: code,
 					}));
 				} else setAi(scope, state, analysed);
-				// R8 : session expirée, l'accès en cache ne vaut plus, pour les
-				// icônes de cartes aussi.
-				if (state.status === "error" && RELOGIN_CODES.has(state.code))
-					cache.invalidate();
-				// Quota consommé, session expirée (R3 : l'accès relu dit alors signedOut) :
-				// l'accès est relu après chaque scan, réussi ou non, même actif en cache.
-				if (current(scope)) readAccess(scope);
+				// L'identification du résultat devient celle affichée ; sans elle, une
+				// identification restée en cours revient au repos (analyse réussie) ou
+				// prend l'erreur de l'analyse.
+				if (state.status === "done") {
+					const embedded = state.result.identification;
+					if (embedded) identified(embedded);
+					else settleIdentifying(IDENTIFY_IDLE);
+				} else if (state.status === "error")
+					settleIdentifying({ status: "error", code: state.code });
+				afterRequest(scope, state);
 			};
 
 			const handle = client.scan(request, onEvent);
@@ -428,11 +660,97 @@ export function useAiScan(
 				() => finish({ status: "error", code: "background_unavailable" }),
 			);
 		},
-		[client, current, patch, setAi, readAccess, cache, aiResults, debugLog],
+		[
+			client,
+			current,
+			patch,
+			setAi,
+			requestFor,
+			afterRequest,
+			aiResults,
+			debugLog,
+		],
 	);
 
 	const scan = useCallback(() => run(false), [run]);
 	const rescan = useCallback(() => run(true), [run]);
+
+	const identify = useCallback(() => {
+		const scope = scopeRef.current;
+		// Une identification ou une analyse en cours : pas de seconde (double clic).
+		if (scope.inflight || !current(scope)) return;
+		const request = requestFor(false);
+		const { listing } = request;
+		const identified = listingFingerprint(listing);
+		let progress = startProgress(Date.now());
+		setIdentification(scope, { status: "loading", progress });
+		debugLog?.group("identification demandée", request);
+
+		const onEvent = (e: ScanProgressEvent) => {
+			if (!current(scope)) return;
+			progress = addEvent(progress, e, Date.now());
+			const loading: IdentifyState = { status: "loading", progress };
+			patch(scope, (prev) =>
+				prev.identification.status === "loading"
+					? { ...prev, identification: loading }
+					: prev,
+			);
+		};
+		const finish = (state: IdentifyState) => {
+			if (scope.inflight === handle) {
+				scope.inflight = null;
+				scope.identifying = null;
+			}
+			// Annulée (autre annonce, démontage) : la portée et sa file sont oubliées.
+			if (state.status === "error" && state.code === CANCELLED) return;
+			debugLog?.group("identification reçue", scanOutcome(state));
+			if (state.status === "done")
+				void aiResults
+					?.put(listing.site, listing.externalId, {
+						result: null,
+						identification: state.result,
+						identifiedByUser: true,
+						fingerprint: identified,
+						storedAt: Date.now(),
+					})
+					.catch(() => {});
+			setIdentification(scope, state, identified, true);
+			afterRequest(scope, state);
+			// La file part, réussie ou non, si l'annonce affichée est celle identifiée.
+			const queued = scope.queued;
+			scope.queued = false;
+			patch(scope, (prev) => ({ ...prev, queuedFingerprint: null }));
+			if (
+				queued &&
+				current(scope) &&
+				listingFingerprint(viewRef.current.listing) === identified
+			)
+				run(false);
+		};
+
+		const handle = client.identify(request, onEvent);
+		scope.inflight = handle;
+		scope.identifying = identified;
+		void handle.done.then(
+			(response) =>
+				finish(
+					response.ok
+						? { status: "done", result: response.data, progress }
+						: { status: "error", code: response.error.code },
+				),
+			() => finish({ status: "error", code: "background_unavailable" }),
+		);
+	}, [
+		client,
+		current,
+		patch,
+		setIdentification,
+		requestFor,
+		afterRequest,
+		aiResults,
+		debugLog,
+		run,
+	]);
 
 	const login = useCallback(() => {
 		const scope = scopeRef.current;
@@ -448,6 +766,13 @@ export function useAiScan(
 	return {
 		access: slots.access ?? "loading",
 		ai: slots.ai,
+		identification: slots.identification,
+		identify,
+		queued: slots.queuedFingerprint !== null,
+		analysisIncluded:
+			slots.identification.status === "done" &&
+			slots.identifiedByUser &&
+			slots.ai.status !== "done",
 		loginUnavailable: slots.loginUnavailable,
 		pricingUrl: `${PUBLIC_URL}/pricing/?lang=${locale}`,
 		loadAccess,

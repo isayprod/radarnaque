@@ -73,6 +73,7 @@ beforeEach(() => {
 			done: scanReply(req),
 			cancel: () => {},
 		})),
+		identify: vi.fn<AiClient["identify"]>(),
 		openLogin: vi.fn<AiClient["openLogin"]>(async () => ({
 			ok: true,
 			data: null,

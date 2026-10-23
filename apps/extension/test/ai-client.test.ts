@@ -3,7 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 import { createAiClient } from "../lib/content/ai-client";
 import type { ScanRequest } from "../lib/messages";
 import { type PortLike, SCAN_PORT } from "../lib/scan-port";
-import { sampleAnalysis } from "./helpers";
+import { sampleAnalysis, sampleIdentification } from "./helpers";
 
 const request = { trigger: "button", partial: false } as ScanRequest;
 
@@ -177,6 +177,52 @@ describe("createAiClient : scan par le port scan/stream", () => {
 			error: { code: "stream_interrupted" },
 		});
 		expect(onEvent).not.toHaveBeenCalled();
+	});
+});
+
+describe("createAiClient : identification par le port scan/stream", () => {
+	test("identify sends purpose identify on the scan port and resolves with the identification", async () => {
+		const fake = contentPort();
+		const client = createAiClient(fake.connect, neverSent);
+		const events: ScanProgressEvent[] = [];
+		const { done } = client.identify(request, (e) => events.push(e));
+
+		expect(fake.connect).toHaveBeenCalledWith(SCAN_PORT);
+		expect(fake.port.postMessage.mock.calls).toEqual([
+			[{ ...request, purpose: "identify" }],
+		]);
+		const stage = { type: "stage", stage: "reading_photos" } as const;
+		fake.receive({ type: "event", event: stage });
+		fake.receive({ type: "result", result: sampleIdentification });
+		fake.drop();
+
+		await expect(done).resolves.toEqual({
+			ok: true,
+			data: sampleIdentification,
+		});
+		expect(events).toEqual([stage]);
+	});
+
+	test("une fin d'une autre forme que celle demandée donne invalid_response", async () => {
+		const fake = contentPort();
+		const client = createAiClient(fake.connect, neverSent);
+		const identify = client.identify(request, vi.fn());
+		fake.receive({ type: "result", result: sampleAnalysis });
+		await expect(identify.done).resolves.toEqual({
+			ok: false,
+			error: { code: "invalid_response" },
+		});
+
+		const other = contentPort();
+		const scan = createAiClient(other.connect, neverSent).scan(
+			request,
+			vi.fn(),
+		);
+		other.receive({ type: "result", result: sampleIdentification });
+		await expect(scan.done).resolves.toEqual({
+			ok: false,
+			error: { code: "invalid_response" },
+		});
 	});
 });
 

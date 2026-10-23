@@ -29,6 +29,7 @@ beforeEach(() => {
 			done: Promise.resolve({ ok: true, data: sampleAnalysis }),
 			cancel: vi.fn(),
 		})),
+		identify: vi.fn<AiClient["identify"]>(),
 		openLogin: vi.fn<AiClient["openLogin"]>(),
 	};
 });

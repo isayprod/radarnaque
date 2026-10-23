@@ -45,6 +45,13 @@ const ai: AiClient = {
 		done: Promise.resolve({ ok: false, error: { code: "analysis_failed" } }),
 		cancel: () => {},
 	}),
+	identify: () => ({
+		done: Promise.resolve({
+			ok: false,
+			error: { code: "identification_failed" },
+		}),
+		cancel: () => {},
+	}),
 	openLogin: async () => ({ ok: true, data: null }),
 };
 

@@ -14,6 +14,7 @@
 import "@radarnaque/design/fonts.css";
 import type {
 	AnalysisResult,
+	IdentificationResult,
 	Locale,
 	ScanProgressEvent,
 } from "@radarnaque/shared";
@@ -247,6 +248,18 @@ function fakeClient(plan: ClientPlan): AiClient {
 					for (const timer of timers) clearTimeout(timer);
 					settle({ ok: false, error: { code: "cancelled" } });
 				},
+			};
+		},
+		// Pas encore de scénario d'identification dans la galerie : elle ne finit
+		// qu'à l'annulation.
+		identify() {
+			let settle!: (response: BgResponse<IdentificationResult>) => void;
+			const done = new Promise<BgResponse<IdentificationResult>>((resolve) => {
+				settle = resolve;
+			});
+			return {
+				done,
+				cancel: () => settle({ ok: false, error: { code: "cancelled" } }),
 			};
 		},
 		openLogin: async () =>

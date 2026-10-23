@@ -1,4 +1,8 @@
-import type { AnalysisResult, ScanProgressEvent } from "@radarnaque/shared";
+import type {
+	AnalysisResult,
+	IdentificationResult,
+	ScanProgressEvent,
+} from "@radarnaque/shared";
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import {
@@ -7,7 +11,11 @@ import {
 	createAccessCache,
 	RECHECK_MS,
 } from "../lib/content/access-policy";
-import type { AiClient, ScanHandle } from "../lib/content/ai-client";
+import type {
+	AiClient,
+	IdentifyHandle,
+	ScanHandle,
+} from "../lib/content/ai-client";
 import {
 	type AiResultStore,
 	listingFingerprint,
@@ -23,7 +31,7 @@ import {
 import type { Listing } from "../lib/listing/types";
 import type { BgResponse, ContentAccess, ScanRequest } from "../lib/messages";
 import type { RiskReport } from "../lib/rules/score";
-import { debugAnalysis, sampleAnalysis } from "./helpers";
+import { debugAnalysis, sampleAnalysis, sampleIdentification } from "./helpers";
 
 /** Promesse résolue de l'extérieur. */
 function deferred<T>() {
@@ -94,9 +102,18 @@ interface FakeScan {
 	cancel: ReturnType<typeof vi.fn<ScanHandle["cancel"]>>;
 }
 
+/** Une identification lancée par le faux client, menée depuis le test. */
+interface FakeIdentify {
+	request: ScanRequest;
+	emit(e: ScanProgressEvent): void;
+	resolve(response: BgResponse<IdentificationResult>): void;
+	cancel: ReturnType<typeof vi.fn<IdentifyHandle["cancel"]>>;
+}
+
 /** Client simulé : chaque appel renvoie une promesse (ou une analyse) menée depuis le test. */
 function fakeClient() {
 	const scans: FakeScan[] = [];
+	const identifies: FakeIdentify[] = [];
 	const accesses: Array<
 		ReturnType<typeof deferred<BgResponse<ContentAccess>>>
 	> = [];
@@ -121,13 +138,26 @@ function fakeClient() {
 				return { done: d.promise, cancel };
 			},
 		),
+		identify: vi.fn(
+			(request: ScanRequest, onEvent: (e: ScanProgressEvent) => void) => {
+				const d = deferred<BgResponse<IdentificationResult>>();
+				const cancel = vi.fn(() => d.resolve(fail("cancelled")));
+				identifies.push({
+					request,
+					emit: (e) => act(() => onEvent(e)),
+					resolve: d.resolve,
+					cancel,
+				});
+				return { done: d.promise, cancel };
+			},
+		),
 		openLogin: vi.fn(() => {
 			const d = deferred<BgResponse<null>>();
 			logins.push(d);
 			return d.promise;
 		}),
 	} satisfies AiClient;
-	return { client, scans, accesses, logins };
+	return { client, scans, identifies, accesses, logins };
 }
 
 function setup(
@@ -1040,5 +1070,451 @@ describe("useAiScan : logs de debug (superuser)", () => {
 		await settle();
 		expect(t.client.scan).toHaveBeenCalledTimes(1);
 		expect(sink.groupCollapsed).not.toHaveBeenCalled();
+	});
+});
+
+const readingPhotos: ScanProgressEvent = {
+	type: "stage",
+	stage: "reading_photos",
+};
+const identifying: ScanProgressEvent = { type: "stage", stage: "identifying" };
+const criteriaCached: ScanProgressEvent = { type: "criteria_cached", count: 3 };
+const pageRead: ScanProgressEvent = {
+	type: "page_read",
+	domain: "www.steamdeck.com",
+	ok: true,
+};
+/** L'événement `identification` du flux : les champs du résultat, à plat. */
+const identificationEvent = (
+	result: IdentificationResult = sampleIdentification,
+): ScanProgressEvent => {
+	const { debug: _, ...fields } = result;
+	return { ...fields, type: "identification" };
+};
+/** Identification telle que reprise du magasin : sans quota restant ni déroulé. */
+const RESTORED_IDENTIFICATION = {
+	status: "done",
+	result: { ...sampleIdentification, remaining: NO_REMAINING },
+	progress: null,
+};
+/** Identification terminée en direct : elle garde son déroulé. */
+const identifiedWith = (result: IdentificationResult) => ({
+	status: "done",
+	result,
+	progress: expect.objectContaining({ steps: expect.any(Array) }),
+});
+const stepsOf = (state: { status: string; progress?: unknown }) =>
+	(
+		state as {
+			progress?: { steps: Array<{ event: ScanProgressEvent }> } | null;
+		}
+	).progress?.steps.map((s) => s.event);
+
+describe("useAiScan : identification", () => {
+	test("identify goes loading then done and stores identifiedByUser", async () => {
+		const store = fakeStore();
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		expect(t.result.current.identification).toEqual({ status: "idle" });
+
+		act(() => t.result.current.identify());
+		expect(t.client.identify).toHaveBeenCalledTimes(1);
+		expect(t.client.scan).not.toHaveBeenCalled();
+		expect(t.identifies[0]?.request).toEqual({
+			listing: listingOf("m1"),
+			signals: report.signals,
+			rulesVersion: 2,
+			trigger: "button",
+			partial: false,
+		});
+		expect(t.result.current.identification).toEqual(LOADING);
+		t.identifies[0]?.emit(readingPhotos);
+		t.identifies[0]?.emit(search);
+		expect(stepsOf(t.result.current.identification)).toEqual([
+			readingPhotos,
+			search,
+		]);
+		// L'analyse n'est pas touchée.
+		expect(t.result.current.ai).toEqual({ status: "idle" });
+
+		t.identifies[0]?.resolve(ok(sampleIdentification));
+		await settle();
+		expect(t.result.current.identification).toEqual(
+			identifiedWith(sampleIdentification),
+		);
+		expect(stepsOf(t.result.current.identification)).toEqual([
+			readingPhotos,
+			search,
+		]);
+		expect(store.put).toHaveBeenCalledWith("2ememain.be", "m1", {
+			result: null,
+			identification: sampleIdentification,
+			identifiedByUser: true,
+			fingerprint: listingFingerprint(listingOf("m1")),
+			storedAt: expect.any(Number),
+		});
+		// Quota consommé : l'accès est relu.
+		expect(t.client.access).toHaveBeenCalledTimes(1);
+	});
+
+	test("identification en erreur : son code, rien n'est écrit, accès relu", async () => {
+		const store = fakeStore();
+		const t = setup(viewOf("m1"), store);
+		act(() => t.result.current.identify());
+		t.identifies[0]?.resolve(fail("quota_exhausted"));
+		await settle();
+		expect(t.result.current.identification).toEqual({
+			status: "error",
+			code: "quota_exhausted",
+		});
+		expect(store.put).not.toHaveBeenCalled();
+		expect(t.client.access).toHaveBeenCalledTimes(1);
+	});
+
+	test("no second identify while one runs (double click)", async () => {
+		const t = setup();
+		act(() => {
+			t.result.current.identify();
+			t.result.current.identify();
+		});
+		act(() => t.result.current.identify());
+		expect(t.client.identify).toHaveBeenCalledTimes(1);
+		t.identifies[0]?.resolve(ok(sampleIdentification));
+		await settle();
+
+		// Pas d'identification pendant une analyse non plus.
+		act(() => t.result.current.scan());
+		act(() => t.result.current.identify());
+		expect(t.client.identify).toHaveBeenCalledTimes(1);
+		// Ni de relance sans cache pendant une identification.
+		t.scans[0]?.resolve(ok(sampleAnalysis));
+		await settle();
+		act(() => t.result.current.identify());
+		act(() => t.result.current.rescan());
+		expect(t.client.identify).toHaveBeenCalledTimes(2);
+		expect(t.client.scan).toHaveBeenCalledTimes(1);
+	});
+
+	test("scan during identify is queued then starts when identify finishes", async () => {
+		const t = setup();
+		expect(t.result.current.queued).toBe(false);
+		act(() => t.result.current.identify());
+		act(() => t.result.current.scan());
+		act(() => t.result.current.scan());
+		expect(t.client.scan).not.toHaveBeenCalled();
+		expect(t.result.current.queued).toBe(true);
+		expect(t.result.current.ai).toEqual({ status: "idle" });
+
+		t.identifies[0]?.resolve(ok(sampleIdentification));
+		await settle();
+		expect(t.client.scan).toHaveBeenCalledTimes(1);
+		expect(t.scans[0]?.request.listing).toEqual(listingOf("m1"));
+		expect(t.result.current.queued).toBe(false);
+		expect(t.result.current.ai).toEqual(LOADING);
+		expect(t.result.current.identification.status).toBe("done");
+	});
+
+	test("queued scan still starts after an identify error", async () => {
+		const t = setup();
+		act(() => t.result.current.identify());
+		act(() => t.result.current.scan());
+		t.identifies[0]?.resolve(fail("identification_failed"));
+		await settle();
+		expect(t.result.current.identification).toEqual({
+			status: "error",
+			code: "identification_failed",
+		});
+		expect(t.client.scan).toHaveBeenCalledTimes(1);
+		expect(t.result.current.queued).toBe(false);
+		expect(t.result.current.ai).toEqual(LOADING);
+	});
+
+	test("queued scan is dropped when the listing changes", async () => {
+		const t = setup(viewOf("m1"));
+		act(() => t.result.current.identify());
+		act(() => t.result.current.scan());
+		expect(t.result.current.queued).toBe(true);
+
+		t.rerender({ view: viewOf("m2") });
+		expect(t.identifies[0]?.cancel).toHaveBeenCalledTimes(1);
+		expect(t.result.current.queued).toBe(false);
+		expect(t.result.current.identification).toEqual({ status: "idle" });
+		await settle();
+		expect(t.client.scan).not.toHaveBeenCalled();
+		// Annulée : ni relecture de l'accès.
+		expect(t.client.access).not.toHaveBeenCalled();
+		// Une identification tardive de m1 ne touche pas m2.
+		t.identifies[0]?.emit(readingPhotos);
+		expect(t.result.current.identification).toEqual({ status: "idle" });
+	});
+
+	test("file oubliée quand l'annonce est modifiée pendant l'identification", async () => {
+		const t = setup(viewOf("m1"));
+		act(() => t.result.current.identify());
+		act(() => t.result.current.scan());
+		t.rerender({
+			view: { report, listing: listingOf("m1", { description: "Autre." }) },
+		});
+		expect(t.result.current.queued).toBe(false);
+		t.identifies[0]?.resolve(ok(sampleIdentification));
+		await settle();
+		expect(t.client.scan).not.toHaveBeenCalled();
+		// L'identification de l'ancienne version n'est pas affichée.
+		expect(t.result.current.identification).toEqual({ status: "idle" });
+	});
+
+	test("identification faite, puis annonce modifiée : retour à idle", async () => {
+		const t = setup(viewOf("m1"));
+		act(() => t.result.current.identify());
+		t.identifies[0]?.resolve(ok(sampleIdentification));
+		await settle();
+		expect(t.result.current.analysisIncluded).toBe(true);
+		t.rerender({
+			view: { report, listing: listingOf("m1", { title: "Autre" }) },
+		});
+		expect(t.result.current.identification).toEqual({ status: "idle" });
+		expect(t.result.current.analysisIncluded).toBe(false);
+	});
+
+	test("scan without identification fills both states from the stream", async () => {
+		const store = fakeStore();
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		act(() => t.result.current.scan());
+		expect(t.client.identify).not.toHaveBeenCalled();
+		t.scans[0]?.emit(readingPhotos);
+		expect(t.result.current.identification).toEqual(LOADING);
+		t.scans[0]?.emit(criteriaCached);
+		t.scans[0]?.emit(pageRead);
+		t.scans[0]?.emit(identifying);
+		t.scans[0]?.emit(identificationEvent());
+		expect(t.result.current.identification).toEqual(
+			identifiedWith(sampleIdentification),
+		);
+		expect(stepsOf(t.result.current.identification)).toEqual([
+			readingPhotos,
+			criteriaCached,
+			pageRead,
+			identifying,
+			identificationEvent(),
+		]);
+		t.scans[0]?.emit(photos);
+		t.scans[0]?.emit(search);
+		// Chaque pilule a son propre déroulé.
+		expect(stepsOf(t.result.current.ai)).toEqual([photos, search]);
+
+		const result = { ...sampleAnalysis, identification: sampleIdentification };
+		t.scans[0]?.resolve(ok(result));
+		await settle();
+		expect(t.result.current.ai).toEqual(doneWith(result));
+		expect(t.result.current.identification).toEqual(
+			identifiedWith(sampleIdentification),
+		);
+		expect(t.result.current.analysisIncluded).toBe(false);
+		expect(store.put).toHaveBeenCalledTimes(1);
+		expect(store.put).toHaveBeenCalledWith("2ememain.be", "m1", {
+			result,
+			identification: sampleIdentification,
+			identifiedByUser: false,
+			fingerprint: listingFingerprint(listingOf("m1")),
+			storedAt: expect.any(Number),
+		});
+	});
+
+	test("l'identification du résultat de l'analyse devient l'identification affichée", async () => {
+		const t = setup();
+		act(() => t.result.current.scan());
+		const result = { ...sampleAnalysis, identification: sampleIdentification };
+		t.scans[0]?.resolve(ok(result));
+		await settle();
+		expect(t.result.current.identification).toEqual({
+			status: "done",
+			result: sampleIdentification,
+			progress: null,
+		});
+	});
+
+	test("identification_error during scan sets identification error and the scan completes", async () => {
+		const t = setup();
+		act(() => t.result.current.scan());
+		t.scans[0]?.emit(identifying);
+		t.scans[0]?.emit({
+			type: "identification_error",
+			code: "identification_failed",
+		});
+		expect(t.result.current.identification).toEqual({
+			status: "error",
+			code: "identification_failed",
+		});
+		t.scans[0]?.emit(photos);
+		expect(t.result.current.ai).toEqual(LOADING);
+		t.scans[0]?.resolve(ok(sampleAnalysis));
+		await settle();
+		expect(t.result.current.ai).toEqual(doneWith(sampleAnalysis));
+		expect(t.result.current.identification).toEqual({
+			status: "error",
+			code: "identification_failed",
+		});
+	});
+
+	test("analyse en erreur pendant l'identification du flux : l'identification prend son code", async () => {
+		const t = setup();
+		act(() => t.result.current.scan());
+		t.scans[0]?.emit(readingPhotos);
+		t.scans[0]?.resolve(fail("quota_exhausted"));
+		await settle();
+		expect(t.result.current.identification).toEqual({
+			status: "error",
+			code: "quota_exhausted",
+		});
+	});
+
+	test("analyse finie sans identification : l'identification en cours revient à idle", async () => {
+		const t = setup();
+		act(() => t.result.current.scan());
+		t.scans[0]?.emit(readingPhotos);
+		t.scans[0]?.resolve(ok(sampleAnalysis));
+		await settle();
+		expect(t.result.current.identification).toEqual({ status: "idle" });
+	});
+
+	test("identification déjà faite : les événements du flux ne la remettent pas en cours", async () => {
+		const store = fakeStore({
+			"2ememain.be|m1": storedFor(listingOf("m1"), {
+				result: null,
+				identification: sampleIdentification,
+				identifiedByUser: true,
+			}),
+		});
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		const restored = t.result.current.identification;
+		expect(restored).toEqual(RESTORED_IDENTIFICATION);
+
+		act(() => t.result.current.scan());
+		t.scans[0]?.emit(readingPhotos);
+		t.scans[0]?.emit(criteriaCached);
+		expect(t.result.current.identification).toBe(restored);
+		t.scans[0]?.emit({ type: "identification_error", code: "x_failed" });
+		expect(t.result.current.identification).toBe(restored);
+		// Servie du cache, l'identification fraîche remplace celle reprise.
+		const fresh = { ...sampleIdentification, fromCache: true };
+		t.scans[0]?.emit(identificationEvent(fresh));
+		expect(t.result.current.identification).toEqual(identifiedWith(fresh));
+		t.scans[0]?.resolve(ok({ ...sampleAnalysis, identification: fresh }));
+		await settle();
+		expect(t.result.current.identification).toEqual(identifiedWith(fresh));
+		// Toujours l'identification de l'utilisateur, mais l'analyse est faite.
+		expect(t.result.current.analysisIncluded).toBe(false);
+	});
+
+	test("analysisIncluded only after the user's own identify", async () => {
+		const store = fakeStore();
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		expect(t.result.current.analysisIncluded).toBe(false);
+		act(() => t.result.current.identify());
+		expect(t.result.current.analysisIncluded).toBe(false);
+		t.identifies[0]?.resolve(ok(sampleIdentification));
+		await settle();
+		expect(t.result.current.analysisIncluded).toBe(true);
+
+		act(() => t.result.current.scan());
+		t.scans[0]?.resolve(
+			ok({ ...sampleAnalysis, identification: sampleIdentification }),
+		);
+		await settle();
+		expect(t.result.current.analysisIncluded).toBe(false);
+		// L'analyse n'écrit pas le drapeau : le magasin le garde pour la même empreinte.
+		expect(store.put).toHaveBeenLastCalledWith(
+			"2ememain.be",
+			"m1",
+			expect.objectContaining({ identifiedByUser: false }),
+		);
+
+		// Une identification venue d'une analyse ne compte pas.
+		const other = setup(viewOf("m2"));
+		act(() => other.result.current.scan());
+		other.scans[0]?.emit(identificationEvent());
+		expect(other.result.current.identification.status).toBe("done");
+		expect(other.result.current.analysisIncluded).toBe(false);
+	});
+
+	test("restored identification from an analysis does not mark analysisIncluded", async () => {
+		// Analyse partielle d'une carte, avec son identification : pastille « Analyser ».
+		const store = fakeStore({
+			"2ememain.be|m1": storedFor(listingOf("m1"), {
+				result: { ...sampleAnalysis, partial: true },
+				identification: sampleIdentification,
+				identifiedByUser: false,
+			}),
+		});
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		expect(t.result.current.ai).toEqual({ status: "idle" });
+		expect(t.result.current.identification).toEqual(RESTORED_IDENTIFICATION);
+		expect(t.result.current.analysisIncluded).toBe(false);
+	});
+
+	test("restores identification and analysis separately from the store", async () => {
+		const store = fakeStore({
+			"2ememain.be|m1": storedFor(listingOf("m1"), {
+				result: null,
+				identification: sampleIdentification,
+				identifiedByUser: true,
+			}),
+			"2ememain.be|m2": storedFor(listingOf("m2"), {
+				identification: sampleIdentification,
+				identifiedByUser: true,
+			}),
+			"2ememain.be|m3": storedFor(listingOf("m3", { description: "Ancien." }), {
+				identification: sampleIdentification,
+			}),
+		});
+		const t = setup(viewOf("m1"), store);
+		await settle();
+		expect(t.result.current.identification).toEqual(RESTORED_IDENTIFICATION);
+		expect(t.result.current.ai).toEqual({ status: "idle" });
+		expect(t.result.current.analysisIncluded).toBe(true);
+
+		t.rerender({ view: viewOf("m2") });
+		await settle();
+		expect(t.result.current.identification).toEqual(RESTORED_IDENTIFICATION);
+		expect(t.result.current.ai).toEqual(ADOPTED);
+		expect(t.result.current.analysisIncluded).toBe(false);
+
+		// Annonce modifiée depuis : ni l'une ni l'autre.
+		t.rerender({ view: viewOf("m3") });
+		await settle();
+		expect(t.result.current.identification).toEqual({ status: "idle" });
+		expect(t.result.current.ai).toEqual({ status: "idle" });
+		expect(t.client.scan).not.toHaveBeenCalled();
+		expect(t.client.identify).not.toHaveBeenCalled();
+	});
+
+	test("lecture du magasin pendant une identification : l'identification en cours l'emporte", async () => {
+		const pending = deferred<StoredAiResult | null>();
+		const store = fakeStore();
+		store.get.mockImplementationOnce(() => pending.promise);
+		const t = setup(viewOf("m1"), store);
+		act(() => t.result.current.identify());
+		pending.resolve(
+			storedFor(listingOf("m1"), {
+				result: null,
+				identification: sampleIdentification,
+				identifiedByUser: true,
+			}),
+		);
+		await settle();
+		expect(t.result.current.identification).toEqual(LOADING);
+	});
+
+	test("identification démontée : annulée, ni état ni relecture", async () => {
+		const t = setup();
+		act(() => t.result.current.identify());
+		t.unmount();
+		expect(t.identifies[0]?.cancel).toHaveBeenCalledTimes(1);
+		await settle();
+		expect(t.client.access).not.toHaveBeenCalled();
 	});
 });

@@ -155,6 +155,7 @@ function setup(
 			done: Promise.resolve({ ok: true, data: sampleAnalysis }),
 			cancel: vi.fn(),
 		})),
+		identify: vi.fn<AiClient["identify"]>(),
 		openLogin: vi.fn<AiClient["openLogin"]>(),
 	};
 	const scan = vi.fn<typeof scanCard>(async () => ({
