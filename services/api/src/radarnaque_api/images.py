@@ -73,7 +73,8 @@ async def default_resolve(host: str) -> list[str]:
     return list(dict.fromkeys(str(info[4][0]) for info in infos))
 
 
-def _is_public(address: str) -> bool:
+def is_public_address(address: str) -> bool:
+    """Vrai si `address` est une adresse IP globale, hors plages privées ou réservées."""
     try:
         ip = ipaddress.ip_address(address)
     except ValueError:
@@ -91,6 +92,9 @@ def _is_public(address: str) -> bool:
         or ip.is_unspecified
         or (isinstance(ip, ipaddress.IPv6Address) and ip.is_site_local)
     )
+
+
+_is_public = is_public_address  # alias conservé
 
 
 def _normalize(host: str) -> str:
