@@ -91,7 +91,8 @@ class AnalysisWebSearch(Base):
 
 
 class LlmCall(Base):
-    """Un appel au modèle qui a produit une analyse (insertion ou rafraîchissement sur place).
+    """Un appel au modèle : une analyse, une identification ou des critères (insertion ou
+    rafraîchissement sur place).
 
     Une analyse expirée est rafraîchie sur place : son coût, ses tokens et sa date sont écrasés.
     Cette trace garde donc chaque appel, pour les statistiques de coût et de cache. Elle ne relie
@@ -102,11 +103,28 @@ class LlmCall(Base):
     __table_args__ = (
         Index("ix_llm_calls_created_at", "created_at"),
         Index("ix_llm_calls_analysis_id", "analysis_id"),
+        Index("ix_llm_calls_identification_id", "identification_id"),
+        CheckConstraint(
+            "step in ('read_photos', 'criteria', 'identify', 'scam')", name="ck_llm_calls_step"
+        ),
+        CheckConstraint(
+            "num_nonnulls(analysis_id, identification_id, criteria_set_id) <= 1"
+            " and (step <> 'scam' or analysis_id is not null)",
+            name="ck_llm_calls_target",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    analysis_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("app.analyses.id"))
+    step: Mapped[str] = mapped_column(server_default="scam")
+    # Une seule cible : l'analyse (étape `scam`), l'identification ou l'ensemble de critères.
+    analysis_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("app.analyses.id"))
+    identification_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("app.identifications.id")
+    )
+    criteria_set_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("app.criteria_sets.id", ondelete="SET NULL")
+    )
     model_id: Mapped[int] = mapped_column(ForeignKey("app.models.id"))
     prompt_version_id: Mapped[int] = mapped_column(ForeignKey("app.prompt_versions.id"))
     tokens_in: Mapped[int] = mapped_column(server_default="0")

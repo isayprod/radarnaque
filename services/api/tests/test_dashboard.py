@@ -410,6 +410,43 @@ async def test_health_active_model_and_purge(app, db):
     assert purge.deleted_scans == 12
 
 
+async def test_calls_without_analysis_count_in_calls_and_cost(
+    client, bearer, admin, db, user, analysis
+):
+    now = datetime.now(UTC)
+    snapshot_id = await _scalar(
+        db, "select snapshot_id from app.analyses where id = :a", a=analysis
+    )
+    ident = await _scalar(
+        db,
+        "insert into app.identifications(snapshot_id, config_hash, input_hash, status, confidence)"
+        " values (:s, 'c', 'i', 'identified', 90) returning id",
+        s=snapshot_id,
+    )
+    for cost in (300_000, 700_000):
+        await db.execute(
+            text(
+                "insert into app.llm_calls(created_at, step, identification_id, model_id,"
+                " prompt_version_id, cost_usd_micros)"
+                " select :at, 'read_photos', :i, k.active_model_id, k.active_prompt_version_id,"
+                " :c from app.scan_kinds k where k.code = 'full'"
+            ),
+            {"at": now, "i": ident, "c": cost},
+        )
+    await db.commit()
+
+    await _call(db, analysis, now, 0)  # l'appel de l'analyse, lui, reste seul dans son détail
+
+    before = (await client.get(f"/api/admin/analyses/{analysis}", headers=bearer(admin))).json()
+    body = (await client.get("/api/admin/dashboard", headers=bearer(admin))).json()
+    after = (await client.get(f"/api/admin/analyses/{analysis}", headers=bearer(admin))).json()
+
+    assert body["today"]["llmCalls"] == 3
+    assert body["today"]["costUsd"] == pytest.approx(1.0)
+    assert before == after
+    assert len(before["technical"]["calls"]) == 1
+
+
 # --- Routes ----------------------------------------------------------------------------------
 
 
