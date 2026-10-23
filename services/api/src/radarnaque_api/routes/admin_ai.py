@@ -183,7 +183,12 @@ async def update_settings(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AiOverviewOut:
     """Modifie les réglages fournis ; une ligne de journal par champ réellement changé."""
-    await admin_ai.update_settings(session, admin_id=admin.user.id, changes=body)
+    await admin_ai.update_settings(
+        session,
+        admin_id=admin.user.id,
+        providers=request.app.state.providers,
+        changes=body,
+    )
     await session.commit()
     return await _overview(request, session)
 
