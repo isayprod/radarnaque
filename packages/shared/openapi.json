@@ -493,6 +493,13 @@
           },
           "settings": {
             "$ref": "#/components/schemas/AiSettingsOut"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/StepOut"
+            },
+            "title": "Steps",
+            "type": "array"
           }
         },
         "required": [
@@ -501,6 +508,7 @@
           "activeModelId",
           "prompts",
           "activePromptVersionId",
+          "steps",
           "settings",
           "search",
           "actions"
@@ -510,6 +518,7 @@
       },
       "AiSettingsIn": {
         "additionalProperties": false,
+        "description": "Champ absent ou `null` : inchang\u00e9, sauf `identifyEscalationModelId`, o\u00f9 `null` explicite\nretire le mod\u00e8le de relance.",
         "properties": {
           "cacheTtlHours": {
             "anyOf": [
@@ -523,6 +532,95 @@
               }
             ],
             "title": "Cachettlhours"
+          },
+          "criteriaMaxPages": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Criteriamaxpages"
+          },
+          "criteriaMaxSearches": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Criteriamaxsearches"
+          },
+          "criteriaTtlDays": {
+            "anyOf": [
+              {
+                "maximum": 730.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Criteriattldays"
+          },
+          "identificationCacheTtlHours": {
+            "anyOf": [
+              {
+                "maximum": 2160.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identificationcachettlhours"
+          },
+          "identifyEscalationModelId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identifyescalationmodelid"
+          },
+          "identifyImageSide": {
+            "anyOf": [
+              {
+                "maximum": 1536.0,
+                "minimum": 768.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identifyimageside"
+          },
+          "identifyRetryThreshold": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identifyretrythreshold"
           },
           "maxWebSearches": {
             "anyOf": [
@@ -549,6 +647,17 @@
               }
             ],
             "title": "Ratelimitperminute"
+          },
+          "scamSendsPhotos": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scamsendsphotos"
           }
         },
         "title": "AiSettingsIn",
@@ -560,6 +669,41 @@
             "title": "Cachettlhours",
             "type": "integer"
           },
+          "criteriaMaxPages": {
+            "title": "Criteriamaxpages",
+            "type": "integer"
+          },
+          "criteriaMaxSearches": {
+            "title": "Criteriamaxsearches",
+            "type": "integer"
+          },
+          "criteriaTtlDays": {
+            "title": "Criteriattldays",
+            "type": "integer"
+          },
+          "identificationCacheTtlHours": {
+            "title": "Identificationcachettlhours",
+            "type": "integer"
+          },
+          "identifyEscalationModelId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identifyescalationmodelid"
+          },
+          "identifyImageSide": {
+            "title": "Identifyimageside",
+            "type": "integer"
+          },
+          "identifyRetryThreshold": {
+            "title": "Identifyretrythreshold",
+            "type": "integer"
+          },
           "maxWebSearches": {
             "title": "Maxwebsearches",
             "type": "integer"
@@ -567,12 +711,24 @@
           "rateLimitPerMinute": {
             "title": "Ratelimitperminute",
             "type": "integer"
+          },
+          "scamSendsPhotos": {
+            "title": "Scamsendsphotos",
+            "type": "boolean"
           }
         },
         "required": [
           "cacheTtlHours",
           "rateLimitPerMinute",
-          "maxWebSearches"
+          "maxWebSearches",
+          "identificationCacheTtlHours",
+          "criteriaTtlDays",
+          "criteriaMaxSearches",
+          "criteriaMaxPages",
+          "identifyRetryThreshold",
+          "identifyImageSide",
+          "scamSendsPhotos",
+          "identifyEscalationModelId"
         ],
         "title": "AiSettingsOut",
         "type": "object"
@@ -2734,6 +2890,7 @@
         "type": "object"
       },
       "PromptTextOut": {
+        "description": "`step` : l'\u00e9tape d'identification propri\u00e9taire du prompt ; `None` pour le type `full`.",
         "properties": {
           "active": {
             "title": "Active",
@@ -2751,6 +2908,17 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
           },
           "systemPrompt": {
             "title": "Systemprompt",
@@ -3572,6 +3740,50 @@
         "title": "SignalIn",
         "type": "object"
       },
+      "StepOut": {
+        "description": "Une \u00e9tape de l'identification : mod\u00e8le actif, prompt actif et versions du prompt (sans\nleur texte, plus r\u00e9cente d'abord).",
+        "properties": {
+          "activeModelId": {
+            "title": "Activemodelid",
+            "type": "integer"
+          },
+          "activePromptId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activepromptid"
+          },
+          "code": {
+            "enum": [
+              "read_photos",
+              "criteria",
+              "identify"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "prompts": {
+            "items": {
+              "$ref": "#/components/schemas/PromptVersionOut"
+            },
+            "title": "Prompts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code",
+          "activeModelId",
+          "activePromptId",
+          "prompts"
+        ],
+        "title": "StepOut",
+        "type": "object"
+      },
       "SubscribersOut": {
         "description": "Abonnements `active` par plan, et comptes cr\u00e9\u00e9s dans les 7 derniers jours civils.",
         "properties": {
@@ -4025,6 +4237,155 @@
           }
         },
         "summary": "Update Settings"
+      }
+    },
+    "/api/admin/ai/steps/{step}/active-model": {
+      "post": {
+        "description": "Active un mod\u00e8le pour une \u00e9tape de l'identification (inconnue : 404).",
+        "operationId": "activate_step_model_api_admin_ai_steps__step__active_model_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "step",
+            "required": true,
+            "schema": {
+              "title": "Step",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveModelIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiOverviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate Step Model"
+      }
+    },
+    "/api/admin/ai/steps/{step}/prompts": {
+      "post": {
+        "description": "Cr\u00e9e la version suivante du prompt d'une \u00e9tape, non active.",
+        "operationId": "create_step_prompt_api_admin_ai_steps__step__prompts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "step",
+            "required": true,
+            "schema": {
+              "title": "Step",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptTextOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Step Prompt"
+      }
+    },
+    "/api/admin/ai/steps/{step}/prompts/{prompt_id}/activate": {
+      "post": {
+        "description": "Active une version du prompt d'une \u00e9tape (d'une autre \u00e9tape : 404).",
+        "operationId": "activate_step_prompt_api_admin_ai_steps__step__prompts__prompt_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "step",
+            "required": true,
+            "schema": {
+              "title": "Step",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiOverviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate Step Prompt"
       }
     },
     "/api/admin/analyses": {

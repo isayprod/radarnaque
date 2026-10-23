@@ -58,6 +58,52 @@ const base: Routes = {
 	"GET /api/me": () => json({ email: "admin@radarnaque.test", role: "admin" }),
 };
 
+function step(
+	code: Schemas["StepOut"]["code"],
+	firstId: number,
+): Schemas["StepOut"] {
+	return {
+		code,
+		activeModelId: 1,
+		activePromptId: firstId + 1,
+		prompts: [
+			{
+				id: firstId + 1,
+				version: 2,
+				active: true,
+				analyses: 0,
+				createdAt: "2026-10-12T10:00:00Z",
+			},
+			{
+				id: firstId,
+				version: 1,
+				active: false,
+				analyses: 0,
+				createdAt: "2026-10-11T10:00:00Z",
+			},
+		],
+	};
+}
+
+function settings(
+	over: Partial<Schemas["AiSettingsOut"]> = {},
+): Schemas["AiSettingsOut"] {
+	return {
+		cacheTtlHours: 24,
+		rateLimitPerMinute: 30,
+		maxWebSearches: 3,
+		identificationCacheTtlHours: 168,
+		criteriaTtlDays: 180,
+		criteriaMaxSearches: 2,
+		criteriaMaxPages: 3,
+		identifyRetryThreshold: 60,
+		identifyImageSide: 1280,
+		scamSendsPhotos: false,
+		identifyEscalationModelId: null,
+		...over,
+	};
+}
+
 function overview(over: Partial<Overview> = {}): Overview {
 	return {
 		activeModelId: 1,
@@ -130,7 +176,12 @@ function overview(over: Partial<Overview> = {}): Overview {
 				createdAt: "2026-10-01T10:00:00Z",
 			},
 		],
-		settings: { cacheTtlHours: 24, rateLimitPerMinute: 30, maxWebSearches: 3 },
+		steps: [
+			step("read_photos", 20),
+			step("criteria", 30),
+			step("identify", 40),
+		],
+		settings: settings(),
 		search: {
 			backend: "searxng",
 			status: "ok",
@@ -599,11 +650,7 @@ describe("écran IA", () => {
 
 	it("settings confirmation lists changes and privacy warning on maxWebSearches", async () => {
 		const after = overview({
-			settings: {
-				cacheTtlHours: 48,
-				rateLimitPerMinute: 30,
-				maxWebSearches: 2,
-			},
+			settings: settings({ cacheTtlHours: 48, maxWebSearches: 2 }),
 		});
 		const { sent } = fakeFetch({
 			...base,
@@ -618,7 +665,7 @@ describe("écran IA", () => {
 		}) as HTMLButtonElement;
 		expect(save.disabled).toBe(true);
 
-		const ttl = within(section).getByLabelText(/Durée du cache/);
+		const ttl = within(section).getByLabelText("Durée du cache");
 		expect((ttl as HTMLInputElement).min).toBe("1");
 		expect((ttl as HTMLInputElement).max).toBe("168");
 		await user.clear(ttl);
@@ -630,7 +677,9 @@ describe("écran IA", () => {
 		expect(dialog.queryByText(/\/privacy/)).toBeNull();
 		await user.click(dialog.getByRole("button", { name: "Annuler" }));
 
-		const searches = within(section).getByLabelText(/Recherches web/);
+		const searches = within(section).getByLabelText(
+			"Recherches web par analyse",
+		);
 		await user.clear(searches);
 		await user.type(searches, "2");
 		await user.click(save);
@@ -658,7 +707,7 @@ describe("écran IA", () => {
 		const user = userEvent.setup();
 		renderAt("/admin/ia");
 		const section = await screen.findByRole("region", { name: "Réglages" });
-		const ttl = within(section).getByLabelText(/Durée du cache/);
+		const ttl = within(section).getByLabelText("Durée du cache");
 		await user.clear(ttl);
 		await user.type(ttl, "200");
 		expect(
@@ -669,6 +718,206 @@ describe("écran IA", () => {
 			).disabled,
 		).toBe(true);
 		expect(ttl.getAttribute("aria-invalid")).toBe("true");
+	});
+
+	it("settings: new fields have units, bounds and errors", async () => {
+		const { sent } = fakeFetch({
+			...base,
+			"GET /api/admin/ai": () => json(overview()),
+			"PATCH /api/admin/ai/settings": () =>
+				json(
+					overview({
+						settings: settings({
+							criteriaTtlDays: 90,
+							scamSendsPhotos: true,
+							identifyEscalationModelId: 2,
+						}),
+					}),
+				),
+		});
+		const user = userEvent.setup();
+		renderAt("/admin/ia");
+		const section = await screen.findByRole("region", { name: "Réglages" });
+		const days = within(section).getByLabelText(
+			/Durée de validité des critères \(jours\)/,
+		);
+		expect((days as HTMLInputElement).max).toBe("730");
+		const side = within(section).getByLabelText(
+			/Côté maximal des photos \(px\)/,
+		);
+		expect((side as HTMLInputElement).min).toBe("768");
+		expect((side as HTMLInputElement).max).toBe("1536");
+		const save = within(section).getByRole("button", {
+			name: "Enregistrer",
+		}) as HTMLButtonElement;
+
+		await user.clear(side);
+		await user.type(side, "767");
+		expect(side.getAttribute("aria-invalid")).toBe("true");
+		expect(save.disabled).toBe(true);
+		await user.clear(side);
+		await user.type(side, "1280");
+
+		await user.clear(days);
+		await user.type(days, "90");
+		await user.click(within(section).getByLabelText(/Envoyer les photos/));
+		await user.selectOptions(
+			within(section).getByLabelText(/Modèle de relance/),
+			"2",
+		);
+		await user.click(save);
+		const dialog = within(await screen.findByRole("dialog"));
+		expect(dialog.getByText(/critères \(jours\) : 180 → 90/)).toBeTruthy();
+		expect(dialog.getByText(/aucun → openai \/ gpt-5/)).toBeTruthy();
+		await user.click(dialog.getByRole("button", { name: "Enregistrer" }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		expect(sent("PATCH", "/api/admin/ai/settings")[0].body).toEqual({
+			criteriaTtlDays: 90,
+			scamSendsPhotos: true,
+			identifyEscalationModelId: 2,
+		});
+	});
+
+	it("settings: an API refusal is shown", async () => {
+		fakeFetch({
+			...base,
+			"GET /api/admin/ai": () => json(overview()),
+			"PATCH /api/admin/ai/settings": () =>
+				apiError(422, "invalid_value", "Modèle de relance inconnu."),
+		});
+		const user = userEvent.setup();
+		renderAt("/admin/ia");
+		const section = await screen.findByRole("region", { name: "Réglages" });
+		await user.click(within(section).getByLabelText(/Envoyer les photos/));
+		await user.click(
+			within(section).getByRole("button", { name: "Enregistrer" }),
+		);
+		await user.click(
+			within(await screen.findByRole("dialog")).getByRole("button", {
+				name: "Enregistrer",
+			}),
+		);
+		expect(await within(section).findByRole("alert")).toBeTruthy();
+	});
+
+	it("shows three identification steps", async () => {
+		fakeFetch({ ...base, "GET /api/admin/ai": () => json(overview()) });
+		renderAt("/admin/ia");
+		const section = await screen.findByRole("region", {
+			name: "Étapes de l'identification",
+		});
+		for (const name of [
+			"Lecture des photos",
+			"Critères de distinction",
+			"Identification",
+		]) {
+			const card = within(within(section).getByRole("article", { name }));
+			expect(card.getByLabelText(`Modèle de l'étape ${name}`)).toBeTruthy();
+			expect(card.getAllByRole("row")).toHaveLength(3);
+			expect(
+				card.getByRole("button", { name: "Nouvelle version" }),
+			).toBeTruthy();
+		}
+	});
+
+	it("step model change calls the step route after confirmation", async () => {
+		const { sent } = fakeFetch({
+			...base,
+			"GET /api/admin/ai": () => json(overview()),
+			"POST /api/admin/ai/steps/criteria/active-model": () => json(overview()),
+		});
+		const user = userEvent.setup();
+		renderAt("/admin/ia");
+		const card = within(
+			await screen.findByRole("article", { name: "Critères de distinction" }),
+		);
+		await user.selectOptions(
+			card.getByLabelText("Modèle de l'étape Critères de distinction"),
+			"2",
+		);
+		const dialog = within(await screen.findByRole("dialog"));
+		await user.click(dialog.getByRole("button", { name: "Annuler" }));
+		expect(
+			sent("POST", "/api/admin/ai/steps/criteria/active-model"),
+		).toHaveLength(0);
+
+		await user.selectOptions(
+			card.getByLabelText("Modèle de l'étape Critères de distinction"),
+			"2",
+		);
+		await user.click(
+			within(await screen.findByRole("dialog")).getByRole("button", {
+				name: "Changer le modèle",
+			}),
+		);
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		expect(
+			sent("POST", "/api/admin/ai/steps/criteria/active-model")[0].body,
+		).toEqual({
+			modelId: 2,
+		});
+	});
+
+	it("step prompt: new version is created and old one activated", async () => {
+		const { sent } = fakeFetch({
+			...base,
+			"GET /api/admin/ai": () => json(overview()),
+			"GET /api/admin/ai/prompts/41": () =>
+				json({
+					id: 41,
+					version: 2,
+					active: true,
+					analyses: 0,
+					createdAt: "2026-10-12T10:00:00Z",
+					systemPrompt: PROMPT_TEXT,
+					step: "identify",
+				}),
+			"POST /api/admin/ai/steps/identify/prompts": () =>
+				json(
+					{
+						id: 42,
+						version: 3,
+						active: false,
+						analyses: 0,
+						createdAt: "2026-10-13T10:00:00Z",
+						systemPrompt: PROMPT_TEXT,
+						step: "identify",
+					},
+					201,
+				),
+			"POST /api/admin/ai/steps/identify/prompts/40/activate": () =>
+				json(overview()),
+		});
+		const user = userEvent.setup();
+		renderAt("/admin/ia");
+		const card = within(
+			await screen.findByRole("article", { name: "Identification" }),
+		);
+		await user.click(card.getByRole("button", { name: "Nouvelle version" }));
+		const box = (await card.findByLabelText(
+			"Texte de la nouvelle version",
+		)) as HTMLTextAreaElement;
+		expect(box.value).toBe(PROMPT_TEXT);
+		await user.click(card.getByRole("button", { name: "Créer la version" }));
+		expect(await card.findByText("Version 3 créée.")).toBeTruthy();
+		expect(
+			sent("POST", "/api/admin/ai/steps/identify/prompts")[0].body,
+		).toEqual({
+			systemPrompt: PROMPT_TEXT,
+		});
+
+		const old = within(card.getByRole("row", { name: /^1\b/ }));
+		await user.click(old.getByRole("button", { name: "Activer" }));
+		await user.click(
+			within(await screen.findByRole("dialog")).getByRole("button", {
+				name: "Activer la version",
+			}),
+		);
+		await waitFor(() =>
+			expect(
+				sent("POST", "/api/admin/ai/steps/identify/prompts/40/activate"),
+			).toHaveLength(1),
+		);
 	});
 
 	it("search status is shown", async () => {

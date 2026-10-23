@@ -124,6 +124,57 @@ async def activate_prompt(
     return await _overview(request, session)
 
 
+@router.post("/steps/{step}/active-model", response_model=AiOverviewOut)
+async def activate_step_model(
+    request: Request,
+    step: str,
+    body: ActiveModelIn,
+    admin: Annotated[AdminContext, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AiOverviewOut:
+    """Active un modèle pour une étape de l'identification (inconnue : 404)."""
+    await admin_ai.activate_step_model(
+        session,
+        admin_id=admin.user.id,
+        providers=request.app.state.providers,
+        step=step,
+        model_id=body.model_id,
+    )
+    await session.commit()
+    return await _overview(request, session)
+
+
+@router.post("/steps/{step}/prompts", response_model=PromptTextOut, status_code=201)
+async def create_step_prompt(
+    step: str,
+    body: PromptIn,
+    admin: Annotated[AdminContext, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PromptTextOut:
+    """Crée la version suivante du prompt d'une étape, non active."""
+    prompt_id = await admin_ai.create_step_prompt(
+        session, admin_id=admin.user.id, step=step, system_prompt=body.system_prompt
+    )
+    await session.commit()
+    return await admin_ai.get_prompt(session, prompt_id)
+
+
+@router.post("/steps/{step}/prompts/{prompt_id}/activate", response_model=AiOverviewOut)
+async def activate_step_prompt(
+    request: Request,
+    step: str,
+    prompt_id: int,
+    admin: Annotated[AdminContext, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AiOverviewOut:
+    """Active une version du prompt d'une étape (d'une autre étape : 404)."""
+    await admin_ai.activate_step_prompt(
+        session, admin_id=admin.user.id, step=step, prompt_id=prompt_id
+    )
+    await session.commit()
+    return await _overview(request, session)
+
+
 @router.patch("/settings", response_model=AiOverviewOut)
 async def update_settings(
     request: Request,

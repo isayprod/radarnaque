@@ -37,8 +37,14 @@ def _restore_ai_state(pg_url: str) -> Iterator[None]:
         kinds = conn.execute(
             "select code, active_model_id, active_prompt_version_id from app.scan_kinds"
         ).fetchall()
+        steps = conn.execute(
+            "select code, active_model_id, active_prompt_version_id from app.pipeline_steps"
+        ).fetchall()
         settings = conn.execute(
-            "select cache_ttl_hours, rate_limit_per_minute, max_web_searches from app.settings"
+            "select cache_ttl_hours, rate_limit_per_minute, max_web_searches,"
+            " identification_cache_ttl_hours, criteria_ttl_days, criteria_max_searches,"
+            " criteria_max_pages, identify_retry_threshold, identify_image_side,"
+            " scam_sends_photos, identify_escalation_model_id from app.settings"
         ).fetchone()
         max_model = conn.execute("select coalesce(max(id), 0) from app.models").fetchone()[0]
         max_prompt = conn.execute(
@@ -55,13 +61,21 @@ def _restore_ai_state(pg_url: str) -> Iterator[None]:
                 " where code = %s",
                 (model_id, prompt_id, code),
             )
-        conn.execute("delete from app.prompt_versions where id > %s", (max_prompt,))
-        conn.execute("delete from app.models where id > %s", (max_model,))
+        for code, model_id, prompt_id in steps:
+            conn.execute(
+                "update app.pipeline_steps set active_model_id = %s,"
+                " active_prompt_version_id = %s where code = %s",
+                (model_id, prompt_id, code),
+            )
         conn.execute(
             "update app.settings set cache_ttl_hours = %s, rate_limit_per_minute = %s,"
-            " max_web_searches = %s",
+            " max_web_searches = %s, identification_cache_ttl_hours = %s, criteria_ttl_days = %s,"
+            " criteria_max_searches = %s, criteria_max_pages = %s, identify_retry_threshold = %s,"
+            " identify_image_side = %s, scam_sends_photos = %s, identify_escalation_model_id = %s",
             settings,
         )
+        conn.execute("delete from app.prompt_versions where id > %s", (max_prompt,))
+        conn.execute("delete from app.models where id > %s", (max_model,))
 
 
 async def _scalar(db, sql: str, **params):
@@ -117,6 +131,9 @@ async def test_routes_require_admin(client, bearer, make_user):
         ("POST", "/api/admin/ai/prompts", {"systemPrompt": PROMPT}),
         ("POST", "/api/admin/ai/prompts/1/activate", None),
         ("PATCH", "/api/admin/ai/settings", {"maxWebSearches": 1}),
+        ("POST", "/api/admin/ai/steps/identify/active-model", {"modelId": 1}),
+        ("POST", "/api/admin/ai/steps/identify/prompts", {"systemPrompt": PROMPT}),
+        ("POST", "/api/admin/ai/steps/identify/prompts/1/activate", None),
     ]
     for method, url, body in calls:
         r = await client.request(method, url, json=body)
@@ -165,7 +182,21 @@ async def test_overview_shape(client, db, bearer, admin, monkeypatch):
     assert [p["id"] for p in data["prompts"] if p["active"]] == [active_prompt]
     assert "systemPrompt" not in json.dumps(data)  # le texte n'est jamais dans la vue d'ensemble
 
-    assert set(data["settings"]) == {"cacheTtlHours", "rateLimitPerMinute", "maxWebSearches"}
+    assert set(data["settings"]) == {
+        "cacheTtlHours",
+        "rateLimitPerMinute",
+        "maxWebSearches",
+        "identificationCacheTtlHours",
+        "criteriaTtlDays",
+        "criteriaMaxSearches",
+        "criteriaMaxPages",
+        "identifyRetryThreshold",
+        "identifyImageSide",
+        "scamSendsPhotos",
+        "identifyEscalationModelId",
+    }
+    assert data["settings"]["identificationCacheTtlHours"] == 168
+    assert data["settings"]["identifyEscalationModelId"] is None
     assert data["search"] == {
         "backend": "none",
         "url": None,
@@ -603,11 +634,11 @@ async def test_settings_bounds_journal_and_effect(client, db, bearer, admin, mak
         {"cacheTtlHours": 168, "rateLimitPerMinute": 600, "maxWebSearches": 0},
     )
     assert r.status_code == 200
-    assert r.json()["settings"] == {
+    assert {k: r.json()["settings"][k] for k in ("cacheTtlHours", "rateLimitPerMinute")} == {
         "cacheTtlHours": 168,
         "rateLimitPerMinute": 600,
-        "maxWebSearches": 0,
     }
+    assert r.json()["settings"]["maxWebSearches"] == 0
     assert await _actions(db) == [
         (
             "ai.settings_set",
@@ -642,3 +673,225 @@ async def test_settings_empty_or_unchanged_writes_nothing(client, db, bearer, ad
         assert r.status_code == 200, body
         assert r.json()["settings"] == current
     assert await _count_actions(db) == 0
+
+
+async def test_settings_new_fields_bounds(client, db, bearer, admin):
+    current = (await _overview(client, bearer, admin))["settings"]
+    for body in (
+        {"identificationCacheTtlHours": 0},
+        {"identificationCacheTtlHours": 2161},
+        {"criteriaTtlDays": 0},
+        {"criteriaTtlDays": 731},
+        {"criteriaMaxSearches": 6},
+        {"criteriaMaxPages": -1},
+        {"identifyRetryThreshold": 101},
+        {"identifyImageSide": 767},
+        {"identifyImageSide": 1537},
+        {"scamSendsPhotos": "x"},
+    ):
+        r = await _patch(client, bearer, admin, body)
+        assert r.status_code == 422, body
+    # Modèle de relance inexistant : 422, rien n'est écrit.
+    r = await _patch(client, bearer, admin, {"identifyEscalationModelId": 999_999})
+    assert r.status_code == 422
+    assert r.json()["error"]["details"] == {"field": "identifyEscalationModelId"}
+    assert await _count_actions(db) == 0
+    assert (await _overview(client, bearer, admin))["settings"] == current
+
+
+async def test_settings_new_fields_journal_and_escalation_clear(client, db, bearer, admin):
+    model = await _add_model(client, bearer, admin)
+    await db.rollback()
+    r = await _patch(
+        client,
+        bearer,
+        admin,
+        {
+            "criteriaTtlDays": 730,
+            "identifyImageSide": 768,
+            "scamSendsPhotos": True,
+            "identifyEscalationModelId": model["id"],
+        },
+    )
+    assert r.status_code == 200, r.text
+    got = r.json()["settings"]
+    assert got["criteriaTtlDays"] == 730 and got["identifyImageSide"] == 768
+    assert got["scamSendsPhotos"] is True and got["identifyEscalationModelId"] == model["id"]
+    actions = [a for a in await _actions(db) if a[0] == "ai.settings_set"]
+    assert {a[3]["field"]: (a[3]["from"], a[3]["to"]) for a in actions} == {
+        "criteria_ttl_days": (180, 730),
+        "identify_image_side": (1280, 768),
+        "scam_sends_photos": (False, True),
+        "identify_escalation_model_id": (None, model["id"]),
+    }
+    # `null` explicite retire la relance ; `scamSendsPhotos: false` est un vrai changement.
+    r = await _patch(
+        client, bearer, admin, {"identifyEscalationModelId": None, "scamSendsPhotos": False}
+    )
+    assert r.status_code == 200
+    got = r.json()["settings"]
+    assert got["identifyEscalationModelId"] is None and got["scamSendsPhotos"] is False
+    # Absent : inchangé.
+    r = await _patch(client, bearer, admin, {"identifyEscalationModelId": model["id"]})
+    r = await _patch(client, bearer, admin, {"criteriaMaxPages": 1})
+    assert r.json()["settings"]["identifyEscalationModelId"] == model["id"]
+
+
+# --- Étapes de l'identification ---------------------------------------------------------------
+
+STEP_CODES = ["read_photos", "criteria", "identify"]
+
+
+async def _step(client, bearer, admin, code: str) -> dict:
+    return next(s for s in (await _overview(client, bearer, admin))["steps"] if s["code"] == code)
+
+
+async def test_overview_lists_three_steps(client, db, bearer, admin):
+    data = await _overview(client, bearer, admin)
+    assert [s["code"] for s in data["steps"]] == STEP_CODES
+    for step in data["steps"]:
+        assert set(step) == {"code", "activeModelId", "activePromptId", "prompts"}
+        assert step["prompts"], step["code"]
+        assert [p["id"] for p in step["prompts"] if p["active"]] == [step["activePromptId"]]
+        versions = [p["version"] for p in step["prompts"]]
+        assert versions == sorted(versions, reverse=True)
+        assert step["activeModelId"] == await _scalar(
+            db,
+            "select active_model_id from app.pipeline_steps where code = :c",
+            c=step["code"],
+        )
+    # Les prompts d'étape n'entrent pas dans la liste du type `full`.
+    step_ids = {p["id"] for s in data["steps"] for p in s["prompts"]}
+    assert step_ids.isdisjoint({p["id"] for p in data["prompts"]})
+    assert "systemPrompt" not in json.dumps(data["steps"])
+
+
+async def test_set_step_model_logs_action(client, db, bearer, admin):
+    before = await _step(client, bearer, admin, "criteria")
+    model = await _add_model(client, bearer, admin)
+    r = await client.post(
+        "/api/admin/ai/steps/criteria/active-model",
+        json={"modelId": model["id"]},
+        headers=bearer(admin),
+    )
+    assert r.status_code == 200, r.text
+    step = next(s for s in r.json()["steps"] if s["code"] == "criteria")
+    assert step["activeModelId"] == model["id"]
+    others = [s for s in r.json()["steps"] if s["code"] != "criteria"]
+    assert all(s["activeModelId"] != model["id"] for s in others)
+    assert r.json()["activeModelId"] != model["id"]  # le type `full` est intact
+    assert (await _actions(db))[-1] == (
+        "ai.step_model_set",
+        admin,
+        None,
+        {"step": "criteria", "from": before["activeModelId"], "to": model["id"]},
+    )
+    # Déjà actif : rien n'est écrit.
+    count = await _count_actions(db)
+    r = await client.post(
+        "/api/admin/ai/steps/criteria/active-model",
+        json={"modelId": model["id"]},
+        headers=bearer(admin),
+    )
+    assert r.status_code == 200
+    assert await _count_actions(db) == count
+    # Modèle absent : 404.
+    r = await client.post(
+        "/api/admin/ai/steps/criteria/active-model",
+        json={"modelId": 999_999},
+        headers=bearer(admin),
+    )
+    assert r.status_code == 404
+    assert await _count_actions(db) == count
+
+
+async def test_create_and_activate_step_prompt(client, db, bearer, admin):
+    before = await _step(client, bearer, admin, "identify")
+    top = before["prompts"][0]["version"]
+    r = await client.post(
+        "/api/admin/ai/steps/identify/prompts",
+        json={"systemPrompt": PROMPT},
+        headers=bearer(admin),
+    )
+    assert r.status_code == 201, r.text
+    made = r.json()
+    assert made["version"] == top + 1
+    assert made["step"] == "identify" and made["active"] is False
+    assert made["systemPrompt"] == PROMPT
+    assert (await _actions(db))[-1] == (
+        "ai.step_prompt_created",
+        admin,
+        None,
+        {"step": "identify", "from": top, "to": top + 1},
+    )
+
+    got = await client.get(f"/api/admin/ai/prompts/{made['id']}", headers=bearer(admin))
+    assert got.status_code == 200 and got.json() == made
+    # Le prompt actif d'une étape se consulte avec son drapeau actif ; `full` : step nul.
+    active = await client.get(
+        f"/api/admin/ai/prompts/{before['activePromptId']}", headers=bearer(admin)
+    )
+    assert active.json()["active"] is True and active.json()["step"] == "identify"
+    full_id = (await _overview(client, bearer, admin))["activePromptVersionId"]
+    full = await client.get(f"/api/admin/ai/prompts/{full_id}", headers=bearer(admin))
+    assert full.json()["step"] is None and full.json()["active"] is True
+
+    r = await client.post(
+        f"/api/admin/ai/steps/identify/prompts/{made['id']}/activate", headers=bearer(admin)
+    )
+    assert r.status_code == 200, r.text
+    step = next(s for s in r.json()["steps"] if s["code"] == "identify")
+    assert step["activePromptId"] == made["id"]
+    assert [p["id"] for p in step["prompts"] if p["active"]] == [made["id"]]
+    assert (await _actions(db))[-1] == (
+        "ai.step_prompt_activated",
+        admin,
+        None,
+        {"step": "identify", "from": before["prompts"][0]["version"], "to": top + 1},
+    )
+    # Déjà active : rien n'est écrit.
+    count = await _count_actions(db)
+    r = await client.post(
+        f"/api/admin/ai/steps/identify/prompts/{made['id']}/activate", headers=bearer(admin)
+    )
+    assert r.status_code == 200 and await _count_actions(db) == count
+
+    # Les numéros se suivent, étape par étape.
+    r = await client.post(
+        "/api/admin/ai/steps/criteria/prompts", json={"systemPrompt": PROMPT}, headers=bearer(admin)
+    )
+    criteria_top = (await _step(client, bearer, admin, "criteria"))["prompts"][0]["version"]
+    assert r.json()["version"] == criteria_top
+
+
+async def test_step_prompt_bounds_200_20000(client, db, bearer, admin):
+    url = "/api/admin/ai/steps/read_photos/prompts"
+    for size in (199, 20_001):
+        r = await client.post(url, json={"systemPrompt": "x" * size}, headers=bearer(admin))
+        assert r.status_code == 422, size
+    assert await _count_actions(db) == 0
+    for size in (200, 20_000):
+        r = await client.post(url, json={"systemPrompt": "x" * size}, headers=bearer(admin))
+        assert r.status_code == 201, size
+
+
+async def test_unknown_step_404(client, db, bearer, admin):
+    model = await _add_model(client, bearer, admin)
+    count = await _count_actions(db)
+    calls = [
+        ("/api/admin/ai/steps/inconnue/active-model", {"modelId": model["id"]}),
+        ("/api/admin/ai/steps/inconnue/prompts", {"systemPrompt": PROMPT}),
+        ("/api/admin/ai/steps/inconnue/prompts/1/activate", None),
+    ]
+    for url, body in calls:
+        r = await client.post(url, json=body, headers=bearer(admin))
+        assert r.status_code == 404, url
+    # Un prompt d'une autre étape, ou du type `full`, est introuvable pour cette étape.
+    other = (await _step(client, bearer, admin, "criteria"))["activePromptId"]
+    full_id = (await _overview(client, bearer, admin))["activePromptVersionId"]
+    for prompt_id in (other, full_id, 999_999):
+        r = await client.post(
+            f"/api/admin/ai/steps/identify/prompts/{prompt_id}/activate", headers=bearer(admin)
+        )
+        assert r.status_code == 404, prompt_id
+    assert await _count_actions(db) == count
