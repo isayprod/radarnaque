@@ -238,3 +238,19 @@ async def test_identification_flags_default_to_false(db):
         ("unsourced", "NO", "false"),
         ("verified_criteria", "NO", "false"),
     ]
+
+
+async def test_set_null_references_are_indexed(db):
+    """Supprimer un critère ou un ensemble met ces colonnes à nul : sans index, chaque
+    suppression parcourt toute la table référençante."""
+    assert await _rows(
+        db,
+        "select tablename, indexname, indexdef like '% WHERE %' from pg_indexes"
+        " where schemaname = 'app' and indexname in ('ix_identification_checks_criterion_id',"
+        " 'ix_identification_objects_criteria_set_id', 'ix_llm_calls_criteria_set_id')"
+        " order by 1",
+    ) == [
+        ("identification_checks", "ix_identification_checks_criterion_id", False),
+        ("identification_objects", "ix_identification_objects_criteria_set_id", False),
+        ("llm_calls", "ix_llm_calls_criteria_set_id", True),
+    ]

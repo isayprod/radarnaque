@@ -235,6 +235,13 @@ def upgrade() -> None:
         sa.UniqueConstraint("identification_id", "position"),
         schema=S,
     )
+    # Clés `ON DELETE SET NULL` : la suppression d'un ensemble ou d'un critère les parcourt.
+    op.create_index(
+        "ix_identification_objects_criteria_set_id",
+        "identification_objects",
+        ["criteria_set_id"],
+        schema=S,
+    )
     op.create_table(
         "identification_checks",
         sa.Column(
@@ -266,6 +273,12 @@ def upgrade() -> None:
             "observation in ('seen_match', 'seen_contrary', 'not_visible')",
             name="ck_identification_checks_observation",
         ),
+        schema=S,
+    )
+    op.create_index(
+        "ix_identification_checks_criterion_id",
+        "identification_checks",
+        ["criterion_id"],
         schema=S,
     )
     op.create_table(
@@ -392,9 +405,17 @@ def upgrade() -> None:
         schema=S,
     )
     op.create_index("ix_llm_calls_identification_id", "llm_calls", ["identification_id"], schema=S)
+    op.create_index(
+        "ix_llm_calls_criteria_set_id",
+        "llm_calls",
+        ["criteria_set_id"],
+        schema=S,
+        postgresql_where=sa.text("criteria_set_id is not null"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("ix_llm_calls_criteria_set_id", table_name="llm_calls", schema=S)
     op.drop_index("ix_llm_calls_identification_id", table_name="llm_calls", schema=S)
     op.drop_constraint("ck_llm_calls_target", "llm_calls", schema=S, type_="check")
     op.drop_constraint("ck_llm_calls_step", "llm_calls", schema=S, type_="check")

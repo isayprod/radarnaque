@@ -119,6 +119,8 @@ class IdentificationObject(Base):
             "confidence between 0 and 100", name="ck_identification_objects_confidence"
         ),
         UniqueConstraint("identification_id", "position"),
+        # Clé `ON DELETE SET NULL` : la suppression d'un ensemble parcourt cette colonne.
+        Index("ix_identification_objects_criteria_set_id", "criteria_set_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -144,6 +146,8 @@ class IdentificationCheck(Base):
             "observation in ('seen_match', 'seen_contrary', 'not_visible')",
             name="ck_identification_checks_observation",
         ),
+        # Clé `ON DELETE SET NULL` : la suppression d'un critère parcourt cette colonne.
+        Index("ix_identification_checks_criterion_id", "criterion_id"),
     )
 
     object_id: Mapped[int] = mapped_column(
