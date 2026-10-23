@@ -1,13 +1,26 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from radarnaque_api.auth.privileges import Privileges
 from radarnaque_api.images import MAX_IMAGES
-from radarnaque_api.models import Plan, PlanFeature, PlanQuota, ScanEvent, ScanFailure, Subscription
+from radarnaque_api.models import (
+    Identification,
+    IdentificationResult,
+    ListingSnapshot,
+    Plan,
+    PlanFeature,
+    PlanQuota,
+    ScanEvent,
+    ScanFailure,
+    Subscription,
+)
 from radarnaque_api.services.periods import current_period_start
+
+INCLUDE_WINDOW = timedelta(hours=24)  # un `identify` inclut l'`analyze` qui le suit sous 24 h
 
 
 @dataclass(frozen=True)
@@ -25,7 +38,8 @@ class UsageSummary:
 
 
 async def compute_usage(session: AsyncSession, sub: Subscription, now: datetime) -> UsageSummary:
-    """Consommation de l'abonnement sur sa période. Les scans en échec ne comptent pas."""
+    """Consommation de l'abonnement sur sa période. Les scans en échec et les `analyze` inclus
+    dans un `identify` ne comptent pas."""
     plan = await session.get(Plan, sub.plan)
     if plan is None:  # impossible : clé étrangère
         raise LookupError(f"plan inconnu : {sub.plan}")
@@ -50,6 +64,7 @@ async def compute_usage(session: AsyncSession, sub: Subscription, now: datetime)
                     ScanEvent.user_id == sub.user_id,
                     ScanEvent.created_at >= period_start,
                     ScanFailure.scan_event_id.is_(None),
+                    ScanEvent.included_by_event_id.is_(None),  # `analyze` inclus : gratuit
                 )
                 .group_by(ScanEvent.scan_kind)
             )
@@ -74,6 +89,39 @@ async def compute_usage(session: AsyncSession, sub: Subscription, now: datetime)
         None if cap is None else KindUsage(limit=cap, used=total_used, remaining=cap_remaining or 0)
     )
     return UsageSummary(period_start=period_start, per_kind=per_kind, total=total)
+
+
+async def included_identify_event(
+    session: AsyncSession, user_id: str, listing_id: int, at: datetime
+) -> int | None:
+    """À appeler sous le verrou consultatif de l'utilisateur. L'`identify` le plus récent de
+    `user_id` sur une snapshot de l'annonce `listing_id`, réussi (`identification_results`,
+    aucune `scan_failures`), de moins de 24 h, et qu'aucun `analyze` réussi ne référence déjà
+    (`included_by_event_id`) ; `None` s'il n'y en a pas."""
+    identify = aliased(ScanEvent)
+    taker = aliased(ScanEvent)
+    failed = select(ScanFailure.scan_event_id).where(ScanFailure.scan_event_id == identify.id)
+    taken = (
+        select(taker.id)
+        .outerjoin(ScanFailure, ScanFailure.scan_event_id == taker.id)
+        .where(taker.included_by_event_id == identify.id, ScanFailure.scan_event_id.is_(None))
+    )
+    return await session.scalar(
+        select(identify.id)
+        .join(IdentificationResult, IdentificationResult.scan_event_id == identify.id)
+        .join(Identification, Identification.id == IdentificationResult.identification_id)
+        .join(ListingSnapshot, ListingSnapshot.id == Identification.snapshot_id)
+        .where(
+            identify.user_id == user_id,
+            identify.purpose == "identify",
+            ListingSnapshot.listing_id == listing_id,
+            identify.created_at > at - INCLUDE_WINDOW,
+            ~failed.exists(),
+            ~taken.exists(),
+        )
+        .order_by(identify.created_at.desc(), identify.id.desc())
+        .limit(1)
+    )
 
 
 async def plan_max_images(
