@@ -206,6 +206,128 @@ const RESULTS: Record<"low" | "medium" | "high", AnalysisResult> = {
 	},
 };
 
+/** Objet principal de l'identification fictive d'un état. */
+const IDENTIFIED_OBJECT: IdentificationResult["objects"][number] = {
+	role: "main",
+	label: "Vélo de ville",
+	reference: "Gazelle Orange C7 HMB",
+	confidence: 92,
+	level: "sure",
+	remaining: ["Gazelle Orange C7 HMB"],
+	checks: [
+		{
+			text: { fr: "Taille du cadre : 54 cm", nl: "Framemaat: 54 cm" },
+			observation: "seen_match",
+			photo: 1,
+			sources: [],
+		},
+		{
+			text: { fr: "Moyeu à vitesses intégrées", nl: "Naafversnelling" },
+			observation: "seen_match",
+			photo: 2,
+			sources: [],
+		},
+	],
+	pages: [
+		{
+			url: "https://www.gazelle.nl/fietsen/orange-c7-hmb",
+			title: "Orange C7 HMB",
+			domain: "www.gazelle.nl",
+		},
+	],
+};
+
+const IDENTIFICATIONS: Record<
+	"sure" | "uncertain" | "none",
+	IdentificationResult
+> = {
+	sure: {
+		identificationId: 11,
+		status: "identified",
+		confidence: 92,
+		level: "sure",
+		objects: [IDENTIFIED_OBJECT],
+		sellerQuestion: null,
+		titleMismatch: null,
+		photoObservations: [],
+		searches: [
+			{ query: "Gazelle Orange C7 HMB", kind: "reference", pagesRead: [] },
+		],
+		verifiedCriteria: true,
+		unsourced: false,
+		imagesAnalyzed: 3,
+		fromCache: false,
+		identifiedAt: new Date().toISOString(),
+		remaining: { scans: 2 },
+	},
+	uncertain: {
+		identificationId: 12,
+		status: "uncertain",
+		confidence: 41,
+		level: "uncertain",
+		objects: [
+			{
+				...IDENTIFIED_OBJECT,
+				reference: null,
+				confidence: 41,
+				level: "uncertain",
+				remaining: ["Gazelle Orange C7 HMB", "Gazelle Orange C7+ HMB"],
+				checks: [
+					{
+						text: { fr: "Taille du cadre", nl: "Framemaat" },
+						observation: "seen_match",
+						photo: 1,
+						sources: [],
+					},
+					{
+						text: { fr: "Année de fabrication", nl: "Bouwjaar" },
+						observation: "not_visible",
+						photo: null,
+						sources: [],
+					},
+					{
+						text: { fr: "Type de moyeu", nl: "Type naaf" },
+						observation: "not_visible",
+						photo: null,
+						sources: [],
+					},
+				],
+				pages: [],
+			},
+		],
+		sellerQuestion: {
+			fr: "De quelle année date le vélo, et quel est le modèle exact du moyeu ?",
+			nl: "Uit welk jaar is de fiets en welk type naaf heeft hij precies?",
+		},
+		titleMismatch: null,
+		photoObservations: [],
+		searches: [],
+		verifiedCriteria: false,
+		unsourced: true,
+		imagesAnalyzed: 3,
+		fromCache: false,
+		identifiedAt: new Date().toISOString(),
+		remaining: { scans: 2 },
+	},
+	none: {
+		identificationId: 13,
+		status: "none",
+		confidence: 0,
+		level: "uncertain",
+		objects: [],
+		sellerQuestion: null,
+		titleMismatch: null,
+		photoObservations: [],
+		searches: [],
+		verifiedCriteria: false,
+		unsourced: false,
+		imagesAnalyzed: 3,
+		fromCache: false,
+		identifiedAt: new Date().toISOString(),
+		remaining: { scans: 2 },
+	},
+};
+
 // --- Doublures ---------------------------------------------------------------
 
 type Outcome = BgResponse<AnalysisResult>;
@@ -219,6 +341,10 @@ interface ClientPlan {
 	outcome?: Outcome;
 	/** La popup de connexion ne s'ouvre pas : le panneau montre le repli. */
 	loginFails?: boolean;
+	/** Événements envoyés pendant l'identification, un toutes les 60 ms. */
+	identifyEvents?: ScanProgressEvent[];
+	/** Issue de l'identification ; sans issue, elle ne finit jamais. */
+	identifyOutcome?: BgResponse<IdentificationResult>;
 }
 
 function fakeClient(plan: ClientPlan): AiClient {
@@ -250,16 +376,30 @@ function fakeClient(plan: ClientPlan): AiClient {
 				},
 			};
 		},
-		// Pas encore de scénario d'identification dans la galerie : elle ne finit
-		// qu'à l'annulation.
-		identify() {
+		identify(_req, onEvent) {
+			const timers: number[] = [];
 			let settle!: (response: BgResponse<IdentificationResult>) => void;
 			const done = new Promise<BgResponse<IdentificationResult>>((resolve) => {
 				settle = resolve;
 			});
+			const events = plan.identifyEvents ?? [];
+			events.forEach((event, index) => {
+				timers.push(window.setTimeout(() => onEvent(event), 60 * (index + 1)));
+			});
+			const { identifyOutcome } = plan;
+			if (identifyOutcome)
+				timers.push(
+					window.setTimeout(
+						() => settle(identifyOutcome),
+						60 * (events.length + 2),
+					),
+				);
 			return {
 				done,
-				cancel: () => settle({ ok: false, error: { code: "cancelled" } }),
+				cancel() {
+					for (const timer of timers) clearTimeout(timer);
+					settle({ ok: false, error: { code: "cancelled" } });
+				},
 			};
 		},
 		openLogin: async () =>
@@ -269,18 +409,20 @@ function fakeClient(plan: ClientPlan): AiClient {
 	};
 }
 
-/** Magasin simulé : le résultat gardé de l'annonce, ou rien. */
+/** Magasin simulé : l'analyse et l'identification gardées de l'annonce, ou rien. */
 function fakeStore(
 	listing: Listing,
 	result: AnalysisResult | null,
+	identification: IdentificationResult | null = null,
+	identifiedByUser = false,
 ): AiResultStore {
 	return {
 		get: async () =>
-			result
+			result || identification
 				? {
 						result,
-						identification: null,
-						identifiedByUser: false,
+						identification,
+						identifiedByUser,
 						fingerprint: listingFingerprint(listing),
 						storedAt: Date.now(),
 					}
@@ -313,6 +455,23 @@ const ANALYZE = "[data-pill='analyze']";
 /** Clic sur la pilule « Analyser » (son bouton), une fois qu'elle est rendue. */
 const clickPill = async (root: ShadowRoot, selector = `${ANALYZE} button`) =>
 	(await waitFor<HTMLElement>(root, selector)).click();
+
+/** Pilule « Identifier » : la première de la ligne. */
+const IDENTIFY = "[data-pill='identify']";
+
+const clickIdentify = async (root: ShadowRoot) =>
+	clickPill(root, `${IDENTIFY} button`);
+
+/** Ouvre le panneau Identification sur un résultat déjà là (magasin). */
+const openIdentification = async (root: ShadowRoot) =>
+	clickPill(root, `${IDENTIFY} button[aria-expanded='false']`);
+
+/** Lance l'identification, puis demande l'analyse pendant qu'elle tourne. */
+async function identifyThenQueueAnalysis(root: ShadowRoot) {
+	await clickIdentify(root);
+	await clickPill(root, `${IDENTIFY} button[aria-busy='true']`).catch(() => {});
+	await clickPill(root);
+}
 
 /** Lance l'analyse, puis ouvre le panneau sur son résultat. */
 async function launchThenOpen(root: ShadowRoot) {
@@ -356,6 +515,9 @@ function badge(
 	plan: ClientPlan,
 	options: {
 		stored?: AnalysisResult;
+		storedIdentification?: IdentificationResult;
+		/** Identification demandée par l'utilisateur (l'analyse est alors « Incluse »). */
+		identifiedByUser?: boolean;
 		cachedAccess?: ContentAccess;
 		professional?: boolean;
 	} = {},
@@ -371,7 +533,12 @@ function badge(
 			locale={locale}
 			ai={fakeClient(plan)}
 			accessCache={accessCache}
-			aiResults={fakeStore(listing, options.stored ?? null)}
+			aiResults={fakeStore(
+				listing,
+				options.stored ?? null,
+				options.storedIdentification ?? null,
+				options.identifiedByUser,
+			)}
 		/>
 	);
 }
@@ -486,7 +653,137 @@ const PILLS: Stage[] = [
 	},
 ];
 
+const IDENTIFY_PILLS: Stage[] = [
+	{
+		id: "identify-idle",
+		label: "pilule Identifier au repos",
+		render: (locale) => ({
+			node: badge("identifier-repos", locale, { access: active(3) }),
+		}),
+	},
+	{
+		id: "identify-loading",
+		label: "pilule Identifier en cours",
+		render: (locale) => ({
+			node: badge("identifier-cours", locale, {
+				access: active(3),
+				identifyEvents: SEARCHES.slice(0, 3),
+			}),
+			script: clickIdentify,
+		}),
+	},
+	{
+		id: "identify-sure",
+		label: "pilule Identifier, Sûr",
+		render: (locale) => ({
+			node: badge(
+				"identifier-sur",
+				locale,
+				{ access: active(3) },
+				{ storedIdentification: IDENTIFICATIONS.sure, identifiedByUser: true },
+			),
+		}),
+	},
+	{
+		id: "identify-uncertain",
+		label: "pilule Identifier, Incertain (A ou B ?)",
+		render: (locale) => ({
+			node: badge(
+				"identifier-incertain",
+				locale,
+				{ access: active(3) },
+				{
+					storedIdentification: IDENTIFICATIONS.uncertain,
+					identifiedByUser: true,
+				},
+			),
+		}),
+	},
+	{
+		id: "identify-none",
+		label: "pilule Identifier, produit non identifié",
+		render: (locale) => ({
+			node: badge(
+				"identifier-aucun",
+				locale,
+				{ access: active(3) },
+				{ storedIdentification: IDENTIFICATIONS.none, identifiedByUser: true },
+			),
+		}),
+	},
+	{
+		id: "identify-error",
+		label: "pilule Identifier en erreur",
+		render: (locale) => ({
+			node: badge("identifier-erreur", locale, {
+				access: active(3),
+				identifyEvents: SEARCHES.slice(0, 1),
+				identifyOutcome: { ok: false, error: { code: "stream_interrupted" } },
+			}),
+			script: clickIdentify,
+		}),
+	},
+	{
+		id: "analyze-queued",
+		label: "« Analyser » en attente de l'identification",
+		render: (locale) => ({
+			node: badge("analyser-attente", locale, {
+				access: active(3),
+				identifyEvents: SEARCHES,
+			}),
+			script: identifyThenQueueAnalysis,
+		}),
+	},
+	{
+		id: "analyze-included",
+		label: "« Analyser » inclus (identification faite, quota à 0)",
+		render: (locale) => ({
+			node: badge(
+				"analyser-inclus",
+				locale,
+				{ access: active(0) },
+				{
+					storedIdentification: IDENTIFICATIONS.sure,
+					identifiedByUser: true,
+					cachedAccess: active(0),
+				},
+			),
+		}),
+	},
+];
+
 const PANELS: Stage[] = [
+	{
+		id: "panel-identify-sure",
+		label: "panneau Identification, Sûr",
+		kind: "tall",
+		render: (locale) => ({
+			node: badge(
+				"panneau-id-sur",
+				locale,
+				{ access: active(3) },
+				{ storedIdentification: IDENTIFICATIONS.sure, identifiedByUser: true },
+			),
+			script: openIdentification,
+		}),
+	},
+	{
+		id: "panel-identify-uncertain",
+		label: "panneau Identification, Incertain",
+		kind: "tall",
+		render: (locale) => ({
+			node: badge(
+				"panneau-id-incertain",
+				locale,
+				{ access: active(3) },
+				{
+					storedIdentification: IDENTIFICATIONS.uncertain,
+					identifiedByUser: true,
+				},
+			),
+			script: openIdentification,
+		}),
+	},
 	{
 		id: "panel-high",
 		label: "panneau, résultat élevé",
@@ -608,6 +905,25 @@ const CARDS: Stage[] = [
 		}),
 	},
 	{
+		id: "card-product",
+		label: "carte, résultat avec la ligne produit (infobulle)",
+		kind: "card",
+		render: (locale) => ({
+			node: (
+				<CardBadge
+					state={{
+						status: "done",
+						result: { ...cardResult, identification: IDENTIFICATIONS.sure },
+						progress: null,
+					}}
+					locale={locale}
+					onActivate={noop}
+				/>
+			),
+			script: hoverCard,
+		}),
+	},
+	{
 		id: "card-pro",
 		label: "carte, résultat professionnel (infobulle)",
 		kind: "card",
@@ -693,6 +1009,7 @@ function renderStage(stage: Stage, locale: Locale, grid: HTMLElement) {
 
 const GROUPS: Array<[string, Stage[]]> = [
 	["Pilule de la fiche", PILLS],
+	["Pilule Identifier", IDENTIFY_PILLS],
 	["Panneau", PANELS],
 	["Icônes des cartes", CARDS],
 ];

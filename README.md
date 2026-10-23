@@ -381,6 +381,19 @@ modèle peut chercher sur le web (SearXNG, démarré par `pnpm dev`).
    `openai-oauth`. Voir les sections « Faux fournisseur (`stub`) », « Groq » et « Abonnement
    ChatGPT/Codex (`openai-oauth`) » ci-dessus. `radarnaque-llm list` donne le modèle actif.
 
+### Pilule « Identifier » et délai du flux
+
+La pastille a deux pilules : « Identifier » (logo et « Identifier », nommée « Identifier le
+produit ») puis « Analyser ». « Identifier » appelle `POST /api/identify/stream` et consomme 1
+analyse ; l'analyse qui suit, sur la même annonce, est incluse (la pilule « Analyser » porte
+alors la mention « Inclus », même quota à 0). Le résultat s'affiche dans la pilule (glyphe ● Sûr,
+◐ Probable, ○ Incertain, référence, niveau et pourcentage) et dans un panneau Identification à
+part ; sur une page de résultats, l'infobulle d'une carte analysée ajoute la ligne
+« référence · niveau ». Cliquer sur « Analyser » pendant une identification la met en file
+(« En attente de l'identification »). Le service worker coupe un flux au bout de 310 s
+(`SCAN_TIMEOUT_MS`), pour laisser au scan ses 80 s d'identification puis ses 180 s d'analyse.
+La galerie (`pnpm --filter extension gallery`, port 3101) montre chacun de ces états.
+
 ### Sur une annonce (2ememain, 2dehands ou Facebook Marketplace)
 
 1. Ouvrir une annonce, par exemple `https://www.2ememain.be/v/…` ou

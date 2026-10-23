@@ -278,7 +278,7 @@ export function createCardController(deps: CardControllerDeps): {
 					void deps.aiResults
 						?.put(site, id, {
 							result: state.result,
-							identification: null,
+							identification: state.result.identification ?? null,
 							identifiedByUser: false,
 							fingerprint: listingFingerprint(scanned),
 							storedAt: Date.now(),

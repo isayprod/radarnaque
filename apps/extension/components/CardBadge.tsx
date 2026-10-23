@@ -2,6 +2,7 @@ import type { Locale } from "@radarnaque/shared";
 import { type SyntheticEvent, useId, useRef, useState } from "react";
 import type { ScanState } from "../lib/content/ai-client";
 import type { CardView } from "../lib/content/card-controller";
+import { identificationHeadline } from "../lib/content/identification-headline";
 import { statusLine } from "../lib/content/scan-progress";
 import { aiErrorText, contentText } from "../lib/content-i18n";
 import { PILL_CLASS } from "./BadgePill";
@@ -37,23 +38,43 @@ const cancel = (event: SyntheticEvent) => {
 
 /**
  * Contenu de l'infobulle : la ligne d'état en direct pendant l'analyse, puis le
- * résumé de l'IA ou le message d'erreur ; rien sinon. `professional` ajoute
- * `pro.notice` sous le résumé.
+ * résumé de l'IA ou le message d'erreur ; rien sinon. `product` est la ligne
+ * « référence · niveau » d'un produit identifié ou incertain, avant le résumé.
+ * `professional` ajoute `pro.notice` sous le résumé.
  */
 function tooltipOf(
 	state: ScanState,
 	locale: Locale,
-): { text: string; professional: boolean } | null {
+): { text: string; product: string | null; professional: boolean } | null {
 	if (state.status === "loading")
-		return { text: statusLine(state.progress, locale), professional: false };
+		return {
+			text: statusLine(state.progress, locale),
+			product: null,
+			professional: false,
+		};
 	if (state.status === "error")
-		return { text: aiErrorText(locale, state.code), professional: false };
+		return {
+			text: aiErrorText(locale, state.code),
+			product: null,
+			professional: false,
+		};
 	if (state.status !== "done") return null;
-	const { summary, partial, professional } = state.result;
+	const { summary, partial, professional, identification } = state.result;
 	const text = partial
 		? `${summary[locale]} ${contentText(locale, "ai.partial")}`
 		: summary[locale];
-	return { text, professional };
+	// Rien à dire d'un produit non identifié (`none`) ou sans identification.
+	const headline = identification
+		? identificationHeadline(identification, locale)
+		: null;
+	// Même objet principal que le titre ; sans référence, « ? ».
+	const main =
+		identification?.objects.find((o) => o.role === "main") ??
+		identification?.objects[0];
+	const product = headline
+		? `${main?.reference ? headline.short : "?"} · ${headline.level}`
+		: null;
+	return { text, product, professional };
 }
 
 function ButtonContent({ state, locale }: Omit<CardView, "onActivate">) {
@@ -166,6 +187,9 @@ export function CardBadge({ state, locale, onActivate }: CardView) {
 					hidden={!open}
 					className={TOOLTIP_CLASS}
 				>
+					{tip.product && (
+						<span className="mb-1 block font-medium">{tip.product}</span>
+					)}
 					<span className="block">{tip.text}</span>
 					{tip.professional && (
 						<span className="mt-1 block border-t border-border-subtle pt-1 text-text-2">
