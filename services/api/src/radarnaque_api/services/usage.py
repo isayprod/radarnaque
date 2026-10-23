@@ -64,7 +64,7 @@ async def compute_usage(session: AsyncSession, sub: Subscription, now: datetime)
                     ScanEvent.user_id == sub.user_id,
                     ScanEvent.created_at >= period_start,
                     ScanFailure.scan_event_id.is_(None),
-                    ScanEvent.included_by_event_id.is_(None),  # `analyze` inclus : gratuit
+                    ScanEvent.included.is_(False),  # `analyze` inclus : gratuit
                 )
                 .group_by(ScanEvent.scan_kind)
             )

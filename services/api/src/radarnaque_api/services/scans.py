@@ -298,6 +298,7 @@ async def _reserve(
                 trigger=scan.trigger,
                 purpose=purpose,
                 included_by_event_id=included_by,
+                included=included_by is not None,
                 created_at=at,
             )
             .returning(ScanEvent.id)

@@ -248,3 +248,15 @@ async def test_concurrent_identify_and_analyze(engine, clock):
         )
     assert marked == 1
     assert await remaining(engine, racer, clock) == 1
+
+
+async def test_same_listing_other_snapshot_includes(engine, clock):
+    user = await _user(engine)
+    identify = await admit(engine, user, clock, "identify", _scan(description="version A"))
+    await succeed(engine, identify)
+    clock.advance(minutes=1)
+    analysis = await admit(engine, user, clock, "analyze", _scan(description="version B"))
+    assert analysis.snapshot_id != identify.snapshot_id
+    assert analysis.listing_id == identify.listing_id
+    assert analysis.included
+    assert await included_by(engine, analysis.event_id) == identify.event_id
