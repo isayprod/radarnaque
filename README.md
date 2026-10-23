@@ -339,7 +339,7 @@ Incertain). Le résultat nourrit ensuite l'analyse anti-arnaque (`scam`). La sp�
   | `criteria_max_pages` | 3 | pages publiques lues par le serveur pour les critères |
   | `identify_retry_threshold` | 60 | confiance en dessous de laquelle `identify` est relancé (recherche en plus, modèle de relance) |
   | `identify_image_side` | 1280 | côté maximal des photos envoyées à l'identification (768 à 1536 px) |
-  | `scam_sends_photos` | non | l'analyse anti-arnaque reçoit-elle aussi les photos |
+  | `scam_sends_photos` | non | l'analyse anti-arnaque reçoit-elle aussi les photos ; à non, l'analyse enregistre `images_analyzed = 0` alors que les photos ont été analysées par l'identification (voir `identifications.images_analyzed`) |
   | `identify_escalation_model_id` | aucun | modèle de la relance (sinon celui d'`identify`) |
 - **Étapes :** un modèle actif et un prompt versionné par étape (`read_photos`, `criteria`,
   `identify`), réglés dans l'écran IA de l'admin ; l'analyse (`scam`, prompt `full`) garde ses
