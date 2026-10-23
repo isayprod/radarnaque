@@ -42,5 +42,20 @@ class Writing:
     """Le modèle commence sa réponse finale."""
 
 
-LLMEvent = Thinking | SearchStarted | SearchDone | Writing
+@dataclass(frozen=True)
+class PageRead:
+    """Une page web lue pour l'identification (`ok` faux : refusée ou en échec)."""
+
+    domain: str
+    ok: bool
+
+
+@dataclass(frozen=True)
+class CriteriaCached:
+    """Critères de distinction déjà connus, repris de la base partagée."""
+
+    count: int
+
+
+LLMEvent = Thinking | SearchStarted | SearchDone | Writing | PageRead | CriteriaCached
 EventSink = Callable[[LLMEvent], Awaitable[None]]

@@ -657,3 +657,8 @@ async def test_client_gone_before_the_stream_gives_back(
     assert llm.calls == 0
     assert await _wait_failures(db, uid) == ["internal"]
     assert len(given_back) == 1
+
+
+def test_sse_of_identification_stages():
+    for stage in ("reading_photos", "criteria", "identifying", "retrying"):
+        assert sse_of(Stage(stage)) == f'event: stage\ndata: {{"stage":"{stage}"}}\n\n'
