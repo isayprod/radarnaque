@@ -19,7 +19,9 @@ from radarnaque_api.llm.tools import WebSearchTool
 
 class FakeLLM:
     """Faux client LLM : compte ses appels, et chaque appel rend un score différent.
-    `complete` rend `step_outputs[schema_name]` et note l'appel dans `step_calls`."""
+    `complete` rend `step_outputs[schema_name]` et note l'appel dans `step_calls` ; une liste y
+    donne une sortie par appel, dans l'ordre (la dernière ensuite). `step_errors[schema_name]`
+    est levée à la place d'une sortie."""
 
     def __init__(
         self, *, delay: float = 0.0, error: Exception | None = None, max_images: int | None = None
@@ -33,7 +35,8 @@ class FakeLLM:
         self.searches: list[
             SearchRecord
         ] = []  # recherches web « faites » par les prochaines réponses
-        self.step_outputs: dict[str, BaseModel] = {}
+        self.step_outputs: dict[str, BaseModel | list[BaseModel]] = {}
+        self.step_errors: dict[str, Exception] = {}
         self.step_calls: list[dict] = []
 
     def llm_for(self, provider: str) -> "FakeLLM":
@@ -97,12 +100,18 @@ class FakeLLM:
             await asyncio.sleep(self.delay)
         if self.error is not None:
             raise self.error
+        if schema_name in self.step_errors:
+            raise self.step_errors[schema_name]
+        prepared = self.step_outputs[schema_name]
+        if isinstance(prepared, list):
+            seen = sum(c["schema_name"] == schema_name for c in self.step_calls)
+            prepared = prepared[min(seen, len(prepared)) - 1]
         n = len(self.step_calls)
         return StepResult(
-            output=self.step_outputs[schema_name],  # type: ignore[arg-type]
+            output=prepared,  # type: ignore[arg-type]
             tokens_in=100 * n,
             tokens_out=10 * n,
             cost_usd_micros=42 * n,
-            raw_text=self.step_outputs[schema_name].model_dump_json(),
+            raw_text=prepared.model_dump_json(),
             system_prompt=system_prompt,
         )

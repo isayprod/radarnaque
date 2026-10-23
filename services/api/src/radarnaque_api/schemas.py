@@ -258,6 +258,98 @@ class AnalysisResultOut(CamelModel):
     debug: ScanDebugOut | None = None
 
 
+# Identification du produit (spec §6). Les liens viennent des résultats de recherche ou des
+# pages lues, revérifiés par l'API : jamais d'URL écrite par le modèle.
+
+ConfidenceLevel = Literal["sure", "probable", "uncertain"]
+IdentificationStatus = Literal["identified", "uncertain", "none"]
+
+
+class PageLinkOut(CamelModel):
+    url: str
+    title: str
+    domain: str
+
+
+class CriterionCheckOut(CamelModel):
+    """Un critère vérifié sur les photos, tel qu'il l'a été (copie gardée avec l'identification).
+    `photo` : numéro de la photo (à partir de 1), `None` pour `not_visible`."""
+
+    text: LocalizedTextOut
+    observation: Literal["seen_match", "seen_contrary", "not_visible"]
+    photo: int | None
+    sources: list[PageLinkOut]
+
+
+class IdentifiedObjectPublicOut(CamelModel):
+    """Un objet de l'annonce. `reference` : `None` quand plusieurs candidats restent possibles
+    (`remaining`). Confiance et niveau calculés par l'API, jamais recopiés du modèle."""
+
+    role: Literal["main", "accessory"]
+    label: str
+    reference: str | None
+    confidence: int
+    level: ConfidenceLevel
+    remaining: list[str]
+    checks: list[CriterionCheckOut]
+    pages: list[PageLinkOut]
+
+
+class IdentificationSearchOut(CamelModel):
+    """Une recherche web de l'identification : requête (déjà masquée), type et domaines des
+    pages lues. Affichée aussi pour un résultat servi par le cache."""
+
+    query: str
+    kind: Literal["criteria", "price", "reference", "retry"]
+    pages_read: list[str]
+
+
+class IdentifyStepDebugOut(CamelModel):
+    """Un appel au modèle d'une étape (`read_photos`, `criteria`, `identify`) : prompt système
+    réellement envoyé, messages résumés (photos en `[image n : N octets]`), réponse brute, durée
+    en millisecondes, jetons et coût."""
+
+    step: Literal["read_photos", "criteria", "identify"]
+    provider: str
+    model: str
+    system_prompt: str
+    messages: list[DebugMessageOut]
+    raw_response: str
+    ms: int
+    tokens_in: int
+    tokens_out: int
+    cost_usd_micros: int
+
+
+class IdentifyDebugOut(CamelModel):
+    """Bloc de débogage du superuser hors production : les appels du pipeline, dans l'ordre."""
+
+    steps: list[IdentifyStepDebugOut]
+
+
+class IdentificationOut(CamelModel):
+    """Résultat d'une identification. `confidence`, `level` : ceux de l'objet principal (0 et
+    `uncertain` pour le statut `none`). `verified_criteria` : les critères de l'objet principal
+    ont été relus par un admin ; `unsourced` : des critères non sourcés ont servi (§9)."""
+
+    identification_id: int
+    status: IdentificationStatus
+    confidence: int
+    level: ConfidenceLevel
+    objects: list[IdentifiedObjectPublicOut]
+    seller_question: LocalizedTextOut | None
+    title_mismatch: str | None
+    searches: list[IdentificationSearchOut]
+    verified_criteria: bool
+    unsourced: bool
+    images_analyzed: int
+    from_cache: bool
+    identified_at: datetime
+    remaining: RemainingOut | None = None
+    # Seulement pour un superuser hors production ; `None` (null) pour tout autre compte.
+    debug: IdentifyDebugOut | None = None
+
+
 # Événements de `POST /api/scans/stream` (spec §8.3), le champ `data` de chaque événement SSE.
 # Hors du schéma OpenAPI (la route n'a pas de modèle de réponse) : l'extension en tient un miroir
 # écrit à la main (`packages/shared/src/stream.ts`).

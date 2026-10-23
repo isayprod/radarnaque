@@ -23,7 +23,8 @@ from radarnaque_api.pages import PageText
 MAX_CRITERIA = 8
 
 
-def _normalize(name: str) -> str:
+def normalize_name(name: str) -> str:
+    """Nom comparable : sans accents, en minuscules, espaces réduits."""
     stripped = "".join(
         c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c)
     )
@@ -31,7 +32,7 @@ def _normalize(name: str) -> str:
 
 
 def candidates_key(candidates: list[str]) -> str:
-    return " | ".join(sorted({_normalize(c) for c in candidates}))
+    return " | ".join(sorted({normalize_name(c) for c in candidates}))
 
 
 async def lock_criteria(session: AsyncSession, key: str) -> None:
@@ -113,7 +114,7 @@ async def save_criteria(
     )
     if criteria_set is not None and criteria_set.status == "verified":
         return await _view(session, criteria_set)
-    known = {_normalize(c) for c in candidates}
+    known = {normalize_name(c) for c in candidates}
     kept: list[tuple[ExtractedCriterion, list[PageText]]] = []
     for crit in extracted.criteria:
         if crit.kind == "invisible":
@@ -121,7 +122,7 @@ async def save_criteria(
         used = list(dict.fromkeys(n for n in crit.sources if 1 <= n <= len(pages)))
         if not used:
             continue
-        if not any(_normalize(e.candidate) in known for e in crit.expected):
+        if not any(normalize_name(e.candidate) in known for e in crit.expected):
             continue
         kept.append((crit, [pages[n - 1] for n in used]))
         if len(kept) == MAX_CRITERIA:
