@@ -167,8 +167,10 @@ cd services/api && uv run --env-file ../../infra/.env radarnaque-llm use stub st
 pnpm e2e:scan                # contre la stack lancée (pnpm dev)
 ```
 
-Le faux fournisseur répond toujours la même analyse (score 42, une raison, textes FR/NL fixes)
-et écrit une ligne par requête : modèle, nombre de messages, présence d'images, jamais le
+Le faux fournisseur répond toujours la même analyse (score 42, une raison, textes FR/NL fixes),
+ou, pour les étapes de l'identification, une sortie fixe valide selon le nom du schéma demandé
+(`radarnaque_read_photos`, `radarnaque_criteria`, `radarnaque_identify` ; en mode `json_object`,
+d'après le schéma ajouté au prompt) : un vélo à deux candidats, donc une étape de critères. Il écrit une ligne par requête : modèle, nombre de messages, présence d'images, jamais le
 contenu ni les en-têtes. Il n'écoute que sur `127.0.0.1`. Le port 20199 est imposé : le
 fournisseur `stub` de `providers.toml` n'a pas de `base_url_env`, l'API appelle donc toujours
 `http://localhost:20199/v1`, même si le faux fournisseur est lancé sur un autre port.
@@ -186,6 +188,14 @@ Le modèle affiché est le modèle actif du type `full`, lu avec `radarnaque-llm
 `E2E_PROVIDER` et `E2E_MODEL` permettent de l'imposer, à condition de définir les deux : avec
 une seule des deux, le modèle est lu avec `radarnaque-llm list`. Il fonctionne avec n'importe
 quel fournisseur ; le score 42 n'est vérifié qu'avec `stub`.
+
+`pnpm e2e:identify` fait de même pour l'identification : deux appels identiques à
+`POST /api/identify/stream` (`-- --no-stream` : `POST /api/identify`). Le premier lance le pipeline
+(`fromCache: false`, étapes `reading_photos` puis `identifying`, et `criteria` avec ses
+recherches quand SearXNG répond), le second est servi depuis le cache (`fromCache: true`, même
+`identificationId`). Il affiche `E2E IDENTIFY OK (status=<s>, confidence=<n>, level=<l>)` ; sinon
+il nomme l'étape en échec. Avec `stub`, les trois étapes d'identification doivent avoir `stub/stub-model`
+pour modèle actif (écran IA de l'admin, section de chaque étape).
 
 Au-delà d'environ 3 connexions par minute (`pnpm e2e:login` et `pnpm e2e:scan` confondus),
 le limiteur du service auth répond 429 à l'étape « connexion 3 »
@@ -284,6 +294,59 @@ cd services/api && uv run --env-file ../../infra/.env radarnaque-llm use ollama 
 ```
 
 Ollama n'a pas de clé ; le coût enregistré est nul.
+
+## Identification du produit (API)
+
+Avant d'analyser une annonce, l'API sait identifier le produit vendu : elle lit les photos
+(étape `read_photos`), cherche sur le web les critères qui distinguent les candidats
+(`criteria`, partagés entre utilisateurs dans une base de critères), vérifie ces critères sur
+les photos (`identify`), puis calcule elle-même un indice de confiance (Sûr, Probable ou
+Incertain). Le résultat nourrit ensuite l'analyse anti-arnaque (`scam`). La spécification est dans
+[`docs/superpowers/specs/2026-10-23-identification-produit-design.md`](docs/superpowers/specs/2026-10-23-identification-produit-design.md).
+
+- **Routes :**
+  - `POST /api/identify/stream` : mêmes corps (`ScanIn`), admission, refus JSON et événements SSE
+    que le scan, plus les étapes `reading_photos`, `criteria`, `identifying` et `retrying` et les
+    événements `criteria_cached`, `page_read` et `identification` ; le dernier événement est
+    `result` (un `IdentificationOut`) ou `error`. Délai de 120 s.
+  - `POST /api/identify` : la même, sans flux.
+  - `POST /api/scans(/stream)` : identifient d'abord l'annonce (80 s au plus), puis analysent. Un
+    échec de l'identification donne un événement `identification_error` et l'analyse continue sans
+    elle. Le scan entier est borné à 190 s (voir le [suivi](docs/superpowers/plans/2026-10-23-identification-partie-1-suivi.md)).
+- **Quota :** « identifier » consomme 1 analyse ; l'analyse qui suit (même utilisateur, même
+  annonce, moins de 24 h, après un `identify` réussi) est incluse, une seule fois par
+  identification.
+- **Réglages** (écran IA de l'admin, table `settings`) :
+  | Réglage | Défaut | Rôle |
+  |---|---|---|
+  | `identification_cache_ttl_hours` | 168 | validité d'une identification en cache |
+  | `criteria_ttl_days` | 180 | âge au-delà duquel les critères d'un ensemble sont recherchés de nouveau |
+  | `criteria_max_searches` | 2 | recherches web de l'étape `criteria` |
+  | `criteria_max_pages` | 3 | pages publiques lues par le serveur pour les critères |
+  | `identify_retry_threshold` | 60 | confiance en dessous de laquelle `identify` est relancé (recherche en plus, modèle de relance) |
+  | `identify_image_side` | 1280 | côté maximal des photos envoyées à l'identification (768 à 1536 px) |
+  | `scam_sends_photos` | oui | l'analyse anti-arnaque reçoit-elle aussi les photos |
+  | `identify_escalation_model_id` | aucun | modèle de la relance (sinon celui d'`identify`) |
+- **Étapes :** un modèle actif et un prompt versionné par étape (`read_photos`, `criteria`,
+  `identify`), réglés dans l'écran IA de l'admin ; l'analyse (`scam`, prompt `full`) garde ses
+  réglages habituels. Les migrations
+  0010 (tables, réglages) et 0011 (prompts v1) les créent.
+
+### Évaluer l'identification en local
+
+```sh
+pnpm eval:identify     # cd services/api && uv run --env-file ../../infra/.env radarnaque-eval-identify evals/identify.jsonl
+```
+
+Le fichier `services/api/evals/identify.jsonl` (ignoré par Git : `services/api/evals/`) contient
+une ligne `{ "scan": <ScanIn>, "expected": "<référence attendue>" }` par annonce, construite à la
+main à partir de pages enregistrées. La commande lance le pipeline comme pour un scan, sur la
+configuration active, sans quota ni cache d'identification, puis affiche pour chaque annonce son
+statut, son niveau, la référence trouvée et le coût, et au final la justesse (référence attendue
+contenue, sans accents ni majuscules, dans la référence trouvée), la répartition des niveaux et le
+coût moyen par étape. Elle n'affiche jamais le contenu d'une annonce. Elle écrit dans la base de
+critères (et les lignes `llm_calls` de l'étape `criteria`), jamais d'identification.
+Ne jamais mettre ce fichier, ni `web-pages/`, dans un commit.
 
 ## Tester les analyses IA dans l'extension
 
