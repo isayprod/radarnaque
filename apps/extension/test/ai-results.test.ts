@@ -10,7 +10,7 @@ import {
 	type StoredAiResult,
 } from "../lib/content/ai-results";
 import type { Listing } from "../lib/listing/types";
-import { debugAnalysis, sampleAnalysis } from "./helpers";
+import { debugAnalysis, sampleAnalysis, sampleIdentification } from "./helpers";
 
 const ANALYZED_AT = Date.parse(sampleAnalysis.analyzedAt);
 
@@ -31,18 +31,33 @@ const entryOf = (
 	overrides: Partial<StoredAiResult> = {},
 ): StoredAiResult => ({
 	result: sampleAnalysis,
+	identification: null,
+	identifiedByUser: false,
 	fingerprint: "fp",
 	storedAt,
 	...overrides,
 });
 
-/** Valeur stockée sous `site|externalId` : l'entrée et `v: 2`. */
-const v2 = (entry: StoredAiResult): StoredAiEntry => ({ v: 2, ...entry });
+/** Valeur stockée sous `site|externalId` : l'entrée et `v: 3`. */
+const v3 = (entry: StoredAiResult): StoredAiEntry => ({ v: 3, ...entry });
+
+/** Ancienne entrée `v: 2` : l'analyse seule. */
+const legacyV2 = (entry: StoredAiResult): StoredAiEntry =>
+	({
+		v: 2,
+		result: entry.result,
+		fingerprint: entry.fingerprint,
+		storedAt: entry.storedAt,
+	}) as unknown as StoredAiEntry;
 
 /** L'entrée telle que le magasin la rend : sans quota restant. */
 const stripped = (entry: StoredAiResult): StoredAiResult => ({
 	...entry,
-	result: { ...entry.result, remaining: NO_REMAINING },
+	result: entry.result && { ...entry.result, remaining: NO_REMAINING },
+	identification: entry.identification && {
+		...entry.identification,
+		remaining: NO_REMAINING,
+	},
 });
 
 const listing: Listing = {
@@ -91,13 +106,13 @@ describe("listingFingerprint", () => {
 });
 
 describe("createAiResultStore : lecture et écriture", () => {
-	test("put puis get : une seule place par annonce, sous site|externalId, v: 2", async () => {
+	test("put puis get : une seule place par annonce, sous site|externalId, v: 3", async () => {
 		const mem = memoryArea();
 		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
 		const entry = entryOf(ANALYZED_AT);
 		await store.put("2ememain.be", "m1", entry);
 		expect(await store.get("2ememain.be", "m1")).toEqual(stripped(entry));
-		expect(mem.value()).toEqual({ "2ememain.be|m1": v2(stripped(entry)) });
+		expect(mem.value()).toEqual({ "2ememain.be|m1": v3(stripped(entry)) });
 		expect(await store.get("2dehands.be", "m1")).toBeNull();
 	});
 
@@ -117,16 +132,16 @@ describe("createAiResultStore : lecture et écriture", () => {
 		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
 		await store.put("2ememain.be", "m1", entryOf(ANALYZED_AT));
 		expect(NO_REMAINING).toEqual({ scans: null });
-		expect(mem.value()["2ememain.be|m1"]?.result.remaining).toEqual({
+		expect(mem.value()["2ememain.be|m1"]?.result?.remaining).toEqual({
 			scans: null,
 		});
 	});
 
 	test("I1 : une entrée stockée avec un quota est rendue sans quota", async () => {
-		const mem = memoryArea({ "2ememain.be|m1": v2(entryOf(ANALYZED_AT)) });
+		const mem = memoryArea({ "2ememain.be|m1": v3(entryOf(ANALYZED_AT)) });
 		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
 		const got = await store.get("2ememain.be", "m1");
-		expect(got?.result.remaining).toEqual(NO_REMAINING);
+		expect(got?.result?.remaining).toEqual(NO_REMAINING);
 	});
 
 	test("le bloc debug (prompts, réponse brute) n'est jamais stocké ni rendu", async () => {
@@ -145,12 +160,12 @@ describe("createAiResultStore : lecture et écriture", () => {
 		);
 		const got = await store.get("2ememain.be", "m1");
 		expect(got?.result).not.toHaveProperty("debug");
-		expect(got?.result.summary).toEqual(debugAnalysis.summary);
+		expect(got?.result?.summary).toEqual(debugAnalysis.summary);
 	});
 
 	test("une entrée stockée avec un bloc debug est rendue sans lui", async () => {
 		const mem = memoryArea({
-			"2ememain.be|m1": v2(entryOf(ANALYZED_AT, { result: debugAnalysis })),
+			"2ememain.be|m1": v3(entryOf(ANALYZED_AT, { result: debugAnalysis })),
 		});
 		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
 		const got = await store.get("2ememain.be", "m1");
@@ -168,17 +183,24 @@ describe("createAiResultStore : lecture et écriture", () => {
 		expect(await store.get("2ememain.be", "m1")).toBeNull();
 		const entry = entryOf(ANALYZED_AT + 1);
 		await store.put("2ememain.be", "m1", entry);
-		expect(mem.value()).toEqual({ "2ememain.be|m1": v2(stripped(entry)) });
+		expect(mem.value()).toEqual({ "2ememain.be|m1": v3(stripped(entry)) });
 		expect(await store.get("2ememain.be", "m1")).toEqual(stripped(entry));
 	});
 
-	test("entrée sans v: 2 ou illisible : ignorée", async () => {
+	test("entrée sans v: 2 ni v: 3, ou illisible : ignorée", async () => {
 		const mem = memoryArea({
 			"2ememain.be|m1": entryOf(ANALYZED_AT) as unknown as StoredAiEntry,
-			"2ememain.be|m2": { ...v2(entryOf(ANALYZED_AT)), v: 3 } as never,
-			"2ememain.be|m3": { v: 2, result: null } as unknown as StoredAiEntry,
+			"2ememain.be|m2": { ...v3(entryOf(ANALYZED_AT)), v: 4 } as never,
+			"2ememain.be|m3": {
+				v: 3,
+				result: null,
+				identification: null,
+				identifiedByUser: false,
+				fingerprint: "fp",
+				storedAt: 1,
+			} as unknown as StoredAiEntry,
 			"2ememain.be|m4": {
-				...v2(entryOf(ANALYZED_AT)),
+				...v3(entryOf(ANALYZED_AT)),
 				fingerprint: 1,
 			} as never,
 		});
@@ -190,7 +212,7 @@ describe("createAiResultStore : lecture et écriture", () => {
 	test("seuls les champs connus sont rendus", async () => {
 		const mem = memoryArea({
 			"2ememain.be|m1": {
-				...v2(entryOf(ANALYZED_AT)),
+				...v3(entryOf(ANALYZED_AT)),
 				scanKind: "text",
 			} as StoredAiEntry,
 		});
@@ -274,7 +296,7 @@ describe("createAiResultStore : expiration", () => {
 		const clock = ANALYZED_AT + 1_000;
 		const store = createAiResultStore(
 			memoryArea({
-				"2ememain.be|m1": v2(entryOf(clock - AI_RESULT_TTL_MS - 1_000)),
+				"2ememain.be|m1": v3(entryOf(clock - AI_RESULT_TTL_MS - 1_000)),
 			}).area,
 			() => clock,
 		);
@@ -297,7 +319,7 @@ describe("createAiResultStore : expiration", () => {
 
 	test("un partiel s'écrit à la place d'une analyse complète expirée", async () => {
 		const clock = ANALYZED_AT + AI_RESULT_TTL_MS + 1_000;
-		const mem = memoryArea({ "2ememain.be|m1": v2(entryOf(ANALYZED_AT)) });
+		const mem = memoryArea({ "2ememain.be|m1": v3(entryOf(ANALYZED_AT)) });
 		const store = createAiResultStore(mem.area, () => clock);
 		const partial = entryOf(clock, {
 			result: {
@@ -315,7 +337,7 @@ describe("createAiResultStore : expiration", () => {
 			result: { ...sampleAnalysis, analyzedAt: "2026-10-01T00:00:00Z" },
 		});
 		const mem = memoryArea({
-			"2ememain.be|old": v2(old),
+			"2ememain.be|old": v3(old),
 			"2ememain.be|v1": { v: 1, text: entryOf(ANALYZED_AT) } as never,
 		});
 		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
@@ -326,9 +348,9 @@ describe("createAiResultStore : expiration", () => {
 	test(`au-delà de ${MAX_AI_RESULTS} annonces, put retire les plus anciennes (storedAt)`, async () => {
 		const initial: Record<string, StoredAiEntry> = {};
 		for (let i = 0; i < MAX_AI_RESULTS; i++)
-			initial[`2ememain.be|m${i}`] = v2(entryOf(ANALYZED_AT + i));
+			initial[`2ememain.be|m${i}`] = v3(entryOf(ANALYZED_AT + i));
 		// m0 a été réécrit récemment : il reste, m1 devient le plus ancien.
-		initial["2ememain.be|m0"] = v2(entryOf(ANALYZED_AT + 500));
+		initial["2ememain.be|m0"] = v3(entryOf(ANALYZED_AT + 500));
 		const mem = memoryArea(initial);
 		const store = createAiResultStore(mem.area, () => ANALYZED_AT + 1_000);
 		await store.put("2ememain.be", "new", entryOf(ANALYZED_AT + 1_000));
@@ -347,17 +369,17 @@ describe("createAiResultStore : expiration", () => {
 		});
 		const fresh = entryOf(ANALYZED_AT);
 		const mem = memoryArea({
-			"2ememain.be|old": v2(old),
-			"2ememain.be|m1": v2(fresh),
+			"2ememain.be|old": v3(old),
+			"2ememain.be|m1": v3(fresh),
 		});
 		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
 		await store.prune();
 		expect(mem.area.setValue).toHaveBeenCalledTimes(1);
-		expect(mem.value()).toEqual({ "2ememain.be|m1": v2(fresh) });
+		expect(mem.value()).toEqual({ "2ememain.be|m1": v3(fresh) });
 	});
 
 	test("M1 : prune sans entrée expirée n'écrit rien", async () => {
-		const mem = memoryArea({ "2ememain.be|m1": v2(entryOf(ANALYZED_AT)) });
+		const mem = memoryArea({ "2ememain.be|m1": v3(entryOf(ANALYZED_AT)) });
 		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
 		await store.prune();
 		expect(mem.area.setValue).not.toHaveBeenCalled();
@@ -366,7 +388,7 @@ describe("createAiResultStore : expiration", () => {
 
 describe("createAiResultStore : copie en mémoire (M2)", () => {
 	test("N lectures : une seule lecture du stockage", async () => {
-		const mem = memoryArea({ "2ememain.be|m1": v2(entryOf(ANALYZED_AT)) });
+		const mem = memoryArea({ "2ememain.be|m1": v3(entryOf(ANALYZED_AT)) });
 		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
 		await Promise.all(
 			["m1", "m2", "m3", "m4"].map((id) => store.get("2ememain.be", id)),
@@ -390,7 +412,7 @@ describe("createAiResultStore : copie en mémoire (M2)", () => {
 		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
 		await store.get("2ememain.be", "x");
 		// Un autre onglet écrit après la lecture mise en mémoire.
-		await mem.area.setValue({ "2ememain.be|other": v2(entryOf(ANALYZED_AT)) });
+		await mem.area.setValue({ "2ememain.be|other": v3(entryOf(ANALYZED_AT)) });
 		await store.put("2ememain.be", "m1", entryOf(ANALYZED_AT));
 		expect(Object.keys(mem.value()).sort()).toEqual([
 			"2ememain.be|m1",
@@ -441,6 +463,148 @@ describe("createAiResultStore : stockage indisponible", () => {
 		const { storage } = await import("wxt/utils/storage");
 		expect(
 			await storage.getItem<Record<string, StoredAiEntry>>("local:aiResults"),
-		).toHaveProperty(["facebook.com|9", "v"], 2);
+		).toHaveProperty(["facebook.com|9", "v"], 3);
+	});
+});
+
+const IDENTIFIED_AT = Date.parse(sampleIdentification.identifiedAt);
+/** Analyse du même jour que l'identification : les deux expirent ensemble. */
+const sameDay = {
+	...sampleAnalysis,
+	analyzedAt: sampleIdentification.identifiedAt,
+};
+const fullEntry = (storedAt: number, overrides = {}): StoredAiResult =>
+	entryOf(storedAt, { result: sameDay, ...overrides });
+const identOnly = (storedAt: number, overrides = {}): StoredAiResult =>
+	entryOf(storedAt, {
+		result: null,
+		identification: sampleIdentification,
+		identifiedByUser: true,
+		...overrides,
+	});
+
+describe("createAiResultStore : identification", () => {
+	test("reads a v2 entry as an analysis with its embedded identification", async () => {
+		const result = { ...sampleAnalysis, identification: sampleIdentification };
+		const mem = memoryArea({
+			"2ememain.be|m1": legacyV2(entryOf(ANALYZED_AT, { result })),
+		});
+		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
+		const got = await store.get("2ememain.be", "m1");
+		expect(got?.result?.score).toBe(sampleAnalysis.score);
+		expect(got?.identification?.identificationId).toBe(
+			sampleIdentification.identificationId,
+		);
+		expect(got?.identifiedByUser).toBe(false);
+		// Sans identification embarquée : null.
+		mem.area.getValue.mockResolvedValueOnce({
+			"2ememain.be|m2": legacyV2(entryOf(ANALYZED_AT)),
+		});
+		const other = createAiResultStore(mem.area, () => ANALYZED_AT);
+		expect((await other.get("2ememain.be", "m2"))?.identification).toBeNull();
+	});
+
+	test("identification-only entry round-trips", async () => {
+		const mem = memoryArea();
+		const clock = IDENTIFIED_AT;
+		const store = createAiResultStore(mem.area, () => clock);
+		const entry = identOnly(clock);
+		await store.put("2ememain.be", "m1", entry);
+		expect(await store.get("2ememain.be", "m1")).toEqual(stripped(entry));
+		expect(mem.value()["2ememain.be|m1"]).toMatchObject({
+			v: 3,
+			result: null,
+			identifiedByUser: true,
+		});
+	});
+
+	test("put merges identification and analysis for the same fingerprint", async () => {
+		const clock = IDENTIFIED_AT;
+		const store = createAiResultStore(memoryArea().area, () => clock);
+		await store.put("2ememain.be", "m1", identOnly(clock));
+		await store.put("2ememain.be", "m1", fullEntry(clock));
+		const both = await store.get("2ememain.be", "m1");
+		expect(both?.result).not.toBeNull();
+		expect(both?.identification).not.toBeNull();
+		expect(both?.identifiedByUser).toBe(true);
+		// L'inverse : une identification écrite après l'analyse la garde.
+		await store.put("2ememain.be", "m2", fullEntry(clock));
+		await store.put("2ememain.be", "m2", identOnly(clock));
+		const inverse = await store.get("2ememain.be", "m2");
+		expect(inverse?.result).not.toBeNull();
+		expect(inverse?.identification).not.toBeNull();
+	});
+
+	test("put replaces the entry when the fingerprint changed", async () => {
+		const clock = IDENTIFIED_AT;
+		const store = createAiResultStore(memoryArea().area, () => clock);
+		await store.put("2ememain.be", "m1", identOnly(clock));
+		await store.put(
+			"2ememain.be",
+			"m1",
+			fullEntry(clock, { fingerprint: "fp2" }),
+		);
+		const got = await store.get("2ememain.be", "m1");
+		expect(got?.identification).toBeNull();
+		expect(got?.identifiedByUser).toBe(false);
+		expect(got?.fingerprint).toBe("fp2");
+	});
+
+	test("expires 24 h after the oldest of analyzedAt and identifiedAt", async () => {
+		const early = Date.parse("2026-10-23T08:00:00Z");
+		const late = Date.parse("2026-10-23T12:00:00Z");
+		const entry = entryOf(late, {
+			result: { ...sampleAnalysis, analyzedAt: new Date(late).toISOString() },
+			identification: {
+				...sampleIdentification,
+				identifiedAt: new Date(early).toISOString(),
+			},
+		});
+		const mem = memoryArea({ "2ememain.be|m1": v3(entry) });
+		let clock = early + AI_RESULT_TTL_MS;
+		const store = createAiResultStore(mem.area, () => clock);
+		expect(await store.get("2ememain.be", "m1")).not.toBeNull();
+		clock += 1_000;
+		const fresh = createAiResultStore(mem.area, () => clock);
+		expect(await fresh.get("2ememain.be", "m1")).toBeNull();
+	});
+
+	test("an entry with neither result nor identification is dropped", async () => {
+		const mem = memoryArea({
+			"2ememain.be|m1": v3(
+				entryOf(ANALYZED_AT, { result: null, identification: null }),
+			),
+		});
+		const store = createAiResultStore(mem.area, () => ANALYZED_AT);
+		expect(await store.get("2ememain.be", "m1")).toBeNull();
+		await store.put(
+			"2ememain.be",
+			"m2",
+			entryOf(ANALYZED_AT, { result: null, identification: null }),
+		);
+		expect(Object.keys(mem.value())).not.toContain("2ememain.be|m2");
+	});
+
+	test("identification remaining is never restored", async () => {
+		const clock = IDENTIFIED_AT;
+		const withQuota = {
+			...sampleIdentification,
+			remaining: { scans: 3 },
+		};
+		const mem = memoryArea({
+			"2ememain.be|m1": v3(identOnly(clock, { identification: withQuota })),
+		});
+		const store = createAiResultStore(mem.area, () => clock);
+		expect(
+			(await store.get("2ememain.be", "m1"))?.identification?.remaining,
+		).toEqual(NO_REMAINING);
+		await store.put(
+			"2ememain.be",
+			"m2",
+			identOnly(clock, { identification: withQuota }),
+		);
+		expect(mem.value()["2ememain.be|m2"]?.identification?.remaining).toEqual(
+			NO_REMAINING,
+		);
 	});
 });

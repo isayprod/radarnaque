@@ -621,6 +621,8 @@ const storedFor = (
 	overrides: Partial<StoredAiResult> = {},
 ): StoredAiResult => ({
 	result: sampleAnalysis,
+	identification: null,
+	identifiedByUser: false,
 	fingerprint: listingFingerprint(listing),
 	storedAt: 1,
 	...overrides,
@@ -768,6 +770,8 @@ describe("useAiScan : résultats gardés 24 h", () => {
 		// Une seule place par annonce, sans type ni progression.
 		expect(store.put).toHaveBeenCalledWith("2ememain.be", "m1", {
 			result,
+			identification: null,
+			identifiedByUser: false,
 			fingerprint: listingFingerprint(listingOf("m1")),
 			storedAt: expect.any(Number),
 		});

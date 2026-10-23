@@ -1566,6 +1566,8 @@ describe("RiskBadge : seule l'IA donne un résultat", () => {
 		const aiResults = storeWith({
 			"2ememain.be|m123": {
 				result: aiHigh,
+				identification: null,
+				identifiedByUser: false,
 				fingerprint: listingFingerprint(listing),
 				storedAt: 1,
 			},
@@ -1639,6 +1641,8 @@ describe("RiskBadge : seule l'IA donne un résultat", () => {
 		const aiResults = storeWith({
 			"2ememain.be|m123": {
 				result: aiHigh,
+				identification: null,
+				identifiedByUser: false,
 				fingerprint: listingFingerprint(listing),
 				storedAt: 1,
 			},
