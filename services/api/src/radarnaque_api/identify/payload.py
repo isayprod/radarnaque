@@ -53,9 +53,9 @@ def build_criteria_messages(
 ) -> list[dict]:
     """Candidats, indices à confirmer, pages numérotées de 1 puis extraits à la suite. Aucune
     donnée d'annonce."""
-    lines = ["Candidats :", *(f"- {c}" for c in candidates)]
+    lines = ["Candidats :", *(f"- {neutralize(c)}" for c in candidates)]
     if hints:
-        lines += ["Indices à confirmer (non vérifiés) :", *(f"- {h}" for h in hints)]
+        lines += ["Indices à confirmer (non vérifiés) :", *(f"- {neutralize(h)}" for h in hints)]
     blocks = [wrap_page(n, page) for n, page in enumerate(pages, start=1)]
     blocks += [_wrap_hit(n, hit) for n, hit in enumerate(hits, start=len(pages) + 1)]
     text = "\n".join(lines) + "\n\n" + "\n".join(blocks)
@@ -74,13 +74,14 @@ def build_identify_messages(
     sections: list[str] = []
     for n, obj in enumerate(objects, start=1):
         lines = [
-            f"Objet {n} ({obj.role}, {obj.category}) — candidats : "
-            + json.dumps(obj.candidates, ensure_ascii=False)
+            f"Objet {n} ({obj.role}, {neutralize(obj.category)}) — candidats : "
+            + neutralize(json.dumps(obj.candidates, ensure_ascii=False))
         ]
         shown = [c for c in criteria.get(n, []) if c.kind == "photo"]
         for k, c in enumerate(shown, start=1):
             expected = "; ".join(f"{cand} : {v.get('fr', '')}" for cand, v in c.expected.items())
-            lines.append(f"  Critère {k} : {c.fr} — attendu : {expected}")
+            clause = f" — attendu : {neutralize(expected)}" if expected else ""
+            lines.append(f"  Critère {k} : {neutralize(c.fr)}{clause}")
         sections.append("\n".join(lines))
     text = _listing_block(listing, len(images)) + "\n\n" + "\n\n".join(sections)
     if hits:
