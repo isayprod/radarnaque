@@ -14,18 +14,18 @@
 |---|---|---|
 | Repos | logo, « Identifier » ; nom accessible « Identifier le produit » | lance l'identification (accès, connexion, quota : règles actuelles de `useLaunch`) |
 | Identification en cours | logo animé, ligne d'état | ouvre ou ferme le panneau |
-| Produit identifié | glyphe, référence courte, « · », niveau et pourcentage, séparateur, action « Analyser le risque » | partie produit : ouvre ou ferme le panneau ; action : lance l'analyse du risque |
-| Incertain | « {A} ou {B} ? · Incertain {n} % », séparateur, « Analyser le risque » | idem |
+| Produit identifié | glyphe, référence courte, « · », niveau (sans pourcentage : il est dans le panneau), séparateur, action « Analyser le risque » ; pilule de 400 px au plus | partie produit : ouvre ou ferme le panneau ; action : lance l'analyse du risque |
+| Incertain | « {A} ou {B} ? · Incertain » (sans pourcentage), séparateur, « Analyser le risque » ; 400 px au plus | idem |
 | Non identifié | « Produit non identifié », séparateur, « Analyser le risque » | idem |
-| Analyse du risque en cours | logo animé, « {référence courte} · {ligne d'état} » (ligne d'état seule si pas de référence) | ouvre ou ferme le panneau |
+| Analyse du risque en cours | logo animé, « {référence courte} · {ligne d'état} » (ligne d'état seule si pas de référence) ; avec la référence, 400 px au plus, la référence bornée (140 px, sans rétrécir) et la ligne d'état tronquée ; sinon 340 px | ouvre ou ferme le panneau |
 | Résultat | point de couleur, « Risque faible », séparateur, « 12/100 » (inchangé) | ouvre ou ferme le panneau |
-| Erreur | pilule d'erreur actuelle ; « Relancer » relance l'étape qui a échoué (identification ou analyse du risque) | — |
+| Erreur | pilule d'erreur actuelle ; « Relancer » relance l'étape qui a échoué (identification ou analyse du risque), décrit par « Inclus avec l'identification » quand l'analyse est incluse | erreur de l'analyse du risque : la partie message ouvre ou ferme le panneau (le produit identifié y reste lisible) ; action : relance l'étape |
 
 - **Action « Analyser le risque »** (NL « Risico analyseren ») : description « Inclus avec l'identification » quand l'analyse est incluse ; possible à quota 0 dans ce cas (spec §7) ; sans inclusion et sans analyse restante, grisée (`aria-disabled`, raison lue) ; sans abonnement : lien vers les formules.
 - **Retour sur une fiche** (magasin des résultats) : une analyse gardée affiche directement le résultat du risque ; une identification seule affiche l'état « Produit identifié » avec l'action.
 - **Une analyse du risque lancée depuis la pilule repasse par l'identification côté serveur** (servie par le cache) : la pilule ne revient jamais à « Identifier » pendant ce temps ; les événements d'identification alimentent le déroulé de la section Produit.
 - **Largeur stable** : pendant le chargement, la ligne d'état a une largeur bornée (texte coupé avec « … ») et les points de suspension occupent une place fixe dont seule l'opacité s'anime ; rien à droite de la pilule ne bouge.
-- **Accessibilité** : une seule région `aria-live` (au plus une annonce toutes les 2 s) ; le focus reste sur la pilule quand son élément change (repos → en cours → produit → action), comme aujourd'hui.
+- **Accessibilité** : une seule région `aria-live` (au plus une annonce toutes les 2 s) ; le focus reste sur la pilule quand son élément change (repos → en cours → produit → action), comme aujourd'hui. Dans le panneau, une erreur s'annonce par son seul `role="alert"`, sans région `aria-live` autour.
 
 ## 3. Le panneau unique
 

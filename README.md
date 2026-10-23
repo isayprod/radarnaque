@@ -406,14 +406,15 @@ modèle peut chercher sur le web (SearXNG, démarré par `pnpm dev`).
 
 ### Pilule « Identifier » et délai du flux
 
-La pastille a deux pilules : « Identifier » (logo et « Identifier », nommée « Identifier le
-produit ») puis « Analyser ». « Identifier » appelle `POST /api/identify/stream` et consomme 1
-analyse ; l'analyse qui suit, sur la même annonce, est incluse (la pilule « Analyser » porte
-alors la mention « Inclus », même quota à 0). Le résultat s'affiche dans la pilule (glyphe ● Sûr,
-◐ Probable, ○ Incertain, référence, niveau et pourcentage) et dans un panneau Identification à
-part ; sur une page de résultats, l'infobulle d'une carte analysée ajoute la ligne
-« référence · niveau ». Cliquer sur « Analyser » pendant une identification la met en file
-(« En attente de l'identification »). Le service worker coupe un flux au bout de 310 s
+La pastille a une seule pilule : « Identifier » (logo et « Identifier », nommée « Identifier le
+produit »), puis l'action « Analyser le risque ». « Identifier » appelle
+`POST /api/identify/stream` et consomme 1 analyse ; l'analyse du risque qui suit, sur la même
+annonce, est incluse (décrite par « Inclus avec l'identification », même quota à 0). Le résultat
+s'affiche dans la pilule (glyphe ● Sûr, ◐ Probable, ○ Incertain, référence et niveau ; le
+pourcentage est dans le panneau) et dans la section Produit du panneau ; sur une page de
+résultats, l'infobulle d'une carte analysée ajoute la ligne « référence · niveau ». Après une
+erreur de l'analyse du risque, le message de la pilule ouvre le panneau, qui garde le produit.
+Le service worker coupe un flux au bout de 310 s
 (`SCAN_TIMEOUT_MS`) : l'API plafonne aujourd'hui un scan à 190 s au total, dont 80 s
 d'identification ; la marge laisse la place aux budgets de la spécification (80 s d'identification
 puis 180 s d'analyse) quand l'API y reviendra.
