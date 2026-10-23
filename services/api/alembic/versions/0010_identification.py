@@ -337,11 +337,23 @@ def upgrade() -> None:
         ),
         schema=S,
     )
+    op.add_column(
+        "scan_events",
+        sa.Column("included", sa.Boolean, nullable=False, server_default=sa.false()),
+        schema=S,
+    )
     op.create_index(
         "ix_scan_events_user_purpose_time",
         "scan_events",
         ["user_id", "purpose", "created_at"],
         schema=S,
+    )
+    op.create_index(
+        "ix_scan_events_included_by_event_id",
+        "scan_events",
+        ["included_by_event_id"],
+        schema=S,
+        postgresql_where=sa.text("included_by_event_id is not null"),
     )
 
     # --- llm_calls -------------------------------------------------------------------------
@@ -393,7 +405,9 @@ def downgrade() -> None:
     op.drop_column("llm_calls", "step", schema=S)
     op.alter_column("llm_calls", "analysis_id", nullable=False, schema=S)
 
+    op.drop_index("ix_scan_events_included_by_event_id", table_name="scan_events", schema=S)
     op.drop_index("ix_scan_events_user_purpose_time", table_name="scan_events", schema=S)
+    op.drop_column("scan_events", "included", schema=S)
     op.drop_column("scan_events", "included_by_event_id", schema=S)
     op.drop_constraint("ck_scan_events_purpose", "scan_events", schema=S, type_="check")
     op.drop_column("scan_events", "purpose", schema=S)

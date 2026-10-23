@@ -513,3 +513,49 @@ def test_cli_invalid_config(cli_env, monkeypatch, capsys):
     assert "radarnaque-purge" in err and "database_url" in err
     # Les valeurs lues dans l'environnement ne sont jamais affichées.
     assert "test-internal-secret" not in err
+
+
+async def _included_analyze(db, uid: str, at: datetime, identify_id: int, analysis_id: int) -> int:
+    event_id = await _event(db, uid, at, analysis_id=analysis_id)
+    await db.execute(
+        text(
+            "update app.scan_events set purpose = 'analyze', included = true,"
+            " included_by_event_id = :i where id = :e"
+        ),
+        {"i": identify_id, "e": event_id},
+    )
+    await db.commit()
+    return event_id
+
+
+async def test_trial_purge_counts_identify_with_its_included_analyze_once(app, db, make_user):
+    uid = await make_user("trial@b.test")
+    await _subscription(db, uid, "trial", OLD - timedelta(days=30))
+    analysis_id = await _analysis(db, "trial")
+    identify = await _event(db, uid, OLD, analysis_id=analysis_id)
+    await _included_analyze(db, uid, OLD, identify, analysis_id)
+
+    assert (await run_purge(app.state.engine, NOW)).scans == 2
+
+    assert await _purged_scans(db, uid) == 1
+
+
+async def test_trial_included_analyze_surviving_its_purged_identify_stays_free(app, db, make_user):
+    uid = await make_user("trial@b.test")
+    await _subscription(db, uid, "trial", OLD - timedelta(days=30))
+    analysis_id = await _analysis(db, "trial")
+    identify = await _event(db, uid, OLD, analysis_id=analysis_id)
+    recent = await _included_analyze(db, uid, NOW - timedelta(days=1), identify, analysis_id)
+
+    assert (await run_purge(app.state.engine, NOW)).scans == 1
+    assert await _purged_scans(db, uid) == 1
+    assert (
+        await _scalar(
+            db, "select included_by_event_id from app.scan_events where id = :e", e=recent
+        )
+        is None
+    )
+
+    # Une seconde passe, plus tard, ne recompte pas l'analyse incluse.
+    assert (await run_purge(app.state.engine, NOW + timedelta(days=800))).scans == 1
+    assert await _purged_scans(db, uid) == 1

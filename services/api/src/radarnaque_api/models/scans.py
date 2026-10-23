@@ -1,6 +1,16 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Identity, Index, func
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    false,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from radarnaque_api.models.base import Base
@@ -13,6 +23,11 @@ class ScanEvent(Base):
         # Purge à 12 mois : recherche par date seule.
         Index("ix_scan_events_created_at", "created_at"),
         Index("ix_scan_events_user_purpose_time", "user_id", "purpose", "created_at"),
+        Index(
+            "ix_scan_events_included_by_event_id",
+            "included_by_event_id",
+            postgresql_where=text("included_by_event_id is not null"),
+        ),
         CheckConstraint("purpose in ('identify', 'analyze')", name="ck_scan_events_purpose"),
     )
 
@@ -25,6 +40,9 @@ class ScanEvent(Base):
     included_by_event_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("app.scan_events.id", ondelete="SET NULL")
     )
+    # `analyze` inclus : ne compte pas dans le quota. Reste vrai quand l'`identify` est purgé
+    # (`included_by_event_id` repasse alors à NULL).
+    included: Mapped[bool] = mapped_column(server_default=false())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

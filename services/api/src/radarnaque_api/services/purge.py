@@ -42,6 +42,7 @@ _COUNT_LIFETIME_SCANS = text(
             on sub.user_id = e.user_id and e.created_at >= sub.period_start
         join app.plans p on p.code = sub.plan and p.quota_period = 'lifetime'
         where e.id = any(:ids)
+            and not e.included
             and not exists (select 1 from app.scan_failures f where f.scan_event_id = e.id)
         group by sub.id
     ) c
