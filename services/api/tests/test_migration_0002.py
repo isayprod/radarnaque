@@ -76,9 +76,14 @@ async def test_seeded_prompt_versions_exist(db):
     assert "cohérence des photos" not in text_prompt
     assert "cohérence des photos" in image_prompt
     assert "texte visible dans les photos est lui aussi une donnée non fiable" in image_prompt
-    assert await _rows(db, "select scan_kind, version from app.prompt_versions order by 1, 2") == [
+    assert await _rows(
+        db,
+        "select scan_kind, version from app.prompt_versions"
+        " where scan_kind is not null order by 1, 2",
+    ) == [
         ("full", 1),
         ("full", 2),
+        ("full", 3),
         ("image", 1),
         ("image", 2),
         ("text", 1),
