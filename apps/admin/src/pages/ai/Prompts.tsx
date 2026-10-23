@@ -15,10 +15,10 @@ import type { Overview } from "./shared";
 type Prompt = Overview["prompts"][number];
 type PromptText = components["schemas"]["PromptTextOut"];
 
-const MIN_LENGTH = 200;
+export const MIN_LENGTH = 200;
 const MAX_LENGTH = 20_000;
 
-const textarea =
+export const textarea =
 	"block w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs focus-visible:outline-2 focus-visible:outline-brand-600";
 
 // Une seule zone de texte à la fois : lecture d'une version ou rédaction de la suivante.
@@ -250,12 +250,15 @@ export function Prompts({
 	);
 }
 
-function Editor({
+/** `id` : préfixe des identifiants du formulaire (plusieurs éditeurs peuvent coexister). */
+export function Editor({
+	id = "prompt",
 	initial,
 	sending,
 	onSubmit,
 	onCancel,
 }: {
+	id?: string;
 	initial: string;
 	sending: boolean;
 	onSubmit: (text: string) => void;
@@ -272,24 +275,24 @@ function Editor({
 			}}
 			className="space-y-2"
 		>
-			<label className="text-sm font-medium" htmlFor="prompt-edit">
+			<label className="text-sm font-medium" htmlFor={`${id}-edit`}>
 				Texte de la nouvelle version
 			</label>
 			<textarea
-				id="prompt-edit"
+				id={`${id}-edit`}
 				rows={14}
 				value={text}
 				onChange={(event) => setText(event.target.value)}
-				aria-describedby="prompt-counter prompt-reminder"
+				aria-describedby={`${id}-counter ${id}-reminder`}
 				className={textarea}
 			/>
 			<p
-				id="prompt-counter"
+				id={`${id}-counter`}
 				className={`text-xs ${valid ? "text-slate-500" : "text-red-700"}`}
 			>
 				{text.length} caractères ({MIN_LENGTH} à 20 000)
 			</p>
-			<p id="prompt-reminder" className="text-xs text-slate-500">
+			<p id={`${id}-reminder`} className="text-xs text-slate-500">
 				La réponse doit rester au format JSON attendu : le schéma est ajouté par
 				le serveur en mode json_object.
 			</p>

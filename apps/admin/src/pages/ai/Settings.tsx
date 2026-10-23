@@ -11,10 +11,12 @@ import {
 import type { Overview } from "./shared";
 
 type Values = Overview["settings"];
-type Key = keyof Values;
+type NumberKey = {
+	[K in keyof Values]: Values[K] extends number ? K : never;
+}[keyof Values];
 
 const FIELDS: {
-	key: Key;
+	key: NumberKey;
 	label: string;
 	hint: string;
 	min: number;
@@ -41,46 +43,89 @@ const FIELDS: {
 		min: 0,
 		max: 5,
 	},
+	{
+		key: "identificationCacheTtlHours",
+		label: "Durée du cache de l'identification (heures)",
+		hint: "En heures, de 1 à 2160.",
+		min: 1,
+		max: 2160,
+	},
+	{
+		key: "criteriaTtlDays",
+		label: "Durée de validité des critères (jours)",
+		hint: "En jours, de 1 à 730.",
+		min: 1,
+		max: 730,
+	},
+	{
+		key: "criteriaMaxSearches",
+		label: "Recherches web des critères",
+		hint: "De 0 à 5 ; 0 désactive la recherche.",
+		min: 0,
+		max: 5,
+	},
+	{
+		key: "criteriaMaxPages",
+		label: "Pages web lues pour les critères",
+		hint: "De 0 à 5 ; 0 désactive la lecture.",
+		min: 0,
+		max: 5,
+	},
+	{
+		key: "identifyRetryThreshold",
+		label: "Seuil de relance de l'identification",
+		hint: "Confiance de 0 à 100 sous laquelle l'identification est relancée.",
+		min: 0,
+		max: 100,
+	},
+	{
+		key: "identifyImageSide",
+		label: "Côté maximal des photos (px)",
+		hint: "En pixels, de 768 à 1536.",
+		min: 768,
+		max: 1536,
+	},
 ];
 
 const PRIVACY_WARNING =
 	"Pensez à mettre à jour la page /privacy, qui annonce jusqu'à 3 recherches.";
 
-function draftsOf(settings: Values): Record<Key, string> {
-	return {
-		cacheTtlHours: String(settings.cacheTtlHours),
-		rateLimitPerMinute: String(settings.rateLimitPerMinute),
-		maxWebSearches: String(settings.maxWebSearches),
-	};
+type Drafts = Record<NumberKey, string>;
+
+function draftsOf(settings: Values): Drafts {
+	return Object.fromEntries(
+		FIELDS.map((f) => [f.key, String(settings[f.key])]),
+	) as Drafts;
 }
 
 export function Settings({
 	api,
 	settings,
+	models,
 	onOverview,
 }: {
 	api: AdminApi;
 	settings: Values;
+	models: Overview["models"];
 	onOverview: (overview: Overview) => void;
 }) {
 	const [drafts, setDrafts] = useState(() => draftsOf(settings));
+	const [sendsPhotos, setSendsPhotos] = useState(settings.scamSendsPhotos);
+	// "" : aucun modèle de relance.
+	const [escalation, setEscalation] = useState(
+		String(settings.identifyEscalationModelId ?? ""),
+	);
 	const [confirming, setConfirming] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
 	// Les valeurs enregistrées font foi : les champs les reprennent après chaque mise à jour.
+	const saved = JSON.stringify(settings);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `saved` résume `settings`
 	useEffect(() => {
-		setDrafts(
-			draftsOf({
-				cacheTtlHours: settings.cacheTtlHours,
-				rateLimitPerMinute: settings.rateLimitPerMinute,
-				maxWebSearches: settings.maxWebSearches,
-			}),
-		);
-	}, [
-		settings.cacheTtlHours,
-		settings.rateLimitPerMinute,
-		settings.maxWebSearches,
-	]);
+		setDrafts(draftsOf(settings));
+		setSendsPhotos(settings.scamSendsPhotos);
+		setEscalation(String(settings.identifyEscalationModelId ?? ""));
+	}, [saved]);
 
 	const parsed = FIELDS.map((f) => {
 		const raw = drafts[f.key];
@@ -88,17 +133,26 @@ export function Settings({
 		return { ...f, value, valid: value >= f.min && value <= f.max };
 	});
 	const allValid = parsed.every((f) => f.valid);
-	const changes = parsed.filter((f) => f.valid && f.value !== settings[f.key]);
+	const numberChanges = parsed.filter(
+		(f) => f.valid && f.value !== settings[f.key],
+	);
+	const photosChanged = sendsPhotos !== settings.scamSendsPhotos;
+	const escalationId = escalation === "" ? null : Number(escalation);
+	const escalationChanged = escalationId !== settings.identifyEscalationModelId;
+	const changeCount =
+		numberChanges.length + Number(photosChanged) + Number(escalationChanged);
 
 	function review(event: FormEvent) {
 		event.preventDefault();
-		if (allValid && changes.length > 0) setConfirming(true);
+		if (allValid && changeCount > 0) setConfirming(true);
 	}
 
 	async function save() {
 		setError(null);
 		const body: Partial<Values> = {};
-		for (const change of changes) body[change.key] = change.value;
+		for (const change of numberChanges) body[change.key] = change.value;
+		if (photosChanged) body.scamSendsPhotos = sendsPhotos;
+		if (escalationChanged) body.identifyEscalationModelId = escalationId;
 		try {
 			onOverview(
 				await api.send<Overview>("PATCH", "/api/admin/ai/settings", body),
@@ -110,10 +164,26 @@ export function Settings({
 		}
 	}
 
-	const summary = changes
-		.map((c) => `${c.label} : ${settings[c.key]} → ${c.value}`)
-		.join(" ; ");
-	const privacy = changes.some((c) => c.key === "maxWebSearches");
+	function modelName(id: number | null): string {
+		const model = models.find((m) => m.id === id);
+		return model ? `${model.provider} / ${model.slug}` : "aucun";
+	}
+	const yesNo = (value: boolean) => (value ? "oui" : "non");
+
+	const lines = numberChanges.map(
+		(c) => `${c.label} : ${settings[c.key]} → ${c.value}`,
+	);
+	if (photosChanged) {
+		lines.push(
+			`Photos envoyées à l'analyse d'arnaque : ${yesNo(settings.scamSendsPhotos)} → ${yesNo(sendsPhotos)}`,
+		);
+	}
+	if (escalationChanged) {
+		lines.push(
+			`Modèle de relance : ${modelName(settings.identifyEscalationModelId)} → ${modelName(escalationId)}`,
+		);
+	}
+	const privacy = numberChanges.some((c) => c.key === "maxWebSearches");
 
 	return (
 		<Section title="Réglages">
@@ -122,7 +192,7 @@ export function Settings({
 					{parsed.map((f) => {
 						const id = `setting-${f.key}`;
 						return (
-							<div key={f.key} className="space-y-1">
+							<div key={f.key} className="max-w-56 space-y-1">
 								<label className="text-sm font-medium" htmlFor={id}>
 									{f.label}
 								</label>
@@ -150,10 +220,39 @@ export function Settings({
 							</div>
 						);
 					})}
+					<div className="max-w-56 space-y-1">
+						<label
+							className="text-sm font-medium"
+							htmlFor="setting-identifyEscalationModelId"
+						>
+							Modèle de relance de l'identification
+						</label>
+						<select
+							id="setting-identifyEscalationModelId"
+							value={escalation}
+							onChange={(event) => setEscalation(event.target.value)}
+							className={`${field} block`}
+						>
+							<option value="">Aucun</option>
+							{models.map((model) => (
+								<option key={model.id} value={model.id}>
+									{model.provider} / {model.slug}
+								</option>
+							))}
+						</select>
+					</div>
 				</div>
+				<label className="flex items-center gap-2 text-sm font-medium">
+					<input
+						type="checkbox"
+						checked={sendsPhotos}
+						onChange={(event) => setSendsPhotos(event.target.checked)}
+					/>
+					Envoyer les photos à l'analyse d'arnaque
+				</label>
 				<button
 					type="submit"
-					disabled={!allValid || changes.length === 0}
+					disabled={!allValid || changeCount === 0}
 					className={primaryButton}
 				>
 					Enregistrer
@@ -164,7 +263,7 @@ export function Settings({
 			{confirming && (
 				<ConfirmDialog
 					title="Modifier les réglages"
-					message={`${summary}.${privacy ? ` ${PRIVACY_WARNING}` : ""}`}
+					message={`${lines.join(" ; ")}.${privacy ? ` ${PRIVACY_WARNING}` : ""}`}
 					confirmLabel="Enregistrer"
 					onCancel={() => setConfirming(false)}
 					onConfirm={save}

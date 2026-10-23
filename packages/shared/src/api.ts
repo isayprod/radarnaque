@@ -188,6 +188,66 @@ export interface paths {
         patch: operations["update_settings_api_admin_ai_settings_patch"];
         trace?: never;
     };
+    "/api/admin/ai/steps/{step}/active-model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate Step Model
+         * @description Active un modèle pour une étape de l'identification (inconnue : 404).
+         */
+        post: operations["activate_step_model_api_admin_ai_steps__step__active_model_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/steps/{step}/prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Step Prompt
+         * @description Crée la version suivante du prompt d'une étape, non active.
+         */
+        post: operations["create_step_prompt_api_admin_ai_steps__step__prompts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/steps/{step}/prompts/{prompt_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate Step Prompt
+         * @description Active une version du prompt d'une étape (d'une autre étape : 404).
+         */
+        post: operations["activate_step_prompt_api_admin_ai_steps__step__prompts__prompt_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/analyses": {
         parameters: {
             query?: never;
@@ -816,24 +876,62 @@ export interface components {
             providers: components["schemas"]["ProviderOut"][];
             search: components["schemas"]["SearchStatusOut"];
             settings: components["schemas"]["AiSettingsOut"];
+            /** Steps */
+            steps: components["schemas"]["StepOut"][];
         };
-        /** AiSettingsIn */
+        /**
+         * AiSettingsIn
+         * @description Champ absent ou `null` : inchangé, sauf `identifyEscalationModelId`, où `null` explicite
+         *     retire le modèle de relance.
+         */
         AiSettingsIn: {
             /** Cachettlhours */
             cacheTtlHours?: number | null;
+            /** Criteriamaxpages */
+            criteriaMaxPages?: number | null;
+            /** Criteriamaxsearches */
+            criteriaMaxSearches?: number | null;
+            /** Criteriattldays */
+            criteriaTtlDays?: number | null;
+            /** Identificationcachettlhours */
+            identificationCacheTtlHours?: number | null;
+            /** Identifyescalationmodelid */
+            identifyEscalationModelId?: number | null;
+            /** Identifyimageside */
+            identifyImageSide?: number | null;
+            /** Identifyretrythreshold */
+            identifyRetryThreshold?: number | null;
             /** Maxwebsearches */
             maxWebSearches?: number | null;
             /** Ratelimitperminute */
             rateLimitPerMinute?: number | null;
+            /** Scamsendsphotos */
+            scamSendsPhotos?: boolean | null;
         };
         /** AiSettingsOut */
         AiSettingsOut: {
             /** Cachettlhours */
             cacheTtlHours: number;
+            /** Criteriamaxpages */
+            criteriaMaxPages: number;
+            /** Criteriamaxsearches */
+            criteriaMaxSearches: number;
+            /** Criteriattldays */
+            criteriaTtlDays: number;
+            /** Identificationcachettlhours */
+            identificationCacheTtlHours: number;
+            /** Identifyescalationmodelid */
+            identifyEscalationModelId: number | null;
+            /** Identifyimageside */
+            identifyImageSide: number;
+            /** Identifyretrythreshold */
+            identifyRetryThreshold: number;
             /** Maxwebsearches */
             maxWebSearches: number;
             /** Ratelimitperminute */
             rateLimitPerMinute: number;
+            /** Scamsendsphotos */
+            scamSendsPhotos: boolean;
         };
         /**
          * AnalysisCallOut
@@ -1643,7 +1741,10 @@ export interface components {
             /** Systemprompt */
             systemPrompt: string;
         };
-        /** PromptTextOut */
+        /**
+         * PromptTextOut
+         * @description `step` : l'étape d'identification propriétaire du prompt ; `None` pour le type `full`.
+         */
         PromptTextOut: {
             /** Active */
             active: boolean;
@@ -1656,6 +1757,8 @@ export interface components {
             createdAt: string;
             /** Id */
             id: number;
+            /** Step */
+            step?: string | null;
             /** Systemprompt */
             systemPrompt: string;
             /** Version */
@@ -1956,6 +2059,24 @@ export interface components {
             severity: "info" | "warning" | "danger";
             /** Weight */
             weight: number;
+        };
+        /**
+         * StepOut
+         * @description Une étape de l'identification : modèle actif, prompt actif et versions du prompt (sans
+         *     leur texte, plus récente d'abord).
+         */
+        StepOut: {
+            /** Activemodelid */
+            activeModelId: number;
+            /** Activepromptid */
+            activePromptId: number | null;
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "read_photos" | "criteria" | "identify";
+            /** Prompts */
+            prompts: components["schemas"]["PromptVersionOut"][];
         };
         /**
          * SubscribersOut
@@ -2273,6 +2394,108 @@ export interface operations {
                 "application/json": components["schemas"]["AiSettingsIn"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiOverviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_step_model_api_admin_ai_steps__step__active_model_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                step: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveModelIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiOverviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_step_prompt_api_admin_ai_steps__step__prompts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                step: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptTextOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_step_prompt_api_admin_ai_steps__step__prompts__prompt_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                step: string;
+                prompt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

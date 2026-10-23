@@ -1,4 +1,5 @@
-"""IA de l'admin : vue d'ensemble, modèles, prompts et réglages du type de scan `full`.
+"""IA de l'admin : vue d'ensemble, modèles, prompts et réglages du type de scan `full`, plus un
+modèle et un prompt par étape de l'identification.
 
 Les fonctions d'action contrôlent d'abord (404, 409, 422), puis appellent `record_action` en
 dernier : aucune ligne de journal ne décrit une modification refusée. Elles ne valident pas la
@@ -24,11 +25,20 @@ from radarnaque_api.admin_schemas import (
     PromptVersionOut,
     ProviderOut,
     SearchStatusOut,
+    StepOut,
 )
 from radarnaque_api.config import Settings
 from radarnaque_api.errors import ApiError
+from radarnaque_api.identify.store import STEPS
 from radarnaque_api.llm.providers import ProviderConfig
-from radarnaque_api.models import Analysis, AppSettings, Model, PromptVersion, ScanKind
+from radarnaque_api.models import (
+    Analysis,
+    AppSettings,
+    Model,
+    PipelineStep,
+    PromptVersion,
+    ScanKind,
+)
 from radarnaque_api.search import SearchBackend, SearxngBackend
 from radarnaque_api.services.admin_log import recent_actions, record_action
 from radarnaque_api.services.ai_probes import SearchHealth
@@ -36,7 +46,19 @@ from radarnaque_api.services.scans import SCAN_KIND
 
 AI_ACTIONS = 20
 # Champs des réglages, dans l'ordre où leurs lignes de journal sont écrites.
-SETTING_FIELDS = ("cache_ttl_hours", "rate_limit_per_minute", "max_web_searches")
+SETTING_FIELDS = (
+    "cache_ttl_hours",
+    "rate_limit_per_minute",
+    "max_web_searches",
+    "identification_cache_ttl_hours",
+    "criteria_ttl_days",
+    "criteria_max_searches",
+    "criteria_max_pages",
+    "identify_retry_threshold",
+    "identify_image_side",
+    "scam_sends_photos",
+    "identify_escalation_model_id",
+)
 
 
 def _not_found(what: str) -> ApiError:
@@ -97,6 +119,55 @@ async def _prompt_version(session: AsyncSession, prompt_id: int | None) -> int |
     if prompt_id is None:
         return None
     return await session.scalar(select(PromptVersion.version).where(PromptVersion.id == prompt_id))
+
+
+async def _steps(session: AsyncSession) -> list[StepOut]:
+    """Les étapes de l'identification, dans l'ordre du pipeline, avec leurs versions de prompt."""
+    active = {
+        code: (model_id, prompt_id)
+        for code, model_id, prompt_id in (
+            await session.execute(
+                select(
+                    PipelineStep.code,
+                    PipelineStep.active_model_id,
+                    PipelineStep.active_prompt_version_id,
+                )
+            )
+        ).all()
+    }
+    versions: dict[str, list[PromptVersionOut]] = {code: [] for code in STEPS}
+    for id_, step, version, created_at in (
+        await session.execute(
+            select(
+                PromptVersion.id,
+                PromptVersion.step,
+                PromptVersion.version,
+                PromptVersion.created_at,
+            )
+            .where(PromptVersion.step.is_not(None))
+            .order_by(PromptVersion.version.desc())
+        )
+    ).all():
+        if step in versions:
+            versions[step].append(
+                PromptVersionOut(
+                    id=id_,
+                    version=version,
+                    created_at=created_at,
+                    active=id_ == active.get(step, (None, None))[1],
+                    analyses=0,
+                )
+            )
+    return [
+        StepOut(
+            code=code,  # type: ignore[arg-type]
+            active_model_id=active[code][0],
+            active_prompt_id=active[code][1],
+            prompts=versions[code],
+        )
+        for code in STEPS
+        if code in active
+    ]
 
 
 async def build_overview(
@@ -164,26 +235,16 @@ async def build_overview(
             )
         ).all()
     ]
-    cache_ttl, rate_limit, max_searches = (
-        await session.execute(
-            select(
-                AppSettings.cache_ttl_hours,
-                AppSettings.rate_limit_per_minute,
-                AppSettings.max_web_searches,
-            )
-        )
-    ).one()
+    settings_row = (await session.execute(select(AppSettings))).scalar_one()
+    steps = await _steps(session)
     return AiOverviewOut(
         providers=[_provider_out(p, environ) for p in providers.values()],
         models=models,
         active_model_id=active_model_id,
         prompts=prompts,
         active_prompt_version_id=active_prompt_id,
-        settings=AiSettingsOut(
-            cache_ttl_hours=cache_ttl,
-            rate_limit_per_minute=rate_limit,
-            max_web_searches=max_searches,
-        ),
+        steps=steps,
+        settings=AiSettingsOut(**{f: getattr(settings_row, f) for f in SETTING_FIELDS}),
         search=await search_status(settings, search_health, search),
         actions=await recent_actions(session, prefix="ai.", limit=AI_ACTIONS),
     )
@@ -264,20 +325,23 @@ async def get_prompt(session: AsyncSession, prompt_id: int) -> PromptTextOut:
                 PromptVersion.version,
                 PromptVersion.created_at,
                 PromptVersion.system_prompt,
-                PromptVersion.id == ScanKind.active_prompt_version_id,
+                (PromptVersion.id == ScanKind.active_prompt_version_id)
+                | (PromptVersion.id == PipelineStep.active_prompt_version_id),
+                PromptVersion.step,
                 select(func.count())
                 .where(Analysis.prompt_version_id == PromptVersion.id)
                 .correlate(PromptVersion)
                 .scalar_subquery(),
             )
             .select_from(PromptVersion)
-            .outerjoin(ScanKind, ScanKind.code == SCAN_KIND)
+            .outerjoin(ScanKind, ScanKind.code == PromptVersion.scan_kind)
+            .outerjoin(PipelineStep, PipelineStep.code == PromptVersion.step)
             .where(PromptVersion.id == prompt_id)
         )
     ).one_or_none()
     if row is None:
         raise _not_found("Version de prompt")
-    id_, version, created_at, system_prompt, active, analyses = row
+    id_, version, created_at, system_prompt, active, step, analyses = row
     return PromptTextOut(
         id=id_,
         version=version,
@@ -285,6 +349,7 @@ async def get_prompt(session: AsyncSession, prompt_id: int) -> PromptTextOut:
         active=bool(active),
         analyses=analyses,
         system_prompt=system_prompt,
+        step=step,
     )
 
 
@@ -342,6 +407,113 @@ async def activate_prompt(session: AsyncSession, *, admin_id: str, prompt_id: in
     )
 
 
+async def _lock_step(session: AsyncSession, step: str) -> PipelineStep:
+    """La ligne `pipeline_steps` de l'étape, sous verrou et relue en base ; 404 si inconnue.
+    Même rôle que `_lock_kind` : sérialise modèle actif, prompt actif et créations de versions."""
+    row = (
+        await session.execute(
+            select(PipelineStep)
+            .where(PipelineStep.code == step)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise _not_found("Étape")
+    return row
+
+
+async def activate_step_model(
+    session: AsyncSession,
+    *,
+    admin_id: str,
+    providers: Mapping[str, ProviderConfig],
+    step: str,
+    model_id: int,
+) -> None:
+    """Active un modèle pour une étape. Étape ou modèle absent : 404 ; fournisseur retiré de
+    `providers.toml` : 422. Déjà actif : rien n'est écrit."""
+    row = await _lock_step(session, step)
+    model = (
+        await session.execute(
+            select(Model).where(Model.id == model_id).execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if model is None:
+        raise _not_found("Modèle")
+    if model.provider not in providers:
+        raise ApiError(
+            422,
+            "invalid_value",
+            "Le fournisseur de ce modèle n'est plus dans providers.toml.",
+            {"field": "modelId"},
+        )
+    previous = row.active_model_id
+    if previous == model_id:
+        return
+    row.active_model_id = model_id
+    await session.flush()
+    record_action(
+        session,
+        admin_id=admin_id,
+        action="ai.step_model_set",
+        details={"step": step, "from": previous, "to": model_id},
+    )
+
+
+async def create_step_prompt(
+    session: AsyncSession, *, admin_id: str, step: str, system_prompt: str
+) -> int:
+    """Crée la version suivante du prompt d'une étape, non active ; renvoie son identifiant."""
+    await _lock_step(session, step)
+    last = await session.scalar(
+        select(func.max(PromptVersion.version)).where(PromptVersion.step == step)
+    )
+    version = (last or 0) + 1
+    created = await session.scalar(
+        insert(PromptVersion)
+        .values(step=step, version=version, system_prompt=system_prompt)
+        .returning(PromptVersion.id)
+    )
+    record_action(
+        session,
+        admin_id=admin_id,
+        action="ai.step_prompt_created",
+        details={"step": step, "from": last, "to": version},
+    )
+    assert created is not None
+    return created
+
+
+async def activate_step_prompt(
+    session: AsyncSession, *, admin_id: str, step: str, prompt_id: int
+) -> None:
+    """Active une version du prompt d'une étape. Étape inconnue, version absente ou d'une autre
+    étape : 404. Déjà active : rien n'est écrit."""
+    row = await _lock_step(session, step)
+    prompt = (
+        await session.execute(
+            select(PromptVersion.version).where(
+                PromptVersion.id == prompt_id, PromptVersion.step == step
+            )
+        )
+    ).one_or_none()
+    if prompt is None:
+        raise _not_found("Version de prompt")
+    previous_id = row.active_prompt_version_id
+    if previous_id == prompt_id:
+        return
+    previous = await _prompt_version(session, previous_id)
+    row.active_prompt_version_id = prompt_id
+    await session.flush()
+    record_action(
+        session,
+        admin_id=admin_id,
+        action="ai.step_prompt_activated",
+        details={"step": step, "from": previous, "to": prompt.version},
+    )
+
+
 async def update_settings(session: AsyncSession, *, admin_id: str, changes: AiSettingsIn) -> None:
     """Applique les champs fournis et réellement changés ; une ligne de journal par champ.
     Corps vide ou sans changement : rien n'est écrit."""
@@ -353,10 +525,20 @@ async def update_settings(session: AsyncSession, *, admin_id: str, changes: AiSe
         )
     ).scalar_one()
     wanted: dict[str, Any] = {f: getattr(changes, f) for f in SETTING_FIELDS}
+    escalation = wanted["identify_escalation_model_id"]
+    if escalation is not None and await session.get(Model, escalation) is None:
+        raise ApiError(
+            422,
+            "invalid_value",
+            "Modèle de relance inconnu.",
+            {"field": "identifyEscalationModelId"},
+        )
     for field in SETTING_FIELDS:
         new = wanted[field]
         old = getattr(row, field)
-        if new is None or new == old:
+        # `null` explicite : seul le modèle de relance se retire ; ailleurs, champ non fourni.
+        cleared = field == "identify_escalation_model_id" and field in changes.model_fields_set
+        if (new is None and not cleared) or new == old:
             continue
         setattr(row, field, new)
         await session.flush()

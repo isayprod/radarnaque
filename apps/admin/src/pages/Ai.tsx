@@ -7,6 +7,7 @@ import { Models } from "./ai/Models";
 import { Prompts } from "./ai/Prompts";
 import { Search } from "./ai/Search";
 import { Settings } from "./ai/Settings";
+import { Steps } from "./ai/Steps";
 import type { Overview } from "./ai/shared";
 
 const KEY_STATES = {
@@ -98,9 +99,16 @@ function AiView({ api, promptId }: { api: AdminApi; promptId?: number }) {
 				reload={reload}
 				promptId={promptId}
 			/>
+			<Steps
+				api={api}
+				overview={overview}
+				onOverview={setOverview}
+				reload={reload}
+			/>
 			<Settings
 				api={api}
 				settings={overview.settings}
+				models={overview.models}
 				onOverview={setOverview}
 			/>
 			<Search api={api} search={overview.search} />

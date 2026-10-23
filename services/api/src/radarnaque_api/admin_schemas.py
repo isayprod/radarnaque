@@ -134,19 +134,51 @@ class PromptVersionOut(CamelModel):
 
 
 class PromptTextOut(PromptVersionOut):
+    """`step` : l'étape d'identification propriétaire du prompt ; `None` pour le type `full`."""
+
     system_prompt: str
+    step: str | None = None
+
+
+class StepOut(CamelModel):
+    """Une étape de l'identification : modèle actif, prompt actif et versions du prompt (sans
+    leur texte, plus récente d'abord)."""
+
+    code: Literal["read_photos", "criteria", "identify"]
+    active_model_id: int
+    active_prompt_id: int | None
+    prompts: list[PromptVersionOut]
 
 
 class AiSettingsOut(CamelModel):
     cache_ttl_hours: int
     rate_limit_per_minute: int
     max_web_searches: int
+    identification_cache_ttl_hours: int
+    criteria_ttl_days: int
+    criteria_max_searches: int
+    criteria_max_pages: int
+    identify_retry_threshold: int
+    identify_image_side: int
+    scam_sends_photos: bool
+    identify_escalation_model_id: int | None
 
 
 class AiSettingsIn(CamelInModel):
+    """Champ absent ou `null` : inchangé, sauf `identifyEscalationModelId`, où `null` explicite
+    retire le modèle de relance."""
+
     cache_ttl_hours: int | None = Field(default=None, ge=1, le=168)
     rate_limit_per_minute: int | None = Field(default=None, ge=1, le=600)
     max_web_searches: int | None = Field(default=None, ge=0, le=5)
+    identification_cache_ttl_hours: int | None = Field(default=None, ge=1, le=2160)
+    criteria_ttl_days: int | None = Field(default=None, ge=1, le=730)
+    criteria_max_searches: int | None = Field(default=None, ge=0, le=5)
+    criteria_max_pages: int | None = Field(default=None, ge=0, le=5)
+    identify_retry_threshold: int | None = Field(default=None, ge=0, le=100)
+    identify_image_side: int | None = Field(default=None, ge=768, le=1536)
+    scam_sends_photos: bool | None = None
+    identify_escalation_model_id: int | None = None
 
 
 class SearchStatusOut(CamelModel):
@@ -168,6 +200,7 @@ class AiOverviewOut(CamelModel):
     active_model_id: int
     prompts: list[PromptVersionOut]
     active_prompt_version_id: int | None
+    steps: list[StepOut]
     settings: AiSettingsOut
     search: SearchStatusOut
     actions: list[AdminActionOut]
