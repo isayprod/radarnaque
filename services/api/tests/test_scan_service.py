@@ -11,6 +11,7 @@ import httpx
 import pytest
 import pytest_asyncio
 import respx
+from fake_llm import FakeLLM
 from PIL import Image
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -19,17 +20,11 @@ from radarnaque_api.auth.privileges import privileges_of
 from radarnaque_api.config import Settings
 from radarnaque_api.errors import ApiError
 from radarnaque_api.llm.client import (
-    Bilingual,
-    LLMAnalysis,
     LLMError,
-    LLMReason,
-    LLMResult,
     OpenAICompatibleClient,
     SearchRecord,
 )
-from radarnaque_api.llm.events import EventSink
 from radarnaque_api.llm.providers import ProviderConfig, ProviderError
-from radarnaque_api.llm.tools import WebSearchTool
 from radarnaque_api.models import (
     Analysis,
     AnalysisReason,
@@ -73,60 +68,6 @@ class Clock:
 
     def advance(self, **delta: float) -> None:
         self.at += timedelta(**delta)
-
-
-class FakeLLM:
-    """Faux client LLM : compte ses appels, et chaque appel rend un score différent."""
-
-    def __init__(
-        self, *, delay: float = 0.0, error: Exception | None = None, max_images: int | None = None
-    ) -> None:
-        self.max_images = max_images
-        self.delay = delay
-        self.error = error
-        self.calls: list[dict] = []
-        self.providers: list[str] = []
-        self.professional = False  # valeur de `professional` des prochaines réponses
-        self.searches: list[
-            SearchRecord
-        ] = []  # recherches web « faites » par les prochaines réponses
-
-    def llm_for(self, provider: str) -> "FakeLLM":
-        self.providers.append(provider)
-        return self
-
-    async def analyze(
-        self,
-        *,
-        model: str,
-        system_prompt: str,
-        messages: list[dict],
-        tools: WebSearchTool | None = None,
-        on_event: EventSink | None = None,
-    ) -> LLMResult:
-        self.calls.append({"model": model, "system_prompt": system_prompt, "messages": messages})
-        if self.delay:
-            await asyncio.sleep(self.delay)
-        if self.error is not None:
-            raise self.error
-        n = len(self.calls)
-        return LLMResult(
-            analysis=LLMAnalysis(
-                score=60 + n,
-                professional=self.professional,
-                summary=Bilingual(fr=f"Résumé {n}", nl=f"Samenvatting {n}"),
-                advice=Bilingual(fr=f"Conseil {n}", nl=f"Advies {n}"),
-                reasons=[
-                    LLMReason(severity="danger", fr=f"Raison A{n}", nl=f"Reden A{n}"),
-                    LLMReason(severity="info", fr=f"Raison B{n}", nl=f"Reden B{n}"),
-                ][: 1 + n % 2],
-            ),
-            tokens_in=100 * n,
-            tokens_out=10 * n,
-            cost_usd_micros=42 * n,
-            raw_text=f'{{"score": {60 + n}}}',
-            searches=list(self.searches),
-        )
 
 
 class FakeResolver:

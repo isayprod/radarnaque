@@ -14,6 +14,7 @@ from radarnaque_api.llm.client import (
     LLMError,
     LLMResult,
     OpenAICompatibleClient,
+    StepResult,
     strict_analysis_schema,
     strict_json_schema,
 )
@@ -863,6 +864,103 @@ async def test_openrouter_reasoning_low():
     assert body["provider"]["data_collection"] == "deny"
     assert body["usage"] == {"include": True}
     assert body["response_format"]["type"] == "json_schema"
+
+
+# --- complete() : sortie structurée générique -----------------------------------------------------
+
+
+class _Out(BaseModel):
+    name: str
+
+
+async def _complete(provider: ProviderConfig, http: httpx.AsyncClient, **kwargs) -> StepResult:
+    client = OpenAICompatibleClient(provider, ENV, http_client=http)
+    return await client.complete(
+        model="vendor/model",
+        system_prompt="SYS",
+        messages=MESSAGES,
+        output=_Out,
+        schema_name="step_out",
+        **kwargs,
+    )
+
+
+async def test_complete_returns_validated_output_and_usage(mock, http):
+    route = mock.post("/chat/completions").mock(return_value=_ok({"name": "x"}))
+    result = await _complete(_provider(), http)
+    assert route.call_count == 1
+    assert result.output.name == "x"
+    assert (result.tokens_in, result.tokens_out) == (120, 80)
+    assert result.raw_text == '{"name": "x"}'
+    assert result.system_prompt == "SYS"
+
+
+async def test_complete_sends_schema_named_and_strict(mock, http):
+    route = mock.post("/chat/completions").mock(return_value=_ok({"name": "x"}))
+    await _complete(_provider(), http)
+    body = json.loads(route.calls.last.request.content)
+    assert body["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {"name": "step_out", "strict": True, "schema": strict_json_schema(_Out)},
+    }
+    assert "tools" not in body
+
+
+async def test_complete_json_object_appends_schema_to_prompt(mock, http):
+    route = mock.post("/chat/completions").mock(return_value=_ok({"name": "x"}))
+    result = await _complete(_provider(structured_output="json_object"), http)
+    body = json.loads(route.calls.last.request.content)
+    assert body["response_format"] == {"type": "json_object"}
+    system = body["messages"][0]["content"]
+    assert system.startswith("SYS")
+    assert json.dumps(strict_json_schema(_Out), ensure_ascii=False) in system
+    assert result.system_prompt == system
+
+
+async def test_complete_reasoning_override_none_drops_reasoning(mock, http):
+    route = mock.post("/chat/completions").mock(return_value=_ok({"name": "x"}))
+    await _complete(_provider(reasoning_effort="low"), http, reasoning="none")
+    assert "reasoning" not in json.loads(route.calls.last.request.content)
+
+
+async def test_complete_reasoning_override_high(mock, http):
+    route = mock.post("/chat/completions").mock(return_value=_ok({"name": "x"}))
+    await _complete(_provider(reasoning_effort="low"), http, reasoning="high")
+    assert json.loads(route.calls.last.request.content)["reasoning"] == {"effort": "high"}
+
+
+async def test_complete_reasoning_none_keeps_provider_setting(mock, http):
+    route = mock.post("/chat/completions").mock(return_value=_ok({"name": "x"}))
+    await _complete(_provider(reasoning_effort="low"), http)
+    assert json.loads(route.calls.last.request.content)["reasoning"] == {"effort": "low"}
+
+
+async def test_complete_reasoning_override_on_responses_api(mock, direct_http):
+    route = mock.post("/responses").mock(return_value=_responses_ok({"name": "x"}))
+    await _complete(_responses_provider(reasoning_effort="low"), direct_http, reasoning="medium")
+    body = json.loads(route.calls.last.request.content)
+    assert body["reasoning"] == {"effort": "medium", "summary": "auto"}
+    await _complete(_responses_provider(reasoning_effort="low"), direct_http, reasoning="none")
+    assert "reasoning" not in json.loads(route.calls.last.request.content)
+
+
+async def test_complete_retries_once_on_invalid_json_then_raises_invalid_response(mock, http):
+    route = mock.post("/chat/completions").mock(return_value=_chat("{cassé"))
+    with pytest.raises(LLMError) as info:
+        await _complete(_provider(), http)
+    assert info.value.code == "invalid_response"
+    assert route.call_count == 2
+    _assert_not_chained(info.value)
+
+
+async def test_complete_retries_once_then_succeeds(mock, http):
+    route = mock.post("/chat/completions").mock(
+        side_effect=[_chat('{"name": 1}'), _ok({"name": "y"})]
+    )
+    result = await _complete(_provider(), http)
+    assert route.call_count == 2
+    assert result.output.name == "y"
+    assert (result.tokens_in, result.tokens_out) == (240, 160)  # réponse refusée comprise
 
 
 # --- API Responses (`api = "responses"`, proxy openai-oauth) -----------------------------------
