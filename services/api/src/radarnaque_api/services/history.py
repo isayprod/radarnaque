@@ -1,14 +1,17 @@
 """Historique des scans d'un utilisateur (`GET /api/scans/history`).
 
 Tout se calcule (3NF) : l'échec, « servi depuis le cache » (règle R8) et le niveau de risque.
-Un événement n'est relié à un snapshot que par `scan_results` → `analyses` : un scan sans
-résultat n'a donc ni site ni titre."""
+Un événement n'est relié à un snapshot que par son résultat : `scan_results` → `analyses` pour
+un `analyze`, `identification_results` → `identifications` pour un `identify` (spec §6). Un scan
+sans résultat n'a donc ni site ni titre ; un `identify` n'a ni note ni niveau de risque."""
 
-from sqlalchemy import exists, select
+from sqlalchemy import case, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from radarnaque_api.models import (
     Analysis,
+    Identification,
+    IdentificationResult,
     Listing,
     ListingSnapshot,
     ScanEvent,
@@ -28,22 +31,40 @@ async def scan_history(
     reste une page."""
     has_failure = exists().where(ScanFailure.scan_event_id == ScanEvent.id)
     # Un scan peut avoir un échec et un résultat (règle R13) : seul le résultat compte.
-    failed = has_failure & ScanResult.scan_event_id.is_(None)
+    failed = (
+        has_failure
+        & ScanResult.scan_event_id.is_(None)
+        & IdentificationResult.scan_event_id.is_(None)
+    )
+    # Un `identify` est servi par le cache si son identification date d'avant lui.
+    from_cache = case(
+        (
+            IdentificationResult.scan_event_id.is_not(None),
+            Identification.created_at < ScanEvent.created_at,
+        ),
+        else_=from_cache_expr(ScanResult),
+    )
     query = (
         select(
             ScanEvent.id,
             ScanEvent.created_at,
             ScanEvent.scan_kind,
             ScanEvent.trigger,
+            ScanEvent.purpose,
             Site.domain,
             ListingSnapshot.title,
             Analysis.score,
-            from_cache_expr(ScanResult),
+            from_cache,
             failed,
         )
         .outerjoin(ScanResult, ScanResult.scan_event_id == ScanEvent.id)
         .outerjoin(Analysis, Analysis.id == ScanResult.analysis_id)
-        .outerjoin(ListingSnapshot, ListingSnapshot.id == Analysis.snapshot_id)
+        .outerjoin(IdentificationResult, IdentificationResult.scan_event_id == ScanEvent.id)
+        .outerjoin(Identification, Identification.id == IdentificationResult.identification_id)
+        .outerjoin(
+            ListingSnapshot,
+            ListingSnapshot.id == func.coalesce(Analysis.snapshot_id, Identification.snapshot_id),
+        )
         .outerjoin(Listing, Listing.id == ListingSnapshot.listing_id)
         .outerjoin(Site, Site.id == Listing.site_id)
         .where(ScanEvent.user_id == user_id)
@@ -59,6 +80,7 @@ async def scan_history(
             created_at=created_at,
             scan_kind=scan_kind,
             trigger=trigger,
+            purpose=purpose,
             site=site,
             title=title,
             score=score,
@@ -71,6 +93,7 @@ async def scan_history(
             created_at,
             scan_kind,
             trigger,
+            purpose,
             site,
             title,
             score,

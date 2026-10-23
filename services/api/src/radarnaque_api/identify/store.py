@@ -412,15 +412,24 @@ async def load_identification(session: AsyncSession, identification_id: int) -> 
 
 
 def identification_digest(out: IdentificationOut) -> str:
-    """Empreinte du résultat qui nourrit `scam` (statut, confiance, référence, niveau et
-    candidats restants de chaque objet, `title_mismatch`, observations photo) : elle entre dans
-    l'`input_hash` de l'analyse."""
+    """Empreinte de ce que le bloc `<identification>` montre à `scam` (statut, confiance et
+    niveau, rôle, libellé, référence, confiance, niveau et candidats restants de chaque objet,
+    `title_mismatch`, observations photo) : elle entre dans l'`input_hash` de l'analyse. Les
+    résultats de la requête « prix » n'y entrent pas : ils ne sont pas enregistrés (règle R11)."""
     return _sha256(
         {
             "status": out.status,
             "confidence": out.confidence,
+            "level": out.level,
             "objects": [
-                {"reference": o.reference, "level": o.level, "remaining": o.remaining}
+                {
+                    "role": o.role,
+                    "label": o.label,
+                    "reference": o.reference,
+                    "confidence": o.confidence,
+                    "level": o.level,
+                    "remaining": o.remaining,
+                }
                 for o in out.objects
             ],
             "titleMismatch": out.title_mismatch,

@@ -1071,6 +1071,8 @@ def test_identification_digest_follows_the_result():
         out(title_mismatch="autre"),
         out(objects=[]),
         out(objects=[out().objects[0].model_copy(update={"remaining": [OLED, LCD]})]),
+        out(objects=[out().objects[0].model_copy(update={"label": "Étui"})]),
+        out(objects=[out().objects[0].model_copy(update={"confidence": 90})]),
         out(photo_observations=[{"photo": None, "kind": "screenshot", "note": "capture"}]),
     ]
     assert base not in {identification_digest(o) for o in changed}

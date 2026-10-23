@@ -25,6 +25,10 @@ from radarnaque_api.main import create_app
 from radarnaque_api.search import SearchHit
 from radarnaque_api.services import scans as scans_service
 
+# Analyse seule : l'identification qui la précède a ses propres tests (test_identify_routes.py,
+# test_scan_service.py).
+pytestmark = pytest.mark.usefixtures("without_identification")
+
 PROVIDER_SECRET = "provider-secret-body-9c41"
 
 

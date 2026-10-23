@@ -447,6 +447,45 @@ async def test_calls_without_analysis_count_in_calls_and_cost(
     assert len(before["technical"]["calls"]) == 1
 
 
+async def test_identify_events_are_scans(app, db, user, analysis):
+    """Un `identify` est un scan : réussi avec son identification, en échec avec un
+    `scan_failures` (et sans identification)."""
+    today = datetime(2026, 10, 21, 7, 0, tzinfo=UTC)
+    snapshot_id = await _scalar(
+        db, "select snapshot_id from app.analyses where id = :a", a=analysis
+    )
+    ident = await _scalar(
+        db,
+        "insert into app.identifications(snapshot_id, config_hash, input_hash, status, confidence)"
+        " values (:s, 'c', 'i', 'identified', 90) returning id",
+        s=snapshot_id,
+    )
+    done = await _event(db, user, today)
+    await db.execute(
+        text("update app.scan_events set purpose = 'identify' where id = :e"), {"e": done}
+    )
+    await db.execute(
+        text(
+            "insert into app.identification_results(scan_event_id, identification_id)"
+            " values (:e, :i)"
+        ),
+        {"e": done, "i": ident},
+    )
+    failed = await _event(db, user, today, failure="identify_read_photos")
+    await db.execute(
+        text("update app.scan_events set purpose = 'identify' where id = :e"), {"e": failed}
+    )
+    await db.commit()
+
+    t = (await _dashboard(db, app)).today
+    assert t.scans == 2
+    assert t.failed_pct == pytest.approx(50.0)
+    assert [(f.code, f.count) for f in t.top_failures] == [("identify_read_photos", 1)]
+    assert t.from_cache_pct == pytest.approx(100.0)  # un réussi, aucun appel ce jour
+    [point] = [p for p in (await daily(db, NOW, 7)).points if p.date == date(2026, 10, 21)]
+    assert (point.from_cache, point.failed) == (1, 1)
+
+
 # --- Routes ----------------------------------------------------------------------------------
 
 

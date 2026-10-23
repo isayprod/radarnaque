@@ -1,4 +1,5 @@
-"""Flux d'un scan en Server-Sent Events (`POST /api/scans/stream`, spec §8.3).
+"""Flux d'un scan en Server-Sent Events (`POST /api/scans/stream`, spec §8.3), et de
+l'identification (`POST /api/identify/stream`, spec §6), qui partagent `stream_scan`.
 
 L'analyse tourne dans sa propre tâche ; ses événements (étapes du service, événements du client
 LLM) passent par une file sans borne, jamais bloquante : le délai d'un tour du modèle englobe

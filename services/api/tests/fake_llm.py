@@ -52,7 +52,9 @@ class FakeLLM:
         tools: WebSearchTool | None = None,
         on_event: EventSink | None = None,
     ) -> LLMResult:
-        self.calls.append({"model": model, "system_prompt": system_prompt, "messages": messages})
+        self.calls.append(
+            {"model": model, "system_prompt": system_prompt, "messages": messages, "tools": tools}
+        )
         if self.delay:
             await asyncio.sleep(self.delay)
         if self.error is not None:

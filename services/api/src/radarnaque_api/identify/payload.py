@@ -1,19 +1,22 @@
 """Messages « user » des trois étapes d'identification.
 
 Les faits de l'annonce sont ceux de `llm.payload` (liste blanche, contacts masqués, vendeur sans
-identité), sans les signaux des règles locales. L'étape des critères ne reçoit jamais d'annonce."""
+identité), sans les signaux des règles locales. L'étape des critères ne reçoit jamais d'annonce.
+Le bloc `<identification>` nourrit ensuite l'analyse de l'arnaque."""
 
 import json
+import re
 from datetime import date
 from urllib.parse import urlsplit
 
 from radarnaque_api.identify.schemas import ReadPhotosObject, StoredCriterion
 from radarnaque_api.llm.payload import FACTS_INTRO, _canonical_block, _facts
 from radarnaque_api.pages import PageText, neutralize, wrap_page
-from radarnaque_api.schemas import ListingIn, RulesIn
+from radarnaque_api.schemas import IdentificationOut, ListingIn, RulesIn
 from radarnaque_api.search import SearchHit
 
 _NO_RULES = RulesIn.model_construct(version=1, signals=[])
+_IDENTIFICATION_TAG = re.compile(r"<(?=\s*/?\s*identification)", re.IGNORECASE)
 
 
 def _listing_block(listing: ListingIn, images_sent: int) -> str:
@@ -89,3 +92,42 @@ def build_identify_messages(
     parts: list[dict] = [{"type": "text", "text": text}]
     parts += _image_parts(images)
     return [{"role": "user", "content": parts}]
+
+
+def _data(value: str) -> str:
+    """Texte du modèle ou du web dans le bloc `<identification>` : sur une ligne (aucune ligne
+    forgée), sans balise `<page_web>` ni `<identification>` ouvrable ou fermable."""
+    return _IDENTIFICATION_TAG.sub("&lt;", neutralize(" ".join(value.split())))
+
+
+def format_identification_block(
+    identification: IdentificationOut, price_hits: list[SearchHit]
+) -> str:
+    """Bloc `<identification>` ajouté au message de l'arnaque (spec §3.5) : statut et confiance,
+    puis chaque objet (référence, confiance, niveau, candidats restants), les observations sur
+    les photos, `title_mismatch` et les résultats de la requête « prix » (titre, domaine,
+    extrait). Tout texte venu du modèle ou du web passe par `_data`."""
+    lines = [
+        "<identification>",
+        f"Statut : {identification.status} ; confiance : {identification.confidence}"
+        f" ({identification.level})",
+    ]
+    for n, obj in enumerate(identification.objects, start=1):
+        remaining = " | ".join(_data(r) for r in obj.remaining) or "aucun"
+        lines.append(
+            f"Objet {n} ({obj.role}, {_data(obj.label)}) : référence "
+            f"{_data(obj.reference) if obj.reference else 'aucune'} ; confiance {obj.confidence}"
+            f" ({obj.level}) ; candidats restants : {remaining}"
+        )
+    observations = identification.photo_observations
+    lines.append("Observations sur les photos :" + ("" if observations else " aucune"))
+    for o in observations:
+        photo = f"photo {o.photo}" if o.photo is not None else "sans photo"
+        lines.append(f"- {photo} ({o.kind}) : {_data(o.note)}")
+    mismatch = identification.title_mismatch
+    lines.append(f"title_mismatch : {_data(mismatch) if mismatch else 'aucun'}")
+    lines.append("Résultats de la requête « prix » :" + ("" if price_hits else " aucun"))
+    for h in price_hits:
+        lines.append(f"- {_data(h.title)} ({_data(_hit_domain(h))}) : {_data(h.snippet)}")
+    lines.append("</identification>")
+    return "\n".join(lines)

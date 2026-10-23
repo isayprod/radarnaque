@@ -137,6 +137,70 @@ describe("parseStreamMessage", () => {
 		expect(parseStreamMessage(msg("error", { message: "x" }))).toBeNull();
 		expect(parseStreamMessage(msg("error", { code: "<script>" }))).toBeNull();
 	});
+
+	test("ignores identification events and keeps parsing the result", () => {
+		const identification = {
+			identificationId: 7,
+			status: "identified",
+			confidence: 95,
+			level: "sure",
+			objects: [
+				{
+					role: "main",
+					label: "Console",
+					reference: "Steam Deck OLED",
+					confidence: 95,
+					level: "sure",
+					remaining: ["Steam Deck OLED"],
+					checks: [],
+					pages: [
+						{
+							url: "https://www.steamdeck.com/fr/tech",
+							title: "Tech specs",
+							domain: "www.steamdeck.com",
+						},
+					],
+				},
+			],
+			sellerQuestion: null,
+			titleMismatch: null,
+			photoObservations: [
+				{ photo: 1, kind: "catalog", note: "photo du fabricant" },
+			],
+			searches: [
+				{
+					query: "Steam Deck OLED prix occasion",
+					kind: "price",
+					pagesRead: [],
+				},
+			],
+			verifiedCriteria: false,
+			unsourced: false,
+			imagesAnalyzed: 2,
+			fromCache: false,
+			identifiedAt: "2026-10-23T10:00:00Z",
+			remaining: null,
+		};
+		const stream = [
+			msg("stage", { stage: "photos", count: 2 }),
+			msg("stage", { stage: "reading_photos" }),
+			msg("search", { id: 1, query: "steam deck", aspect: "model" }),
+			msg("page_read", { domain: "versus.example", ok: true }),
+			msg("criteria_cached", { count: 3 }),
+			msg("identification", identification),
+			msg("identification_error", { code: "identify_resolve" }),
+			msg("stage", { stage: "analyzing", count: 0 }),
+			msg("result", { ...sampleAnalysis, identification }),
+		];
+		const out = stream.map(parseStreamMessage).filter((e) => e !== null);
+		expect(out).toEqual([
+			{ type: "stage", stage: "photos", count: 2 },
+			{ type: "search", id: 1, query: "steam deck", aspect: "model" },
+			{ type: "stage", stage: "analyzing", count: 0 },
+			{ type: "result", result: { ...sampleAnalysis, identification } },
+		]);
+		expect(isAnalysisResult({ ...sampleAnalysis, identification })).toBe(true);
+	});
 });
 
 describe("isAnalysisResult", () => {

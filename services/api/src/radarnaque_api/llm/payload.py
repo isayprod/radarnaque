@@ -125,14 +125,19 @@ def build_messages(
     *,
     today: date,
     images_sent: int | None = None,
+    identification_block: str | None = None,
 ) -> list[dict]:
     """Un seul message « user » : le bloc de faits délimité (dont `imagesSent`, le nombre de
-    photos jointes, et `today`, la date du jour), puis une part `image_url` par photo (JPEG en
-    base64, déjà réduit par le téléchargeur). `images_sent` ne sert qu'à décrire des photos non
-    téléchargées (bloc debug d'un scan servi par le cache) ; par défaut, celles de `images_b64`."""
+    photos jointes, et `today`, la date du jour), le bloc `<identification>` s'il est donné
+    (`identify.payload.format_identification_block`), puis une part `image_url` par photo (JPEG
+    en base64, déjà réduit par le téléchargeur). `images_sent` ne sert qu'à décrire des photos
+    non téléchargées (bloc debug d'un scan servi par le cache) ; par défaut, celles de
+    `images_b64`."""
     sent = len(images_b64) if images_sent is None else images_sent
     facts = _facts(listing, rules, sent, today)
     text = f"{FACTS_INTRO}\n<annonce>\n{_canonical_block(facts)}\n</annonce>"
+    if identification_block is not None:
+        text += "\n\n" + identification_block
     parts: list[dict] = [{"type": "text", "text": text}]
     parts += [
         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}

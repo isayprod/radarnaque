@@ -264,3 +264,11 @@ def test_today_is_in_the_message_but_in_no_hash():
     assert _facts_sent(scan)["today"] == "2026-10-19"
     # `input_hash` n'a aucun paramètre de date : deux jours donnent la même empreinte.
     assert "today" not in input_hash.__code__.co_varnames
+
+
+def test_input_hash_follows_the_identification_digest():
+    scan = ScanIn.model_validate(_scan())
+    # Sans identification, l'empreinte d'avant : le cache des analyses reste valide.
+    assert input_hash(scan, 2, None) == input_hash(scan, 2)
+    assert input_hash(scan, 0, "a" * 64) != input_hash(scan, 0)
+    assert input_hash(scan, 0, "a" * 64) != input_hash(scan, 0, "b" * 64)
