@@ -895,3 +895,65 @@ async def test_unknown_step_404(client, db, bearer, admin):
         )
         assert r.status_code == 404, prompt_id
     assert await _count_actions(db) == count
+
+
+async def test_concurrent_step_prompt_creation(client, db, bearer, admin):
+    last = (await _step(client, bearer, admin, "identify"))["prompts"][0]["version"]
+    url = "/api/admin/ai/steps/identify/prompts"
+    first, second = await asyncio.gather(
+        client.post(url, json={"systemPrompt": PROMPT + "A"}, headers=bearer(admin)),
+        client.post(url, json={"systemPrompt": PROMPT + "B"}, headers=bearer(admin)),
+    )
+    assert (first.status_code, second.status_code) == (201, 201)
+    assert sorted([first.json()["version"], second.json()["version"]]) == [last + 1, last + 2]
+
+
+async def test_set_step_model_with_unknown_provider_is_422(client, db, bearer, admin):
+    before = (await _step(client, bearer, admin, "identify"))["activeModelId"]
+    orphan = await _scalar(
+        db, "insert into app.models(provider, slug) values ('disparu', 'x/step') returning id"
+    )
+    await db.commit()
+    r = await client.post(
+        "/api/admin/ai/steps/identify/active-model",
+        json={"modelId": orphan},
+        headers=bearer(admin),
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "invalid_value"
+    assert (await _step(client, bearer, admin, "identify"))["activeModelId"] == before
+    assert await _count_actions(db) == 0
+
+
+async def test_set_step_model_already_active_writes_nothing(client, db, bearer, admin):
+    active = (await _step(client, bearer, admin, "identify"))["activeModelId"]
+    r = await client.post(
+        "/api/admin/ai/steps/identify/active-model",
+        json={"modelId": active},
+        headers=bearer(admin),
+    )
+    assert r.status_code == 200
+    assert await _count_actions(db) == 0
+
+
+async def test_step_prompt_creation_waits_for_the_step_lock(client, bearer, admin, pg_url: str):
+    """Le verrou de l'étape (FOR NO KEY UPDATE) se heurte à lui-même : tant qu'une autre
+    transaction le tient, la création attend, puis prend le numéro suivant."""
+    url = pg_url.replace("postgresql+psycopg://", "postgresql://", 1)
+    last = (await _step(client, bearer, admin, "identify"))["prompts"][0]["version"]
+    with psycopg.connect(url) as conn:
+        conn.execute(
+            "select code from app.pipeline_steps where code = 'identify' for no key update"
+        )
+        task = asyncio.create_task(
+            client.post(
+                "/api/admin/ai/steps/identify/prompts",
+                json={"systemPrompt": PROMPT},
+                headers=bearer(admin),
+            )
+        )
+        await asyncio.sleep(0.5)
+        assert not task.done()
+        conn.rollback()
+    r = await asyncio.wait_for(task, 5)
+    assert r.status_code == 201 and r.json()["version"] == last + 1
