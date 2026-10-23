@@ -7,8 +7,8 @@
 // l'analyse (score 42, une raison) par défaut, ou celle de l'étape d'identification demandée
 // (`radarnaque_read_photos`, `radarnaque_criteria`, `radarnaque_identify`), reconnue au nom du
 // schéma (`response_format.json_schema.name`) ou, en mode `json_object`, au schéma ajouté au
-// prompt système. L'identification passe par les critères (deux candidats). Avec `stream: true`, la réponse part en SSE : une ligne de réflexion
-// factice (`delta.reasoning`, comme OpenRouter), l'analyse en plusieurs morceaux, la fin du choix,
+// prompt système. L'identification passe par les critères (deux candidats).
+// Avec `stream: true`, la réponse part en SSE : une ligne de réflexion factice (`delta.reasoning`, comme OpenRouter), l'analyse en plusieurs morceaux, la fin du choix,
 // l'usage si `stream_options.include_usage`, puis `data: [DONE]`. Une ligne de log par requête :
 // modèle, nombre de messages, présence d'images, flux. Jamais le contenu des messages ni les
 // en-têtes (Authorization peut porter une clé).
