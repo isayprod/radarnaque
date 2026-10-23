@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timedelta
 from typing import Literal
+from urllib.parse import urlsplit
 
 import httpx
 from pydantic import BaseModel
@@ -63,7 +64,7 @@ from radarnaque_api.identify.schemas import (
     ReadPhotosOut,
     StoredCriterion,
 )
-from radarnaque_api.identify.store import StepSetup
+from radarnaque_api.identify.store import StepSetup, record_criteria_call
 from radarnaque_api.images import Resolver, fetch_images
 from radarnaque_api.llm.client import LLMClient, LLMError, StepResult
 from radarnaque_api.llm.events import CriteriaCached
@@ -89,6 +90,8 @@ Observation = Literal["seen_match", "seen_contrary", "not_visible"]
 
 _VALUE_RANK = {"high": 0, "medium": 1, "low": 2}
 _BAD_URL_CHARS = re.compile(r"[\s\x00-\x1f\x7f]")
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+NAME_MAX = 120
 
 
 @dataclass(frozen=True)
@@ -131,7 +134,9 @@ class PipelineContext:
 
 @dataclass(frozen=True)
 class CallRecord:
-    """Un appel au modèle, pour `llm_calls` (`criteria_set_id` : appel `criteria` seulement)."""
+    """Un appel au modèle, pour `llm_calls` (`criteria_set_id` : appel `criteria` seulement).
+    La ligne d'un appel `criteria` est écrite dans la transaction des critères, celle des autres
+    par `save_identification`."""
 
     step: StepCode
     model_id: int
@@ -208,7 +213,8 @@ class StepTrace:
 @dataclass
 class PipelineRun:
     """Résultat d'un pipeline. `objects` : un par objet de `read_photos`, dans son ordre ;
-    `status` et `confidence` : ceux de l'objet principal (`none` et 0 sans objet)."""
+    `status`, `confidence` et `verified_criteria` : ceux de l'objet principal (`none` et 0 sans
+    objet)."""
 
     read_photos: ReadPhotosOut | None = None
     identify: IdentifyOut | None = None
@@ -220,6 +226,7 @@ class PipelineRun:
     calls: list[CallRecord] = field(default_factory=list)
     retried: bool = False
     unsourced: bool = False
+    verified_criteria: bool = False
     images_analyzed: int = 0
     traces: list[StepTrace] = field(default_factory=list)
 
@@ -500,14 +507,32 @@ def _distinct(candidates: list[str]) -> int:
 
 
 def _designated(reference: str | None, candidates: list[str]) -> str | None:
-    """Candidat (normalisé) que `reference` désigne seul : l'un contient l'autre, une fois
-    normalisés. `None` si aucun ou plusieurs."""
+    """Candidat (normalisé) que `reference` désigne seul : son nom normalisé figure dans la
+    référence normalisée (« Steam Deck OLED 1010 » désigne « Steam Deck OLED » ; une lecture
+    partielle comme « OLED » ne désigne rien). `None` si aucun ou plusieurs."""
     ref = normalize_name(reference or "")
     if not ref:
         return None
     names = {normalize_name(c) for c in candidates}
-    matched = [n for n in names if n and (n in ref or ref in n)]
+    matched = [n for n in names if n and n in ref]
     return matched[0] if len(matched) == 1 else None
+
+
+def _clean_name(value: str | None) -> str | None:
+    """Nom de produit écrit par le modèle, rendu tel quel à l'extension : `None` s'il contient
+    une URL (`://`, `www.`), un caractère de contrôle ou `<`/`>` ; 120 caractères au plus."""
+    text = (value or "").strip()
+    lowered = text.lower()
+    if (
+        not text
+        or "://" in lowered
+        or "www." in lowered
+        or _CONTROL_CHARS.search(text)
+        or "<" in text
+        or ">" in text
+    ):
+        return None
+    return text[:NAME_MAX].strip()
 
 
 # --- Critères ----------------------------------------------------------------------------------
@@ -600,15 +625,15 @@ async def _criteria_for(
         view = await save_criteria(
             session, key, obj.candidates, result.output, outcome.pages, ctx.at
         )
-        run.calls.append(
-            _record(
-                "criteria",
-                ctx.steps["criteria"],
-                result,
-                web_searches=len(queries),
-                criteria_set_id=view.id,
-            )
+        call = _record(
+            "criteria",
+            ctx.steps["criteria"],
+            result,
+            web_searches=len(queries),
+            criteria_set_id=view.id,
         )
+        record_criteria_call(session, call, ctx.at)
+        run.calls.append(call)
         return _from_view(view, hits)
 
 
@@ -663,11 +688,11 @@ async def _complete_criteria(
             return current
         merged, merged_pages = _merge(view.criteria if view else (), result.output, pages)
         view = await save_criteria(session, key, obj.candidates, merged, merged_pages, ctx.at)
-        run.calls.append(
-            _record(
-                "criteria", ctx.steps["criteria"], result, web_searches=1, criteria_set_id=view.id
-            )
+        call = _record(
+            "criteria", ctx.steps["criteria"], result, web_searches=1, criteria_set_id=view.id
         )
+        record_criteria_call(session, call, ctx.at)
+        run.calls.append(call)
         return _from_view(view, current.hits)
 
 
@@ -727,13 +752,29 @@ def _resolve(
     for answer in identify.objects:
         answers.setdefault(answer.object, answer)
     found_anywhere = _reference_found(read.read_reference, hits + run.price_hits)
+    read_designates = {
+        n: _designated(read.read_reference, obj.candidates)
+        for n, obj in enumerate(read.objects, start=1)
+    }
     objects: list[ObjectRecord] = []
     for n, obj in enumerate(read.objects, start=1):
         crit = criteria.get(n, _Criteria())
         answer = answers.get(n)
         shown = [c for c in crit.items if c.kind == "photo"]
         checks = _checks(answer.checks if answer else [], shown, crit.stored, photos)
-        reference = ((answer.reference or "").strip() or None) if answer else None
+        reference = _clean_name(answer.reference) if answer else None
+        remaining = (
+            [r for r in map(_clean_name, answer.remaining) if r] if answer else obj.candidates
+        )
+        # Plancher de la référence lue : seulement si `identify` retient le candidat qu'elle
+        # désigne, et si elle figure dans un résultat de recherche.
+        designated = read_designates[n]
+        read_and_found = (
+            found_anywhere
+            and designated is not None
+            and reference is not None
+            and normalize_name(reference) == designated
+        )
         confidence = object_confidence(
             ObjectEvidence(
                 candidate_count=_distinct(obj.candidates),
@@ -746,9 +787,7 @@ def _resolve(
                     )
                     for c in checks
                 ),
-                reference_read_and_found=(
-                    found_anywhere and _designated(read.read_reference, obj.candidates) is not None
-                ),
+                reference_read_and_found=read_and_found,
                 photos=photos,
                 unsourced=crit.unsourced,
                 criteria_step=n in targets,
@@ -760,7 +799,7 @@ def _resolve(
                 role=obj.role,
                 label=obj.category.strip() or obj.candidates[0],
                 reference=reference,
-                remaining=tuple(answer.remaining) if answer else tuple(obj.candidates),
+                remaining=tuple(remaining),
                 confidence=confidence,
                 level=level_of(confidence, reference),
                 checks=tuple(checks),
@@ -772,6 +811,7 @@ def _resolve(
     main = objects[targets[0] - 1]
     run.status = overall_status(main.level)
     run.confidence = main.confidence
+    run.verified_criteria = criteria.get(targets[0], _Criteria()).verified
 
 
 def _checks(
@@ -779,8 +819,8 @@ def _checks(
 ) -> list[CheckRecord]:
     """Une vérification par critère `photo` montré à `identify` (numérotés de 1, dans l'ordre),
     retrouvé par son numéro. Un numéro inconnu est ignoré ; un critère sans réponse compte comme
-    `not_visible` (omettre un critère décisif ne doit pas relever la confiance) ; un numéro de
-    photo hors des photos envoyées devient `None`."""
+    `not_visible` (omettre un critère décisif ne doit pas relever la confiance), comme une
+    observation `seen_*` sans numéro de photo valide (rien n'a été vu sans photo)."""
     by_number: dict[int, CheckOut] = {}
     for answer in answers:
         by_number.setdefault(answer.criterion, answer)
@@ -788,6 +828,7 @@ def _checks(
     for n, criterion in enumerate(shown, start=1):
         answer = by_number.get(n)
         photo = answer.photo if answer and answer.photo and 1 <= answer.photo <= photos else None
+        seen = answer is not None and answer.observation != "not_visible" and photo is not None
         records.append(
             CheckRecord(
                 criterion_id=criterion.id if stored else None,
@@ -795,8 +836,8 @@ def _checks(
                 text_nl=criterion.nl,
                 decisive=criterion.decisive,
                 sources=criterion.sources,
-                observation=answer.observation if answer else "not_visible",
-                photo=photo,
+                observation=answer.observation if seen and answer else "not_visible",
+                photo=photo if seen else None,
             )
         )
     return records
@@ -818,7 +859,7 @@ def _safe_url(url: str) -> bool:
 
 def _pages(numbers: list[int], hits: list[SearchHit]) -> list[PageLink]:
     """Pages désignées par leur numéro dans les résultats montrés à `identify` (à partir de 1) :
-    hors bornes, doublon ou URL refusée, le numéro est ignoré."""
+    hors bornes, doublon, URL refusée ou sans hôte lisible, le numéro est ignoré."""
     links: list[PageLink] = []
     for n in numbers:
         if not 1 <= n <= len(hits):
@@ -826,7 +867,12 @@ def _pages(numbers: list[int], hits: list[SearchHit]) -> list[PageLink]:
         h = hits[n - 1]
         if not _safe_url(h.url) or any(link.url == h.url for link in links):
             continue
-        domain = (httpx.URL(h.url).host or "")[:DOMAIN_MAX]
+        try:
+            domain = (urlsplit(h.url).hostname or "")[:DOMAIN_MAX]
+        except ValueError:
+            continue
+        if not domain:
+            continue
         links.append(PageLink(url=h.url, title=h.title, domain=domain))
     return links
 

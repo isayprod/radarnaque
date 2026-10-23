@@ -225,3 +225,16 @@ async def test_downgrade_then_upgrade(db, alembic_config):
         ("identify",),
         ("read_photos",),
     ]
+
+
+async def test_identification_flags_default_to_false(db):
+    assert await _rows(
+        db,
+        "select column_name, is_nullable, column_default from information_schema.columns"
+        " where table_schema = 'app' and table_name = 'identifications'"
+        " and column_name in ('retried', 'unsourced', 'verified_criteria') order by 1",
+    ) == [
+        ("retried", "NO", "false"),
+        ("unsourced", "NO", "false"),
+        ("verified_criteria", "NO", "false"),
+    ]

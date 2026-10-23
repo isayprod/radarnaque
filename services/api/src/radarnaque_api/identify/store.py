@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from radarnaque_api.identify.confidence import level_of
 from radarnaque_api.models import (
-    CriteriaSet,
+    Criterion,
     Identification,
     IdentificationCheck,
     IdentificationObject,
@@ -34,12 +34,13 @@ from radarnaque_api.schemas import (
     IdentifiedObjectPublicOut,
     LocalizedTextOut,
     PageLinkOut,
+    PhotoObservationOut,
     ScanIn,
 )
 from radarnaque_api.services.hashing import canonical_json
 
 if TYPE_CHECKING:
-    from radarnaque_api.identify.pipeline import PipelineRun
+    from radarnaque_api.identify.pipeline import CallRecord, PipelineRun
 
 STEPS = ("read_photos", "criteria", "identify")
 
@@ -85,9 +86,15 @@ async def active_steps(session: AsyncSession) -> dict[str, StepSetup] | None:
     return steps if len(steps) == len(STEPS) else None
 
 
-def config_hash(steps: dict[str, StepSetup]) -> str:
-    """Empreinte des modèles et prompts des étapes : une autre configuration, un autre cache."""
-    return _sha256(sorted([s.step, s.model_id, s.prompt_version_id] for s in steps.values()))
+def config_hash(steps: dict[str, StepSetup], *, escalation_model_id: int | None) -> str:
+    """Empreinte des modèles et prompts des étapes et du modèle de la relance (`None` : aucun) :
+    une autre configuration, un autre cache."""
+    return _sha256(
+        {
+            "steps": sorted([s.step, s.model_id, s.prompt_version_id] for s in steps.values()),
+            "escalation": escalation_model_id,
+        }
+    )
 
 
 def identify_input_hash(scan: ScanIn, photos: int, image_side: int) -> str:
@@ -143,16 +150,41 @@ async def valid_identification_id(
     )
 
 
+def _llm_call(call: "CallRecord", at: datetime, identification_id: int | None) -> LlmCall:
+    return LlmCall(
+        created_at=at,
+        step=call.step,
+        identification_id=identification_id,
+        criteria_set_id=call.criteria_set_id,
+        model_id=call.model_id,
+        prompt_version_id=call.prompt_version_id,
+        tokens_in=call.tokens_in,
+        tokens_out=call.tokens_out,
+        cost_usd_micros=call.cost_usd_micros,
+        images_analyzed=call.images,
+        web_searches=call.web_searches,
+    )
+
+
+def record_criteria_call(session: AsyncSession, call: "CallRecord", at: datetime) -> None:
+    """Ligne `llm_calls` d'un appel `criteria`, reliée à son ensemble de critères, dans la
+    transaction qui l'enregistre : son coût reste compté même si l'identification échoue."""
+    session.add(_llm_call(call, at, None))
+
+
 async def save_identification(
     session: AsyncSession, key: IdentificationKey, run: "PipelineRun", at: datetime
 ) -> int:
     """Insère l'identification de `key`, ou rafraîchit sur place celle qui détient déjà la clé
     (règle R4) : sa ligne est mise à jour, ses objets (vérifications et pages comprises) et ses
-    recherches remplacés. Écrit une ligne `llm_calls` par appel du `run`, reliée à
-    l'identification, ou à l'ensemble de critères pour un appel `criteria`. Les jetons et le
-    coût de l'identification sont ceux de tous les appels du `run`. À appeler sous le verrou
-    consultatif de la clé ; ne valide pas."""
+    recherches remplacés. Écrit une ligne `llm_calls` par appel `read_photos` et `identify` du
+    `run`, reliée à l'identification ; celles des appels `criteria` sont déjà écrites, avec leur
+    ensemble de critères (`record_criteria_call`). Les jetons et le coût de l'identification sont
+    ceux de ses propres appels. Une vérification dont le critère a disparu depuis (ensemble
+    rafraîchi par un autre scan, admin) garde sa copie, avec `criterion_id` nul. À appeler sous
+    le verrou consultatif de la clé ; ne valide pas."""
     read = run.read_photos
+    own = [c for c in run.calls if c.step != "criteria"]
     question = run.identify.seller_question if run.identify is not None else None
     values = {
         "status": run.status,
@@ -165,10 +197,11 @@ async def save_identification(
         "seller_question_nl": question.nl if question else None,
         "retried": run.retried,
         "unsourced": run.unsourced,
+        "verified_criteria": run.verified_criteria,
         "images_analyzed": run.images_analyzed,
-        "tokens_in": sum(c.tokens_in for c in run.calls),
-        "tokens_out": sum(c.tokens_out for c in run.calls),
-        "cost_usd_micros": sum(c.cost_usd_micros for c in run.calls),
+        "tokens_in": sum(c.tokens_in for c in own),
+        "tokens_out": sum(c.tokens_out for c in own),
+        "cost_usd_micros": sum(c.cost_usd_micros for c in own),
         "created_at": at,
     }
     stmt = insert(Identification).values(
@@ -198,6 +231,21 @@ async def save_identification(
         )
     )
 
+    referenced = {
+        c.criterion_id for o in run.objects for c in o.checks if c.criterion_id is not None
+    }
+    existing = (
+        # Verrou partagé : ces critères ne peuvent plus disparaître avant la validation.
+        set(
+            await session.scalars(
+                select(Criterion.id)
+                .where(Criterion.id.in_(referenced))
+                .with_for_update(key_share=True)
+            )
+        )
+        if referenced
+        else set()
+    )
     for position, obj in enumerate(run.objects):
         object_id = (
             await session.execute(
@@ -222,7 +270,9 @@ async def save_identification(
                     {
                         "object_id": object_id,
                         "position": n,
-                        "criterion_id": check.criterion_id,
+                        "criterion_id": (
+                            check.criterion_id if check.criterion_id in existing else None
+                        ),
                         "text_fr": check.text_fr,
                         "text_nl": check.text_nl,
                         "decisive": check.decisive,
@@ -264,22 +314,7 @@ async def save_identification(
                 for position, search in enumerate(run.searches)
             ],
         )
-    session.add_all(
-        LlmCall(
-            created_at=at,
-            step=call.step,
-            identification_id=None if call.step == "criteria" else identification_id,
-            criteria_set_id=call.criteria_set_id if call.step == "criteria" else None,
-            model_id=call.model_id,
-            prompt_version_id=call.prompt_version_id,
-            tokens_in=call.tokens_in,
-            tokens_out=call.tokens_out,
-            cost_usd_micros=call.cost_usd_micros,
-            images_analyzed=call.images,
-            web_searches=call.web_searches,
-        )
-        for call in run.calls
-    )
+    session.add_all(_llm_call(call, at, identification_id) for call in own)
     await session.flush()
     return identification_id
 
@@ -287,8 +322,7 @@ async def save_identification(
 async def load_identification(session: AsyncSession, identification_id: int) -> IdentificationOut:
     """Identification relue telle qu'enregistrée (sans `remaining`, ni `debug`, avec
     `from_cache` faux : à l'appelant de les renseigner). Les vérifications viennent de leur
-    copie, jamais de la base de critères. `verified_criteria` : l'ensemble de critères de
-    l'objet principal est relu par un admin."""
+    copie, jamais de la base de critères."""
     ident = (
         await session.execute(
             select(Identification)
@@ -339,12 +373,6 @@ async def load_identification(session: AsyncSession, identification_id: int) -> 
         .order_by(IdentificationSearch.position)
     )
     main = next((o for o in objects if o.role == "main"), None)
-    verified = main is not None and main.criteria_set_id is not None
-    if verified:
-        status = await session.scalar(
-            select(CriteriaSet.status).where(CriteriaSet.id == cast(int, main.criteria_set_id))
-        )
-        verified = status == "verified"
     question = (
         LocalizedTextOut(fr=ident.seller_question_fr, nl=ident.seller_question_nl)
         if ident.seller_question_fr is not None and ident.seller_question_nl is not None
@@ -370,11 +398,12 @@ async def load_identification(session: AsyncSession, identification_id: int) -> 
         ],
         seller_question=question,
         title_mismatch=ident.title_mismatch,
+        photo_observations=[PhotoObservationOut(**o) for o in ident.photo_observations],
         searches=[
             IdentificationSearchOut(query=query, kind=cast(Any, kind), pages_read=list(read))
             for query, kind, read in searches
         ],
-        verified_criteria=verified,
+        verified_criteria=ident.verified_criteria,
         unsourced=ident.unsourced,
         images_analyzed=ident.images_analyzed,
         from_cache=False,
@@ -383,13 +412,18 @@ async def load_identification(session: AsyncSession, identification_id: int) -> 
 
 
 def identification_digest(out: IdentificationOut) -> str:
-    """Empreinte du résultat qui nourrit `scam` (statut, confiance, référence et niveau de
-    chaque objet, `title_mismatch`) : elle entre dans l'`input_hash` de l'analyse."""
+    """Empreinte du résultat qui nourrit `scam` (statut, confiance, référence, niveau et
+    candidats restants de chaque objet, `title_mismatch`, observations photo) : elle entre dans
+    l'`input_hash` de l'analyse."""
     return _sha256(
         {
             "status": out.status,
             "confidence": out.confidence,
-            "objects": [{"reference": o.reference, "level": o.level} for o in out.objects],
+            "objects": [
+                {"reference": o.reference, "level": o.level, "remaining": o.remaining}
+                for o in out.objects
+            ],
             "titleMismatch": out.title_mismatch,
+            "photoObservations": [o.model_dump(mode="json") for o in out.photo_observations],
         }
     )

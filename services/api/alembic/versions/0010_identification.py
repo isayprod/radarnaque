@@ -194,6 +194,7 @@ def upgrade() -> None:
         sa.Column("seller_question_nl", sa.Text, nullable=True),
         sa.Column("retried", sa.Boolean, nullable=False, server_default=sa.false()),
         sa.Column("unsourced", sa.Boolean, nullable=False, server_default=sa.false()),
+        sa.Column("verified_criteria", sa.Boolean, nullable=False, server_default=sa.false()),
         sa.Column("images_analyzed", sa.Integer, nullable=False, server_default="0"),
         sa.Column("tokens_in", sa.Integer, nullable=False, server_default="0"),
         sa.Column("tokens_out", sa.Integer, nullable=False, server_default="0"),
