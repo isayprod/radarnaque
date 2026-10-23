@@ -11,7 +11,8 @@ import pytest_asyncio
 import respx
 from fake_llm import FakeLLM
 from PIL import Image
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -1017,6 +1018,78 @@ async def test_check_of_a_criterion_replaced_meanwhile_keeps_its_copy(
         ("Étui de transport", False),
     ]
     assert [c.text.fr for c in out.objects[0].checks] == ["Anneau du joystick", "Étui de transport"]
+
+
+async def test_refresh_and_criteria_deletion_do_not_deadlock(maker, llm, clients, steps, suffixes):
+    """Un rafraîchissement de l'identification et un rafraîchissement des critères simultanés.
+
+    La suppression d'un critère met à nul les vérifications qui le citent ; un rafraîchissement
+    supprime ces vérifications. Le verrou partagé sur les critères est donc pris avant les
+    suppressions, sinon chaque transaction attend l'autre (40P01)."""
+    scan = scan_in()
+    run = await pipeline(maker, llm, clients, steps, suffixes, scan=scan)
+    key = IdentificationKey(
+        await snapshot_of(maker, scan), config_hash(steps, escalation_model_id=None), "x"
+    )
+    async with maker() as session, session.begin():
+        await save_identification(session, key, run, T0)
+    target = run.objects[0].checks[0].criterion_id
+    assert target is not None
+
+    async def blocked() -> bool:
+        async with maker() as probe:
+            waiting = await probe.scalar(
+                text(
+                    "select count(*) from pg_stat_activity where wait_event_type = 'Lock'"
+                    " and query like 'DELETE FROM app.criteria%'"
+                )
+            )
+        return bool(waiting)
+
+    async def delete_criterion() -> None:
+        async with maker() as other, other.begin():
+            await other.execute(delete(Criterion).where(Criterion.id == target))
+
+    statements: list[str] = []
+    deleter: asyncio.Task[None] | None = None
+    async with maker() as session, session.begin():
+        execute = session.execute
+
+        async def spy(statement, *args, **kwargs):
+            nonlocal deleter
+            statements.append(str(statement.compile(dialect=postgresql.dialect())))
+            result = await execute(statement, *args, **kwargs)
+            if statements[-1].startswith("DELETE FROM app.identification_searches"):
+                # Les vérifications du rafraîchissement sont supprimées : un autre scan supprime
+                # maintenant le critère qu'elles citent.
+                deleter = asyncio.create_task(delete_criterion())
+                for _ in range(50):
+                    if await blocked():
+                        break
+                    await asyncio.sleep(0.1)
+                else:
+                    pytest.fail("la suppression du critère n'attend pas")
+            return result
+
+        session.execute = spy  # type: ignore[method-assign]
+        await save_identification(session, key, run, T0 + timedelta(days=8))
+    assert deleter is not None
+    await asyncio.wait_for(deleter, 10)
+
+    locks = [n for n, sql in enumerate(statements) if "FROM app.criteria" in sql]
+    deletes = [n for n, sql in enumerate(statements) if sql.startswith("DELETE")]
+    assert len(locks) == 1 and locks[0] < min(deletes)
+    assert statements[locks[0]].endswith("FOR KEY SHARE")
+    async with maker() as session:
+        rows = (
+            await session.execute(
+                select(IdentificationCheck.position, IdentificationCheck.criterion_id).order_by(
+                    IdentificationCheck.position
+                )
+            )
+        ).all()
+    # La suppression a attendu l'enregistrement, puis a mis la vérification à nul.
+    assert rows[0] == (0, None) and rows[1][1] is not None
 
 
 async def test_criteria_call_recorded_even_if_identify_fails(maker, llm, clients, steps, suffixes):

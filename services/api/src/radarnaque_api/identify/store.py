@@ -218,6 +218,26 @@ async def save_identification(
         )
     ).scalar_one()
 
+    referenced = {
+        c.criterion_id for o in run.objects for c in o.checks if c.criterion_id is not None
+    }
+    existing = (
+        # Verrou partagé (`FOR KEY SHARE`) : ces critères ne peuvent plus disparaître avant la
+        # validation, et deux identifications ne s'attendent pas. Il est pris avant les
+        # suppressions ci-dessous : supprimer un critère met à nul les vérifications qui le citent,
+        # et un rafraîchissement qui tiendrait déjà ces vérifications attendrait le critère pendant
+        # que sa suppression l'attend (interblocage).
+        set(
+            await session.scalars(
+                select(Criterion.id)
+                .where(Criterion.id.in_(referenced))
+                .with_for_update(read=True, key_share=True)
+            )
+        )
+        if referenced
+        else set()
+    )
+
     # Sans effet pour une nouvelle identification ; pour un rafraîchissement, les vérifications
     # et les pages partent avec leurs objets (`ON DELETE CASCADE`).
     await session.execute(
@@ -231,21 +251,6 @@ async def save_identification(
         )
     )
 
-    referenced = {
-        c.criterion_id for o in run.objects for c in o.checks if c.criterion_id is not None
-    }
-    existing = (
-        # Verrou partagé : ces critères ne peuvent plus disparaître avant la validation.
-        set(
-            await session.scalars(
-                select(Criterion.id)
-                .where(Criterion.id.in_(referenced))
-                .with_for_update(key_share=True)
-            )
-        )
-        if referenced
-        else set()
-    )
     for position, obj in enumerate(run.objects):
         object_id = (
             await session.execute(
