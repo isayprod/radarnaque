@@ -149,9 +149,17 @@ class IdentificationCheck(Base):
         ForeignKey("app.identification_objects.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    criterion_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("app.criteria.id", ondelete="CASCADE"), primary_key=True
+    position: Mapped[int] = mapped_column(primary_key=True)
+    # Le critère de la base partagée peut être remplacé par un rafraîchissement : la vérification
+    # garde une copie du critère tel qu'il a été vérifié.
+    criterion_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("app.criteria.id", ondelete="SET NULL")
     )
+    text_fr: Mapped[str]
+    text_nl: Mapped[str]
+    decisive: Mapped[bool] = mapped_column(Boolean)
+    # [{url, title, domain}]
+    sources: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     observation: Mapped[str]
     photo_index: Mapped[int | None]
 
