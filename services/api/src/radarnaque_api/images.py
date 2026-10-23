@@ -6,7 +6,8 @@ terminant par « . » + ce suffixe, et **toutes** les adresses résolues publiqu
 sont suivies à la main, deux au plus. Une réponse compressée est refusée : le corps est lu brut,
 en flux, sans aucun décodage de notre côté, et coupé au-delà de 5 Mo, avec un délai global de
 5 s par image, résolution et redirections comprises. L'image, refusée dès son en-tête au-delà
-de MAX_PIXELS, est ensuite vérifiée et réencodée par Pillow en JPEG de 768 px au plus.
+de MAX_PIXELS, est ensuite vérifiée et réencodée par Pillow en JPEG de 768 px au plus par
+défaut (réglable).
 
 Les adresses IPv6 qui embarquent une IPv4 (NAT64 `64:ff9b::/96`, 6to4, Teredo) sont refusées
 par `is_reserved` ou `is_global`, quelle que soit l'IPv4 embarquée : le contrôle échoue fermé.
@@ -211,8 +212,8 @@ async def _download(
     raise ImageFetchError(reason)
 
 
-def _to_jpeg(data: bytes) -> bytes | None:
-    """JPEG RGB de MAX_SIDE px au plus, ou None si `data` n'est pas une image acceptée."""
+def _to_jpeg(data: bytes, max_side: int = MAX_SIDE) -> bytes | None:
+    """JPEG RGB de `max_side` px au plus, ou None si `data` n'est pas une image acceptée."""
     try:
         # Avertissement de bombe de décompression changé en erreur, ici seulement : les filtres
         # sont restaurés à la sortie, et aucun `await` n'a lieu entre-temps.
@@ -225,9 +226,9 @@ def _to_jpeg(data: bytes) -> bytes | None:
                 probe.verify()
             with Image.open(io.BytesIO(data), formats=ALLOWED_FORMATS) as image:
                 # Décodage JPEG réduit d'emblée (sans effet sur les autres formats).
-                image.draft("RGB", (MAX_SIDE, MAX_SIDE))
+                image.draft("RGB", (max_side, max_side))
                 rgb = ImageOps.exif_transpose(image).convert("RGB")
-            rgb.thumbnail((MAX_SIDE, MAX_SIDE))
+            rgb.thumbnail((max_side, max_side))
             out = io.BytesIO()
             rgb.save(out, "JPEG", quality=JPEG_QUALITY)
     except Exception:  # entrée non fiable : toute erreur de décodage signifie « pas une image »
@@ -242,16 +243,17 @@ async def fetch_images(
     http: httpx.AsyncClient,
     resolve: Resolver = default_resolve,
     limit: int = MAX_IMAGES,
+    max_side: int = MAX_SIDE,
 ) -> list[str]:
-    """Les `limit` premières images, en JPEG encodé en base64, dans l'ordre des URL. Les
-    téléchargements se font l'un après l'autre ; une seule image en échec fait échouer tout
-    l'appel.
+    """Les `limit` premières images, en JPEG de `max_side` px au plus (encodé en base64), dans
+    l'ordre des URL. Les téléchargements se font l'un après l'autre ; une seule image en échec
+    fait échouer tout l'appel.
 
     `http` doit être un client dédié à ce téléchargement : `trust_env=False` (aucun proxy, qui
     résoudrait l'hôte à notre place), sans en-têtes, cookies ni authentification partagés."""
     encoded: list[str] = []
     for raw in urls[:limit]:
-        jpeg = _to_jpeg(await _download(raw, allowed_suffixes, http, resolve))
+        jpeg = _to_jpeg(await _download(raw, allowed_suffixes, http, resolve), max_side)
         if jpeg is None:
             raise ImageFetchError("bad_image")
         encoded.append(base64.b64encode(jpeg).decode("ascii"))
