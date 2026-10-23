@@ -18,7 +18,7 @@ spécification est dans [`2026-10-23-identification-produit-design.md`](../specs
   garde son identification dans le magasin.
 - **Galerie :** pilule au repos, en cours, Sûr, Incertain, non identifié, erreur ; « Analyser » en
   attente et « Inclus » ; panneau Sûr et Incertain ; infobulle de carte avec la ligne produit.
-  Captures de la galerie (FR, et NL pour les panneaux et la carte) gardées hors du dépôt.
+  Captures de la galerie (FR, et NL pour les panneaux et la carte) gardées hors du dépôt, dans `.superpowers/shots/identification-partie-2/` (dossier ignoré par Git).
 
 ## À vérifier sur les vrais sites
 
@@ -73,22 +73,23 @@ README, « Tester les analyses IA dans l'extension »). À faire en FR et en NL,
 
 ## Points mineurs reportés
 
-- Une identification dont un seul élément est mal formé est rejetée en entier ; le bloc `debug`
-  passe sans borne (réservé au superuser).
-- Le test du chemin « risqué » du magasin utilise la même identification pour l'utilisateur et pour
-  l'analyse : la source n'est pas distinguée.
-- « Analyser » cliqué après un changement d'annonce pendant une identification est ignoré en
-  silence ; la file devrait garder l'empreinte du clic.
-- Les événements de recherche et de réflexion de la phase d'identification arrivent dans le
-  déroulé de l'analyse (les titres de réflexion peuvent se mélanger) ; pas de test d'une relance
-  qui reçoit des événements d'identification ; une fermeture périmée dans la fin d'une
-  identification ; `use-ai-scan.ts` fait près de 800 lignes et le routage de l'identification
-  pourrait en sortir.
-- Pas de test négatif « quota à 0 et identification faite sans demande de l'utilisateur » ; une
-  analyse incluse refusée (quota épuisé) garde « Inclus » et peut boucler sur le refus.
-- Deux régions `role="status"` pendant une analyse : un peu bavard pour un lecteur d'écran ; le nom
-  de la pilule de résultat ne dit pas « Identification » ; le lien vers les formules n'a pas
-  `noreferrer` (déjà le cas avant).
-- Le contrôle d'adresse des liens accepte aussi des formes normalisées de `https` (majuscules,
-  espaces) : sans danger ; la liste des candidats répète les deux du titre ; pas de test qui cache
-  les candidats hors du cas incertain ; le presse-papiers dans le Shadow DOM n'est pas testé.
+La relecture finale de la branche et sa vague de corrections ont traité la plupart des remarques
+des relectures de tâches (déroulé de l'identification pendant une analyse, pilule « Identifier »
+animée dès « Analyser », boucle sur une analyse incluse refusée, file d'attente gardée sur la
+version cliquée, nom accessible de la pilule, `noreferrer`, carte « A ou B ? »). Restent :
+
+- Si le serveur ne lance aucune identification pendant une analyse (étapes non configurées, ou
+  échec silencieux), la pilule « Identifier » reste sur « Démarrage de l'identification… » jusqu'à
+  la fin de l'analyse, puis revient au repos. Cas rare ; on pourrait l'arrêter dès le premier
+  événement propre à l'analyse.
+- Une erreur d'analyse avant tout événement d'identification remet « Identifier » au repos (au
+  lieu d'afficher deux fois la même erreur) ; l'erreur reste visible sur « Analyser ».
+- Les liens vers les formules de la section d'analyse gardent `rel="noopener"` sans `noreferrer`
+  (déjà le cas avant cette branche).
+- Le contrôle d'adresse des liens accepte les formes normalisées de `https` (majuscules, espaces
+  autour) : sans danger, l'adresse rendue est toujours une vraie adresse `https://`.
+- Une identification mal formée est rejetée en entier par le service worker (cohérent avec le
+  schéma de l'API, qui ne produit pas ces formes).
+- `use-ai-scan.ts` dépasse 800 lignes : le routage de l'identification pourrait sortir dans son
+  propre module.
+- Le presse-papiers dans le Shadow DOM n'est vérifiable qu'à la main (liste ci-dessus).
