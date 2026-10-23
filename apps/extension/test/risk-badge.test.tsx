@@ -151,7 +151,7 @@ const LAUNCH = contentText("fr", "ai.analyzeRisk");
 const IDENTIFY = contentText("fr", "identify.launch");
 const PANEL_CLOSE = contentText("fr", "panel.close");
 /** Nom accessible de la partie produit de la pilule « Produit identifié ». */
-const SURE = "Identification : Steam Deck OLED · Sûr 95 %";
+const SURE = "Identification : Steam Deck OLED · Sûr";
 /** Action « Analyser le risque » de la pilule (produit identifié, ou erreur). */
 const launch = () => screen.getByRole("button", { name: LAUNCH });
 const queryLaunch = () => screen.queryByRole("button", { name: LAUNCH });
@@ -452,7 +452,7 @@ describe("RiskBadge", () => {
 		});
 		expect(
 			screen.getByRole("button", {
-				name: "Identificatie: Steam Deck OLED · Zeker 95%",
+				name: "Identificatie: Steam Deck OLED · Zeker",
 			}),
 		).toBeTruthy();
 		await user.click(action);
@@ -2511,15 +2511,15 @@ describe("RiskBadge : une seule pilule, identification puis risque", () => {
 	test.each([
 		[
 			"fr",
-			"Lecture des photos…",
-			"Identification : Steam Deck OLED · Sûr 95 %",
+			"Lecture des photos",
+			"Identification : Steam Deck OLED · Sûr",
 			"Steam Deck OLED·Démarrage de l'analyse",
 			"Risque élevé82/100",
 		],
 		[
 			"nl",
-			"Foto's lezen…",
-			"Identificatie: Steam Deck OLED · Zeker 95%",
+			"Foto's lezen",
+			"Identificatie: Steam Deck OLED · Zeker",
 			"Steam Deck OLED·Analyse wordt gestart",
 			"Hoog risico82/100",
 		],
@@ -2670,14 +2670,14 @@ describe("RiskBadge : une seule pilule, identification puis risque", () => {
 			);
 	});
 
-	test("nl : partie produit « Identificatie: … Zeker 95% », panneau en néerlandais", async () => {
+	test("nl : partie produit « Identificatie: … Zeker », panneau en néerlandais", async () => {
 		const user = userEvent.setup();
 		renderActive("nl");
 		await user.click(
 			screen.getByRole("button", { name: "Product identificeren" }),
 		);
 		const pill = await screen.findByRole("button", {
-			name: "Identificatie: Steam Deck OLED · Zeker 95%",
+			name: "Identificatie: Steam Deck OLED · Zeker",
 		});
 		await user.click(pill);
 		const dialog = screen.getByRole("dialog", {
@@ -3047,6 +3047,16 @@ describe("badge.css", () => {
 		expect(css).not.toContain("@keyframes radarnaque-fade");
 		expect(css).not.toContain(".radarnaque-spin");
 		expect(css).not.toContain(".radarnaque-fade");
+	});
+
+	test("points visibles (attente, ou « … » retiré du texte) : la troncature coupe sans « … », les points le donnent", () => {
+		expect(blockOf("\\.radarnaque-status\\.has-ellipsis \\.rq-dots")).toMatch(
+			/opacity:\s*1/,
+		);
+		const clip = css.match(
+			/\.radarnaque-status\.is-waiting \.rq-shimmer,\s*\.radarnaque-status\.has-ellipsis \.rq-shimmer\s*\{([^}]*)\}/,
+		)?.[1];
+		expect(clip).toMatch(/text-overflow:\s*clip/);
 	});
 
 	test("animations réduites : ni rotation, ni fondu, ni points animés", () => {

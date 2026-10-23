@@ -1,4 +1,4 @@
-import type { Locale } from "@radarnaque/shared";
+import type { IdentificationResult, Locale } from "@radarnaque/shared";
 import {
 	type ReactNode,
 	type RefObject,
@@ -31,9 +31,16 @@ type Access = AiScan["access"];
 export const PILL_CLASS =
 	"inline-flex items-center rounded-pill border border-white/12 bg-glass-host font-sans font-medium whitespace-nowrap text-text-1 no-underline shadow-[var(--shadow-pill)] supports-[backdrop-filter]:backdrop-blur-[18px] focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
 
-// Pilule de la fiche : 28 px de haut, au plus 340 px de large (seule la ligne
-// d'état ou le message se tronquent), texte 13 px.
-export const BADGE_PILL_CLASS = `${PILL_CLASS} h-7 max-w-[340px] min-w-0 gap-2 px-3 text-[13px] leading-none`;
+// Pilule de la fiche, sans largeur maximale : 28 px de haut, texte 13 px.
+const BADGE_PILL_BASE_CLASS = `${PILL_CLASS} h-7 min-w-0 gap-2 px-3 text-[13px] leading-none`;
+
+// Pilule de la fiche : au plus 340 px de large (seule la ligne d'état ou le
+// message se tronquent).
+export const BADGE_PILL_CLASS = `${BADGE_PILL_BASE_CLASS} max-w-[340px]`;
+
+// Pilule « Produit identifié » : au plus 400 px, pour que la référence reste
+// lisible à côté du niveau et de « Analyser le risque ».
+const PRODUCT_PILL_CLASS = `${BADGE_PILL_BASE_CLASS} max-w-[400px]`;
 
 // Pilule cliquable : repos, analyse en cours, résultat.
 export const ACTION_PILL_CLASS = `${BADGE_PILL_CLASS} cursor-pointer hover:border-border-strong aria-disabled:cursor-default aria-disabled:text-text-3 aria-disabled:hover:border-white/12`;
@@ -44,9 +51,15 @@ export const INLINE_ACTION_CLASS =
 	"shrink-0 cursor-pointer rounded-xs text-text-1 underline underline-offset-2 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden aria-disabled:cursor-default aria-disabled:text-text-3 aria-disabled:no-underline";
 
 // Partie produit de la pilule « Produit identifié » : un bouton sans surface
-// propre, dans la pilule, qui ouvre ou ferme le panneau.
+// propre, qui ouvre ou ferme le panneau. Il remplit la hauteur de la pilule et
+// reprend son padding gauche (`-ml-3 pl-3`) : une cible de 26 px de haut, sans
+// bord mort (WCAG 2.5.8).
 const PRODUCT_CLASS =
-	"inline-flex min-w-0 cursor-pointer items-center gap-2 rounded-xs text-text-1 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
+	"-ml-3 inline-flex min-w-0 cursor-pointer items-center gap-2 self-stretch rounded-l-pill pl-3 text-text-1 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
+
+// « Analyser le risque » dans la pilule « Produit identifié » : comme la partie
+// produit, toute la hauteur et le padding droit de la pilule.
+const PRODUCT_ACTION_CLASS = `${INLINE_ACTION_CLASS} -mr-3 inline-flex items-center self-stretch rounded-r-pill pr-3`;
 
 // Séparateur vertical entre deux parties de la pilule.
 const SEPARATOR_CLASS = "h-3.5 w-px shrink-0 bg-white/12";
@@ -394,6 +407,102 @@ export function PillFrame({
 	);
 }
 
+/**
+ * Pilule « Produit identifié » (état 5 de `BadgePill`) : la partie produit,
+ * bouton qui ouvre ou ferme le panneau (glyphe, référence courte ou « A ou
+ * B ? », « · », niveau en toutes lettres ; « Produit non identifié » quand rien
+ * n'est identifiable), un séparateur, puis « Analyser le risque ». Le
+ * pourcentage reste dans le panneau. Nom accessible de la partie produit :
+ * « Identification : » et la référence entière. Aucune couleur sémantique du
+ * risque. Au plus 400 px : seule la référence se tronque.
+ */
+function ProductPill({
+	result,
+	locale,
+	open,
+	onToggle,
+	onAnalyze,
+	pricingUrl,
+	disabled,
+	describedBy,
+	title,
+}: {
+	result: IdentificationResult;
+	locale: Locale;
+	open: boolean;
+	onToggle(): void;
+	onAnalyze(): void;
+	/** Sans abonnement : l'action est un lien vers les formules. */
+	pricingUrl: string | null;
+	/** Grisée (`aria-disabled`) : plus d'analyse, et l'analyse n'est pas incluse. */
+	disabled: boolean;
+	/** Descriptions de l'action (raison, « Inclus »), rendues par `PillFrame`. */
+	describedBy: string | undefined;
+	title: string | undefined;
+}) {
+	const headline = identificationHeadline(result, locale);
+	const analyzeText = contentText(locale, "ai.analyzeRisk");
+	const label = headline
+		? `${headline.reference} · ${headline.level}`
+		: contentText(locale, "identify.none");
+	// « Identification : Steam Deck OLED · Sûr » : la référence entière.
+	const name = contentText(locale, "identify.name").replace(
+		"{name}",
+		() => label,
+	);
+	return (
+		<span className={PRODUCT_PILL_CLASS}>
+			<button
+				type="button"
+				aria-expanded={open}
+				aria-label={name}
+				onClick={onToggle}
+				className={PRODUCT_CLASS}
+			>
+				{headline ? (
+					<>
+						<span data-glyph="" aria-hidden="true" className="shrink-0">
+							{headline.glyph}
+						</span>
+						<span data-reference="" className="min-w-0 truncate">
+							{headline.short}
+						</span>
+						<span aria-hidden="true" className="shrink-0 text-text-3">
+							·
+						</span>
+						<span data-level="" className="shrink-0 text-text-2">
+							{headline.level}
+						</span>
+					</>
+				) : (
+					<span className="min-w-0 truncate">{label}</span>
+				)}
+			</button>
+			<span aria-hidden="true" className={SEPARATOR_CLASS} />
+			{pricingUrl !== null ? (
+				<PricingLink
+					href={pricingUrl}
+					label={analyzeText}
+					className={PRODUCT_ACTION_CLASS}
+				>
+					{analyzeText}
+				</PricingLink>
+			) : (
+				<button
+					type="button"
+					aria-disabled={disabled ? true : undefined}
+					aria-describedby={describedBy}
+					title={title}
+					onClick={onAnalyze}
+					className={PRODUCT_ACTION_CLASS}
+				>
+					{analyzeText}
+				</button>
+			)}
+		</span>
+	);
+}
+
 /** Ce que montre la pilule, dans l'ordre de priorité de `pillStep`. */
 type PillStep =
 	| "restoring"
@@ -434,9 +543,10 @@ function pillStep(scan: AiScan): PillStep {
  * 4. analyse du risque en échec : le logo atténué, son texte (sauf panneau
  *    ouvert, qui l'affiche déjà), puis « Relancer » (analyse coupée en route) ou
  *    « Analyser le risque » ;
- * 5. produit identifié : glyphe, référence courte (ou « A ou B ? »), niveau et
- *    pourcentage, ou « Produit non identifié », dans un bouton qui ouvre ou
- *    ferme le panneau ; un séparateur ; l'action « Analyser le risque ». Décrite
+ * 5. produit identifié (`ProductPill`) : glyphe, référence courte (ou « A ou
+ *    B ? ») et niveau, sans le pourcentage (dans le panneau), ou « Produit non
+ *    identifié », dans un bouton qui ouvre ou ferme le panneau ; un séparateur ;
+ *    l'action « Analyser le risque ». Décrite
  *    par « Inclus avec l'identification » quand l'analyse est incluse (alors
  *    acceptée à 0 analyse restante) ; grisée sans inclusion ni analyse
  *    restante, mais focusable, la raison lue avec elle ; un lien vers les
@@ -605,75 +715,22 @@ export function BadgePill({
 			/>
 		);
 	} else if (step === "identified" && identification.status === "done") {
-		const label = headline
-			? `${headline.reference} · ${headline.level} ${headline.percent}`
-			: contentText(locale, "identify.none");
-		// « Identification : Steam Deck OLED · Sûr 95 % » : la référence entière.
-		const name = contentText(locale, "identify.name").replace(
-			"{name}",
-			() => label,
-		);
-		let action: ReactNode;
-		if (noSubscription)
-			action = (
-				<PricingLink
-					href={scan.pricingUrl}
-					label={analyzeText}
-					className={INLINE_ACTION_CLASS}
-				>
-					{analyzeText}
-				</PricingLink>
-			);
-		else {
+		if (!noSubscription) {
 			disabledReason = emptyAnalyze;
 			included = analysisIncluded;
-			action = (
-				<button
-					type="button"
-					aria-disabled={emptyAnalyze ? true : undefined}
-					aria-describedby={describedBy()}
-					title={emptyAnalyze ? reason : included ? includedText : undefined}
-					onClick={onAnalyze}
-					className={INLINE_ACTION_CLASS}
-				>
-					{analyzeText}
-				</button>
-			);
 		}
 		pill = (
-			<span className={BADGE_PILL_CLASS}>
-				<button
-					type="button"
-					aria-expanded={open}
-					aria-label={name}
-					onClick={onToggle}
-					className={PRODUCT_CLASS}
-				>
-					{headline ? (
-						<>
-							<span data-glyph="" aria-hidden="true" className="shrink-0">
-								{headline.glyph}
-							</span>
-							<span data-reference="" className="min-w-0 truncate">
-								{headline.short}
-							</span>
-							<span aria-hidden="true" className="shrink-0 text-text-3">
-								·
-							</span>
-							<span data-level="" className="shrink-0 text-text-2">
-								{headline.level}{" "}
-								<span data-percent="" className="tabular-nums">
-									{headline.percent}
-								</span>
-							</span>
-						</>
-					) : (
-						<span className="min-w-0 truncate">{label}</span>
-					)}
-				</button>
-				<span aria-hidden="true" className={SEPARATOR_CLASS} />
-				{action}
-			</span>
+			<ProductPill
+				result={identification.result}
+				locale={locale}
+				open={open}
+				onToggle={onToggle}
+				onAnalyze={onAnalyze}
+				pricingUrl={noSubscription ? scan.pricingUrl : null}
+				disabled={emptyAnalyze}
+				describedBy={describedBy()}
+				title={emptyAnalyze ? reason : included ? includedText : undefined}
+			/>
 		);
 	} else if (step === "identificationError" && failed !== null) {
 		pill = (
