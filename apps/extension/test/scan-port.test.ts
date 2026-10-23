@@ -301,6 +301,16 @@ describe("port scan/stream", () => {
 		expect(identifyStream).not.toHaveBeenCalled();
 	});
 
+	test("routes an unknown purpose to scanStream", async () => {
+		const { listener, scanStream, identifyStream } = setup();
+		const tab = fakePort();
+		listener(tab.port);
+		tab.send({ ...scanRequest(), purpose: "bogus" });
+		await tab.closed();
+		expect(scanStream).toHaveBeenCalledTimes(1);
+		expect(identifyStream).not.toHaveBeenCalled();
+	});
+
 	test("maps ApiRequestError 402 to quota_exhausted", async () => {
 		const { listener, scanStream } = setup();
 		scanStream.mockRejectedValueOnce(
