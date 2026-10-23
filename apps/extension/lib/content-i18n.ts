@@ -49,7 +49,7 @@ type AiErrorKey = `ai.error.${(typeof AI_ERROR_CODES)[number]}`;
 type AiKey =
 	| "ai.title"
 	| "ai.run"
-	| "ai.launch"
+	| "ai.analyzeRisk"
 	| "ai.launchShort"
 	| "ai.retry"
 	| "ai.noScansLeft"
@@ -69,9 +69,10 @@ type AiKey =
 	| "ai.product"
 	| AiErrorKey;
 
-// Pilule « Identifier » et en-tête de son panneau. `identify.percent` utilise
-// `{count}` ; `identify.either`, `{a}` et `{b}` (les deux premiers candidats) ;
-// `identify.name`, `{name}` (le nom accessible de la pilule du résultat).
+// États d'identification de la pilule et section Identification du panneau.
+// `identify.percent` utilise `{count}` ; `identify.either`, `{a}` et `{b}` (les
+// deux premiers candidats) ; `identify.name`, `{name}` (le nom accessible de la
+// partie produit de la pilule).
 type IdentifyKey =
 	| "identify.launch"
 	| "identify.launchShort"
@@ -83,7 +84,6 @@ type IdentifyKey =
 	| "identify.either"
 	| "identify.none"
 	| "identify.included"
-	| "identify.queued"
 	| "identify.verified"
 	| "identify.unsourced"
 	| "identify.criteria"
@@ -161,7 +161,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"severity.info": "Info",
 		"ai.title": "Analyse IA",
 		"ai.run": "Lancer une analyse IA",
-		"ai.launch": "Analyser avec l'IA",
+		"ai.analyzeRisk": "Analyser le risque",
 		"ai.launchShort": "Analyser",
 		"ai.retry": "Relancer",
 		"ai.noScansLeft": "Plus d'analyses IA disponibles",
@@ -210,7 +210,6 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"identify.either": "{a} ou {b} ?",
 		"identify.none": "Produit non identifié",
 		"identify.included": "Inclus avec l'identification",
-		"identify.queued": "En attente de l'identification…",
 		"identify.verified": "Critères vérifiés par Radarnaque",
 		"identify.unsourced": "Critères non confirmés par une source",
 		"identify.criteria": "Critères",
@@ -284,7 +283,7 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"severity.info": "Info",
 		"ai.title": "AI-analyse",
 		"ai.run": "AI-analyse starten",
-		"ai.launch": "Analyseren met AI",
+		"ai.analyzeRisk": "Risico analyseren",
 		"ai.launchShort": "Analyseren",
 		"ai.retry": "Opnieuw proberen",
 		"ai.noScansLeft": "Geen AI-analyses meer beschikbaar",
@@ -332,7 +331,6 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"identify.either": "{a} of {b}?",
 		"identify.none": "Product niet geïdentificeerd",
 		"identify.included": "Inbegrepen bij de identificatie",
-		"identify.queued": "Wacht op de identificatie…",
 		"identify.verified": "Criteria gecontroleerd door Radarnaque",
 		"identify.unsourced": "Criteria niet bevestigd door een bron",
 		"identify.criteria": "Criteria",

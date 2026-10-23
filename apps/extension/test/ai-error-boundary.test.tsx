@@ -4,9 +4,14 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AiErrorBoundary } from "../components/AiErrorBoundary";
 import { RiskBadge } from "../components/RiskBadge";
 import type { AiClient } from "../lib/content/ai-client";
+import {
+	type AiResultStore,
+	listingFingerprint,
+} from "../lib/content/ai-results";
 import { aiErrorText, contentText } from "../lib/content-i18n";
 import type { Listing } from "../lib/listing/types";
 import type { RiskReport } from "../lib/rules/score";
+import { sampleIdentification } from "./helpers";
 
 // La section IA lève une erreur au rendu : la pastille doit rester utilisable.
 vi.mock("../components/AiSection", () => ({
@@ -95,20 +100,37 @@ describe("AiErrorBoundary", () => {
 describe("RiskBadge : section IA en échec", () => {
 	test("la pilule reste utilisable et le panneau se ferme et se rouvre", async () => {
 		const user = userEvent.setup();
-		// Accès en erreur : le clic sur « Analyser » ouvre le panneau, qui dit pourquoi.
-		const failing: AiClient = {
-			...ai,
-			access: async () => ({
-				ok: false,
-				error: { code: "background_unavailable" },
+		// Produit déjà identifié : la partie produit ouvre le panneau, dont la
+		// section IA est rendue (et échoue).
+		const aiResults: AiResultStore = {
+			get: async () => ({
+				result: null,
+				identification: sampleIdentification,
+				identifiedByUser: true,
+				fingerprint: listingFingerprint(listing),
+				storedAt: 1,
 			}),
+			put: async () => {},
+			prune: async () => {},
+			forgetIdentifiedByUser: async () => {},
 		};
 		render(
-			<RiskBadge report={report} listing={listing} locale="fr" ai={failing} />,
+			<RiskBadge
+				report={report}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				aiResults={aiResults}
+			/>,
 		);
-		const launch = () =>
-			screen.getByRole("button", { name: contentText("fr", "ai.launch") });
-		await user.click(launch());
+		const productPart = () =>
+			screen.getByRole("button", {
+				name: "Identification : Steam Deck OLED · Sûr 95 %",
+			});
+		await screen.findByRole("button", {
+			name: contentText("fr", "ai.analyzeRisk"),
+		});
+		await user.click(productPart());
 
 		const dialog = await screen.findByRole("dialog");
 		expect(dialog.textContent).toContain(aiErrorText("fr", "default"));
@@ -117,7 +139,7 @@ describe("RiskBadge : section IA en échec", () => {
 
 		await user.keyboard("{Escape}");
 		expect(screen.queryByRole("dialog")).toBeNull();
-		await user.click(launch());
+		await user.click(productPart());
 		expect(await screen.findByRole("dialog")).toBeTruthy();
 	});
 });
