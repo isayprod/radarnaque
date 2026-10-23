@@ -47,11 +47,19 @@ export function useThrottled(text: string, ms = ANNOUNCE_MS): string {
 }
 
 /**
+ * Points de suspension finaux (« … » ou « ... ») et espaces de fin d'une ligne
+ * d'état : la ligne a ses propres points, de largeur fixe.
+ */
+const TRAILING_ELLIPSIS = /\s*(?:…|\.\.\.)\s*$/u;
+
+/**
  * Ligne d'état visible : le texte balayé par un reflet (`rq-shimmer`, coupé si
  * l'utilisateur réduit les animations), tronqué s'il est trop long, et trois points
  * de largeur fixe, toujours présents, dont l'opacité s'anime pendant une attente
- * (`is-waiting`) : la pastille ne change jamais de largeur. Masquée aux lecteurs d'écran,
- * qui ont leur propre région `aria-live` ralentie.
+ * (`is-waiting`) : la pastille ne change jamais de largeur. Le « … » final du
+ * texte est retiré et les points, alors visibles dès le repos (`has-ellipsis`),
+ * le remplacent : jamais « … … ». Masquée aux lecteurs d'écran, qui ont leur
+ * propre région `aria-live` ralentie, au texte entier.
  */
 export function LiveLine({
 	text,
@@ -60,12 +68,14 @@ export function LiveLine({
 	text: string;
 	waiting: boolean;
 }) {
+	const shown = text.replace(TRAILING_ELLIPSIS, "").trimEnd();
+	const ellipsis = shown.length < text.trimEnd().length;
 	return (
 		<span
 			aria-hidden="true"
-			className={`radarnaque-status inline-flex max-w-[220px] min-w-0 items-baseline text-text-2${waiting ? " is-waiting" : ""}`}
+			className={`radarnaque-status inline-flex max-w-[220px] min-w-0 items-baseline text-text-2${waiting ? " is-waiting" : ""}${ellipsis ? " has-ellipsis" : ""}`}
 		>
-			<span className="rq-shimmer min-w-0 truncate">{text}</span>
+			<span className="rq-shimmer min-w-0 truncate">{shown}</span>
 			<span
 				aria-hidden="true"
 				className="rq-dots inline-block w-[1.2em] shrink-0"

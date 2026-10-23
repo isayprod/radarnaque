@@ -120,6 +120,38 @@ describe("LiveLine", () => {
 		expect(container.querySelectorAll(".rq-dots > span")).toHaveLength(3);
 	});
 
+	test.each([
+		["Démarrage de l'identification…", "Démarrage de l'identification"],
+		["Recherche web (prix du march… ", "Recherche web (prix du march"],
+		["Lecture des photos...", "Lecture des photos"],
+		["Rédige le verdict  ", "Rédige le verdict"],
+		["Rédige le verdict", "Rédige le verdict"],
+	])(
+		"« %s » : points de suspension finaux retirés du texte visible, les points fixes les donnent",
+		(text, shown) => {
+			const { container } = render(<LiveLine text={text} waiting={false} />);
+			expect(container.querySelector(".rq-shimmer")?.textContent).toBe(shown);
+		},
+	);
+
+	test("« … » retiré : les points fixes le montrent dès le repos (has-ellipsis) ; sans « … », pas de classe", () => {
+		const cut = render(
+			<LiveLine text="Démarrage de l'identification…" waiting={false} />,
+		);
+		expect(
+			cut.container
+				.querySelector(".radarnaque-status")
+				?.classList.contains("has-ellipsis"),
+		).toBe(true);
+		cut.unmount();
+		const plain = render(<LiveLine text="Rédige le verdict" waiting={false} />);
+		expect(
+			plain.container
+				.querySelector(".radarnaque-status")
+				?.classList.contains("has-ellipsis"),
+		).toBe(false);
+	});
+
 	test("animations réduites : aucune classe d'animation en JS, la feuille de style les fige", () => {
 		const { container } = render(<LiveLine text="Recherche" waiting />);
 		expect(container.querySelector("[style]")).toBeNull();

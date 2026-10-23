@@ -125,7 +125,7 @@ describe("RiskBadge : section IA en échec", () => {
 		);
 		const productPart = () =>
 			screen.getByRole("button", {
-				name: "Identification : Steam Deck OLED · Sûr 95 %",
+				name: "Identification : Steam Deck OLED · Sûr",
 			});
 		await screen.findByRole("button", {
 			name: contentText("fr", "ai.analyzeRisk"),

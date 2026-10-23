@@ -63,8 +63,16 @@
 	content: ".";
 }
 
-.radarnaque-status.is-waiting .rq-dots {
+.radarnaque-status.is-waiting .rq-dots,
+.radarnaque-status.has-ellipsis .rq-dots {
 	opacity: 1;
+}
+
+/* Points visibles : un texte trop long est coupé net, sans « … » de troncature
+   juste avant eux (jamais « … … »). */
+.radarnaque-status.is-waiting .rq-shimmer,
+.radarnaque-status.has-ellipsis .rq-shimmer {
+	text-overflow: clip;
 }
 
 .radarnaque-status.is-waiting .rq-dots > span {

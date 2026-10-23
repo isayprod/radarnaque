@@ -137,7 +137,7 @@ const none: IdentificationResult = {
 	objects: [],
 };
 
-const SURE_NAME = "Identification : Steam Deck OLED · Sûr 95 %";
+const SURE_NAME = "Identification : Steam Deck OLED · Sûr";
 /** Le bouton de la pilule quand elle n'en a qu'un (repos, en cours, résultat). */
 const pillButton = () => screen.getByRole("button");
 /** La partie produit de la pilule « Produit identifié ». */
@@ -248,6 +248,8 @@ describe("BadgePill : identification en cours", () => {
 		["fr", "Lecture des photos…"],
 		["nl", "Foto's lezen…"],
 	] as const)("%s : logo animé, ligne d'état « %s »", (locale, line) => {
+		// Texte visible sans « … » final : les points fixes de la ligne le donnent.
+		const visible = line.replace(/…$/, "");
 		const { onToggle } = renderPill({
 			locale,
 			identification: identifyLoading({
@@ -264,7 +266,8 @@ describe("BadgePill : identification en cours", () => {
 		expect(
 			pill.querySelector("svg")?.classList.contains("rq-logo--loading"),
 		).toBe(true);
-		expect(lineText()).toBe(line);
+		expect(lineText()).toBe(visible);
+		// La région annoncée garde le texte entier.
 		expect(screen.getByRole("status").textContent).toBe(line);
 		pill.click();
 		expect(onToggle).toHaveBeenCalledTimes(1);
@@ -272,7 +275,10 @@ describe("BadgePill : identification en cours", () => {
 
 	test("avant le premier événement : « Démarrage de l'identification… »", () => {
 		renderPill({ identification: identifyLoading() });
-		expect(lineText()).toBe("Démarrage de l'identification…");
+		expect(lineText()).toBe("Démarrage de l'identification");
+		expect(screen.getByRole("status").textContent).toBe(
+			"Démarrage de l'identification…",
+		);
 	});
 
 	test("ligne d'état : page lue, critères connus ; points de suspension après 4 s", () => {
@@ -316,7 +322,7 @@ describe("BadgePill : identification en cours", () => {
 			at(addEvent(first, { type: "stage", stage: "identifying" }, 2_000)),
 		);
 		// La ligne visible suit ; la région annoncée attend la fin des 2 s.
-		expect(lineText()).toBe("Vérification des critères…");
+		expect(lineText()).toBe("Vérification des critères");
 		expect(region.textContent).toBe("Lecture des photos…");
 		act(() => vi.advanceTimersByTime(1_999));
 		expect(region.textContent).toBe("Lecture des photos…");
@@ -327,15 +333,15 @@ describe("BadgePill : identification en cours", () => {
 
 describe("BadgePill : produit identifié", () => {
 	test.each([
-		["fr", SURE_NAME, "Sûr 95 %", "Analyser le risque"],
+		["fr", SURE_NAME, "Sûr", "Analyser le risque"],
 		[
 			"nl",
-			"Identificatie: Steam Deck OLED · Zeker 95%",
-			"Zeker 95%",
+			"Identificatie: Steam Deck OLED · Zeker",
+			"Zeker",
 			"Risico analyseren",
 		],
 	] as const)(
-		"%s : glyphe ●, référence, niveau, pourcentage, séparateur, « %s »",
+		"%s : glyphe ●, référence, niveau sans pourcentage, séparateur, « %s »",
 		(locale, name, level, action) => {
 			const { onToggle, onAnalyze, onIdentify } = renderPill({
 				locale,
@@ -351,8 +357,9 @@ describe("BadgePill : produit identifié", () => {
 			const glyph = product.querySelector("[data-glyph]");
 			expect(glyph?.textContent).toBe("●");
 			expect(glyph?.getAttribute("aria-hidden")).toBe("true");
-			const percent = product.querySelector("[data-percent]");
-			expect(percent?.classList.contains("tabular-nums")).toBe(true);
+			// Le pourcentage reste dans le panneau.
+			expect(product.querySelector("[data-percent]")).toBeNull();
+			expect(product.textContent).not.toMatch(/\d/);
 			// Ni logo, ni animation : le produit seul.
 			expect(product.querySelector("svg")).toBeNull();
 
@@ -366,6 +373,9 @@ describe("BadgePill : produit identifié", () => {
 			expect(button.parentElement).toBe(pill);
 			expect(pill.classList.contains("bg-glass-host")).toBe(true);
 			expect(pill.classList.contains("h-7")).toBe(true);
+			// Cet état seul va jusqu'à 400 px, pour garder la référence lisible.
+			expect(pill.classList.contains("max-w-[400px]")).toBe(true);
+			expect(pill.classList.contains("max-w-[340px]")).toBe(false);
 			const separator = product.nextElementSibling;
 			expect(separator?.getAttribute("aria-hidden")).toBe("true");
 			expect(separator?.nextElementSibling).toBe(button);
@@ -381,6 +391,34 @@ describe("BadgePill : produit identifié", () => {
 		},
 	);
 
+	test.each([
+		["bouton", active],
+		["lien", noSubscription],
+	] as const)(
+		"cibles de clic (%s) : la partie produit et l'action remplissent la hauteur de la pilule et son padding",
+		(_, access) => {
+			renderPill({ access, identification: done(sampleIdentification) });
+			const product = productButton();
+			const action =
+				screen.queryByRole("button", { name: "Analyser le risque" }) ??
+				screen.getByRole("link", { name: "Analyser le risque" });
+			const pill = product.parentElement as HTMLElement;
+			// 28 px de pilule, bordure comprise : chaque cible fait 26 px de haut.
+			expect(pill.classList.contains("h-7")).toBe(true);
+			expect(pill.classList.contains("px-3")).toBe(true);
+			for (const target of [product, action]) {
+				expect(target.classList.contains("self-stretch")).toBe(true);
+				expect(target.classList.contains("inline-flex")).toBe(true);
+				expect(target.classList.contains("items-center")).toBe(true);
+			}
+			// Le padding de la pilule appartient aux cibles, pas au vide.
+			for (const name of ["-ml-3", "pl-3", "rounded-l-pill"])
+				expect(product.classList.contains(name), name).toBe(true);
+			for (const name of ["-mr-3", "pr-3", "rounded-r-pill"])
+				expect(action.classList.contains(name), name).toBe(true);
+		},
+	);
+
 	test("panneau ouvert : aria-expanded vrai sur la partie produit", () => {
 		renderPill({ open: true, identification: done(sampleIdentification) });
 		expect(productButton().getAttribute("aria-expanded")).toBe("true");
@@ -391,7 +429,7 @@ describe("BadgePill : produit identifié", () => {
 		const product = productButton();
 		expect(product.querySelector("[data-glyph]")?.textContent).toBe("◐");
 		expect(product.getAttribute("aria-label")).toBe(
-			"Identification : Steam Deck OLED · Probable 80 %",
+			"Identification : Steam Deck OLED · Probable",
 		);
 	});
 
@@ -399,13 +437,9 @@ describe("BadgePill : produit identifié", () => {
 		[
 			"fr",
 			"Identification : ",
-			"Steam Deck OLED ou Steam Deck LCD ? · Incertain 55 %",
+			"Steam Deck OLED ou Steam Deck LCD ? · Incertain",
 		],
-		[
-			"nl",
-			"Identificatie: ",
-			"Steam Deck OLED of Steam Deck LCD? · Onzeker 55%",
-		],
+		["nl", "Identificatie: ", "Steam Deck OLED of Steam Deck LCD? · Onzeker"],
 	] as const)(
 		"%s : incertain, deux candidats, glyphe ○ et l'action",
 		(locale, prefix, text) => {
@@ -455,7 +489,7 @@ describe("BadgePill : produit identifié", () => {
 		expect(Array.from(shown)).toHaveLength(32);
 		expect(shown).toBe(`${reference.slice(0, 31).trimEnd()}…`);
 		expect(product.getAttribute("aria-label")).toBe(
-			`Identification : ${reference} · Sûr 95 %`,
+			`Identification : ${reference} · Sûr`,
 		);
 	});
 
@@ -480,7 +514,7 @@ describe("BadgePill : produit identifié", () => {
 			`${cut(a)} ou ${cut(b)} ?`,
 		);
 		expect(product.getAttribute("aria-label")).toBe(
-			`Identification : ${a} ou ${b} ? · Incertain 55 %`,
+			`Identification : ${a} ou ${b} ? · Incertain`,
 		);
 	});
 
