@@ -114,7 +114,6 @@ export const sampleAnalysis: AnalysisResult = {
 	webSearches: [],
 };
 
-/** Bloc `debug` d'un superuser (hors production), avec des empreintes longues. */
 /** `IdentificationOut` minimal : un objet identifié. */
 export const sampleIdentification: IdentificationResult = {
 	identificationId: 7,
@@ -155,6 +154,7 @@ export const sampleIdentification: IdentificationResult = {
 	remaining: null,
 };
 
+/** Bloc `debug` d'un superuser (hors production), avec des empreintes longues. */
 export const sampleDebug: NonNullable<AnalysisResult["debug"]> = {
 	analysisId: 42,
 	contentHash:

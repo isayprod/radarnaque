@@ -117,7 +117,8 @@ function scanByPort(
 		if (!message) return;
 		if (message.type === "event") onEvent(message.event);
 		else if (message.type === "result")
-			// Sans `purpose`, le service worker ne relaie qu'une analyse.
+			// Sans `purpose`, le service worker ne relaie qu'une analyse ; la tâche 3 remplace ce
+			// cast par une branche typée.
 			finish({ ok: true, data: message.result as AnalysisResult });
 		else finish(failure(message.code));
 	});
