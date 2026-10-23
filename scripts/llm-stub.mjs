@@ -3,8 +3,11 @@
 //
 //   pnpm llm:stub [port]      (20199 par défaut, celui du fournisseur `stub` de providers.toml)
 //
-// `POST /v1/chat/completions` renvoie toujours la même analyse (score 42, une raison), sans
-// jamais appeler d'outil. Avec `stream: true`, la réponse part en SSE : une ligne de réflexion
+// `POST /v1/chat/completions` renvoie toujours la même sortie fixe, sans jamais appeler d'outil :
+// l'analyse (score 42, une raison) par défaut, ou celle de l'étape d'identification demandée
+// (`radarnaque_read_photos`, `radarnaque_criteria`, `radarnaque_identify`), reconnue au nom du
+// schéma (`response_format.json_schema.name`) ou, en mode `json_object`, au schéma ajouté au
+// prompt système. L'identification passe par les critères (deux candidats). Avec `stream: true`, la réponse part en SSE : une ligne de réflexion
 // factice (`delta.reasoning`, comme OpenRouter), l'analyse en plusieurs morceaux, la fin du choix,
 // l'usage si `stream_options.include_usage`, puis `data: [DONE]`. Une ligne de log par requête :
 // modèle, nombre de messages, présence d'images, flux. Jamais le contenu des messages ni les
@@ -36,6 +39,108 @@ export const STUB_ANALYSIS = Object.freeze({
 	],
 });
 
+/** Lecture des photos : un objet principal à deux candidats, donc des critères à chercher. */
+export const STUB_READ_PHOTOS = Object.freeze({
+	status: "ok",
+	objects: [
+		{
+			role: "main",
+			category: "Vélo de course",
+			brand: "Stub",
+			candidates: ["Stub Racer 100", "Stub Racer 200"],
+			relative_value: "high",
+		},
+	],
+	clues: [
+		{ text: "Cadre en carbone, logo Stub sur le tube diagonal", photo: null },
+	],
+	read_reference: null,
+	hint_criteria: ["Couleur du cadre", "Marque des freins"],
+	photo_observations: [],
+	title_mismatch: null,
+});
+
+/** Critères : un à vérifier sur photo (décisif), un à demander au vendeur. */
+export const STUB_CRITERIA = Object.freeze({
+	criteria: [
+		{
+			kind: "photo",
+			decisive: true,
+			fr: "Le logo sur le tube diagonal est de la couleur annoncée",
+			nl: "Het logo op de schuine buis heeft de aangegeven kleur",
+			expected: [
+				{ candidate: "Stub Racer 100", fr: "Logo blanc", nl: "Wit logo" },
+				{ candidate: "Stub Racer 200", fr: "Logo noir", nl: "Zwart logo" },
+			],
+			sources: [1],
+		},
+		{
+			kind: "ask_seller",
+			decisive: false,
+			fr: "Demander l'année de fabrication",
+			nl: "Vraag naar het bouwjaar",
+			expected: [
+				{ candidate: "Stub Racer 100", fr: "2021", nl: "2021" },
+				{ candidate: "Stub Racer 200", fr: "2023", nl: "2023" },
+			],
+			sources: [1],
+		},
+	],
+});
+
+/** Identification : le premier candidat, le critère 1 vu conforme sur la photo 1. */
+export const STUB_IDENTIFY = Object.freeze({
+	objects: [
+		{
+			object: 1,
+			checks: [{ criterion: 1, observation: "seen_match", photo: 1 }],
+			reference: "Stub Racer 100",
+			remaining: ["Stub Racer 200"],
+			pages: [],
+		},
+	],
+	seller_question: {
+		fr: "Quelle est l'année de fabrication du vélo ?",
+		nl: "Wat is het bouwjaar van de fiets?",
+	},
+	retry_query: null,
+});
+
+const STEP_OUTPUTS = Object.freeze({
+	radarnaque_read_photos: STUB_READ_PHOTOS,
+	radarnaque_criteria: STUB_CRITERIA,
+	radarnaque_identify: STUB_IDENTIFY,
+});
+
+// Titres Pydantic des schémas, présents dans le prompt système en mode `json_object`.
+const SCHEMA_TITLES = Object.freeze({
+	ReadPhotosOut: "radarnaque_read_photos",
+	CriteriaOut: "radarnaque_criteria",
+	IdentifyOut: "radarnaque_identify",
+});
+
+/** Nom du schéma demandé : `json_schema.name`, sinon le titre du schéma ajouté au prompt système. */
+const schemaName = (payload, messages) => {
+	const name = payload.response_format?.json_schema?.name;
+	if (typeof name === "string") return name;
+	const system = messages.find((m) => m?.role === "system");
+	if (typeof system?.content !== "string") return null;
+	const marker = system.content.lastIndexOf("Schéma JSON exact de la réponse");
+	if (marker === -1) return null;
+	const tail = system.content.slice(marker);
+	for (const [title, code] of Object.entries(SCHEMA_TITLES)) {
+		if (
+			tail.includes(`"title": "${title}"`) ||
+			tail.includes(`"title":"${title}"`)
+		)
+			return code;
+	}
+	return null;
+};
+
+/** Sortie fixe de l'étape demandée ; l'analyse pour tout autre nom (ou aucun). */
+export const outputFor = (name) => STEP_OUTPUTS[name] ?? STUB_ANALYSIS;
+
 const hasImages = (messages) =>
 	messages.some(
 		(message) =>
@@ -63,8 +168,8 @@ const USAGE = Object.freeze({
 });
 
 /** Morceaux `chat.completion.chunk` d'une réponse en flux (OpenAI, OpenRouter). */
-const streamChunks = ({ id, created, model, includeUsage }) => {
-	const content = JSON.stringify(STUB_ANALYSIS);
+const streamChunks = ({ id, created, model, includeUsage, output }) => {
+	const content = JSON.stringify(output);
 	const third = Math.ceil(content.length / 3);
 	const chunk = (delta, finish_reason = null) => ({
 		id,
@@ -147,12 +252,16 @@ export function createStubServer({ log = console.log } = {}) {
 		log(
 			`llm-stub : model=${printable(payload.model)} messages=${messages.length} images=${hasImages(messages) ? "oui" : "non"} flux=${stream ? "oui" : "non"}`,
 		);
+		const output = outputFor(schemaName(payload, messages));
 		const id = `chatcmpl-stub-${randomUUID()}`;
 		const created = Math.floor(Date.now() / 1000);
 		const model = typeof payload.model === "string" ? payload.model : "stub";
 		if (stream) {
 			const includeUsage = payload.stream_options?.include_usage === true;
-			sendStream(res, streamChunks({ id, created, model, includeUsage }));
+			sendStream(
+				res,
+				streamChunks({ id, created, model, includeUsage, output }),
+			);
 			return;
 		}
 		send(res, 200, {
@@ -165,7 +274,7 @@ export function createStubServer({ log = console.log } = {}) {
 					index: 0,
 					message: {
 						role: "assistant",
-						content: JSON.stringify(STUB_ANALYSIS),
+						content: JSON.stringify(output),
 					},
 					finish_reason: "stop",
 				},
