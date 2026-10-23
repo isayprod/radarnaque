@@ -322,6 +322,42 @@ describe("parseStreamMessage", () => {
 	});
 });
 
+describe("parseStreamMessage : identification d'une analyse", () => {
+	test("passes the identification embedded in an analysis result through toIdentificationResult", () => {
+		expect(
+			parseStreamMessage(
+				msg("result", {
+					...sampleAnalysis,
+					identification: { ...sampleIdentification, extra: "<b>x</b>" },
+				}),
+			),
+		).toEqual({
+			type: "result",
+			result: { ...sampleAnalysis, identification: sampleIdentification },
+		});
+		// Identification invalide : champ à null, l'analyse est gardée.
+		expect(
+			parseStreamMessage(
+				msg("result", {
+					...sampleAnalysis,
+					identification: { ...sampleIdentification, level: "certain" },
+				}),
+			),
+		).toEqual({
+			type: "result",
+			result: { ...sampleAnalysis, identification: null },
+		});
+		expect(
+			parseStreamMessage(
+				msg("result", { ...sampleAnalysis, identification: null }),
+			),
+		).toEqual({
+			type: "result",
+			result: { ...sampleAnalysis, identification: null },
+		});
+	});
+});
+
 describe("toIdentificationResult", () => {
 	test("copies the API shape, refuses a wrong one", () => {
 		expect(toIdentificationResult(sampleIdentification)).toEqual(

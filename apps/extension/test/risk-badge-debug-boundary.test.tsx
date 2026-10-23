@@ -86,6 +86,7 @@ describe("RiskBadge : section Debug après une erreur de rendu", () => {
 				done: reply(),
 				cancel: () => {},
 			})),
+			identify: vi.fn<AiClient["identify"]>(),
 			openLogin: vi.fn<AiClient["openLogin"]>(async () => ({
 				ok: true,
 				data: null,

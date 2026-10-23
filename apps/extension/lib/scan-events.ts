@@ -497,9 +497,19 @@ export function parseStreamMessage(
 				? { type: "result", result: identification }
 				: { type: "error", code: "invalid_response" };
 		}
-		return isAnalysisResult(data)
-			? { type: "result", result: data }
-			: { type: "error", code: "invalid_response" };
+		if (!isAnalysisResult(data))
+			return { type: "error", code: "invalid_response" };
+		if (data.identification === undefined || data.identification === null)
+			return { type: "result", result: data };
+		// L'identification embarquée est recopiée comme celle d'un flux `identify` ;
+		// invalide, elle devient null et l'analyse est gardée.
+		return {
+			type: "result",
+			result: {
+				...data,
+				identification: toIdentificationResult(data.identification),
+			},
+		};
 	}
 	if (!isRecord(data)) return null;
 	if (m.event === "error") {

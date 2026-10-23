@@ -1,4 +1,8 @@
-import type { AnalysisResult, ScanProgressEvent } from "@radarnaque/shared";
+import type {
+	AnalysisResult,
+	IdentificationResult,
+	ScanProgressEvent,
+} from "@radarnaque/shared";
 import { browser } from "wxt/browser";
 import {
 	type BgResponse,
@@ -15,13 +19,19 @@ import type { ScanProgress } from "./scan-progress";
  */
 export const CANCELLED = "cancelled";
 
-/** Une analyse lancée : son issue, et de quoi l'abandonner (navigation, démontage). */
-export interface ScanHandle {
+/** Une requête lancée sur le port : son issue, et de quoi l'abandonner (navigation, démontage). */
+export interface StreamHandle<T> {
 	/** Résout toujours, jamais en rejet ; `cancelled` après `cancel()`. */
-	done: Promise<BgResponse<AnalysisResult>>;
+	done: Promise<BgResponse<T>>;
 	/** Ferme le port : le service worker annule la requête. Sans effet après la fin. */
 	cancel(): void;
 }
+
+/** Une analyse lancée. */
+export type ScanHandle = StreamHandle<AnalysisResult>;
+
+/** Une identification lancée. */
+export type IdentifyHandle = StreamHandle<IdentificationResult>;
 
 /**
  * Accès du content script aux analyses IA. Tout passe par le service worker, seul
@@ -31,6 +41,11 @@ export interface ScanHandle {
 export interface AiClient {
 	access(): Promise<BgResponse<ContentAccess>>;
 	scan(req: ScanRequest, onEvent: (e: ScanProgressEvent) => void): ScanHandle;
+	/** Identification seule : le même port, avec `purpose: "identify"`. */
+	identify(
+		req: ScanRequest,
+		onEvent: (e: ScanProgressEvent) => void,
+	): IdentifyHandle;
 	openLogin(): Promise<BgResponse<null>>;
 }
 
@@ -41,8 +56,19 @@ export type ScanState =
 	| { status: "done"; result: AnalysisResult; progress: ScanProgress | null }
 	| { status: "error"; code: string };
 
+/** État de l'identification affiché par la pilule « Identifier », avec sa progression. */
+export type IdentifyState =
+	| { status: "idle" }
+	| { status: "loading"; progress: ScanProgress }
+	| {
+			status: "done";
+			result: IdentificationResult;
+			progress: ScanProgress | null;
+	  }
+	| { status: "error"; code: string };
+
 /** Ce que le log de debug « scan reçu » montre : le résultat (avec `debug`) ou le code d'erreur. */
-export function scanOutcome(state: ScanState): unknown {
+export function scanOutcome(state: ScanState | IdentifyState): unknown {
 	if (state.status === "done") return state.result;
 	if (state.status === "error") return { error: state.code };
 	return state;
@@ -71,26 +97,38 @@ const failure = (code: string): BgResponse<never> => ({
 	error: { code },
 });
 
+type PortResult = AnalysisResult | IdentificationResult;
+
+/** La fin postée est une analyse (le service worker l'a validée selon `purpose`). */
+const isAnalysis = (result: PortResult): result is AnalysisResult =>
+	"analysisId" in result;
+
+/** La fin postée est une identification. */
+const isIdentification = (result: PortResult): result is IdentificationResult =>
+	"identificationId" in result;
+
 const defaultConnect = (name: string): PortLike<ScanRequest> =>
 	browser.runtime.connect({ name });
 
 /**
- * Une analyse par port : le message de départ, puis chaque événement passé à `onEvent`,
+ * Une requête par port : le message de départ, puis chaque événement passé à `onEvent`,
  * jusqu'à une seule issue. Un port fermé sans issue (service worker arrêté, MV3) donne
- * `stream_interrupted` ; un service worker injoignable, `background_unavailable`.
+ * `stream_interrupted` ; un service worker injoignable, `background_unavailable`. Une fin
+ * d'une autre forme que celle attendue (`accept`) donne `invalid_response`.
  */
-function scanByPort(
+function scanByPort<T extends PortResult>(
 	connect: (name: string) => PortLike<ScanRequest>,
 	req: ScanRequest,
 	onEvent: (e: ScanProgressEvent) => void,
-): ScanHandle {
-	let settle!: (response: BgResponse<AnalysisResult>) => void;
-	const done = new Promise<BgResponse<AnalysisResult>>((resolve) => {
+	accept: (result: PortResult) => result is T,
+): StreamHandle<T> {
+	let settle!: (response: BgResponse<T>) => void;
+	const done = new Promise<BgResponse<T>>((resolve) => {
 		settle = resolve;
 	});
 	let over = false;
 	/** Première issue seulement : rien n'est relayé ensuite. */
-	const finish = (response: BgResponse<AnalysisResult>) => {
+	const finish = (response: BgResponse<T>) => {
 		if (over) return;
 		over = true;
 		settle(response);
@@ -117,9 +155,11 @@ function scanByPort(
 		if (!message) return;
 		if (message.type === "event") onEvent(message.event);
 		else if (message.type === "result")
-			// Sans `purpose`, le service worker ne relaie qu'une analyse ; la tâche 3 remplace ce
-			// cast par une branche typée.
-			finish({ ok: true, data: message.result as AnalysisResult });
+			finish(
+				accept(message.result)
+					? { ok: true, data: message.result }
+					: failure("invalid_response"),
+			);
 		else finish(failure(message.code));
 	});
 	// Le service worker ferme le port après l'issue ; avant, c'est une interruption.
@@ -147,7 +187,14 @@ export function createAiClient(
 ): AiClient {
 	return {
 		access: () => send<ContentAccess>({ type: "content/access" }),
-		scan: (req, onEvent) => scanByPort(connect, req, onEvent),
+		scan: (req, onEvent) => scanByPort(connect, req, onEvent, isAnalysis),
+		identify: (req, onEvent) =>
+			scanByPort(
+				connect,
+				{ ...req, purpose: "identify" },
+				onEvent,
+				isIdentification,
+			),
 		openLogin: () => send<null>({ type: "ui/open-popup" }),
 	};
 }
