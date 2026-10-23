@@ -66,6 +66,7 @@ type AiKey =
 	| "ai.remaining"
 	| "ai.advice"
 	| "ai.reasons"
+	| "ai.product"
 	| AiErrorKey;
 
 // Pilule « Identifier » et en-tête de son panneau. `identify.percent` utilise
@@ -81,7 +82,22 @@ type IdentifyKey =
 	| "identify.either"
 	| "identify.none"
 	| "identify.included"
-	| "identify.queued";
+	| "identify.queued"
+	| "identify.verified"
+	| "identify.unsourced"
+	| "identify.criteria"
+	| "identify.photo"
+	| "identify.check.match"
+	| "identify.check.contrary"
+	| "identify.check.notVisible"
+	| "identify.candidates"
+	| "identify.askSeller"
+	| "identify.copy"
+	| "identify.copied"
+	| "identify.accessories"
+	| "identify.object"
+	| "identify.pages"
+	| "identify.howIdentified";
 
 // Ligne d'état d'une analyse en cours (`statusLine`). `{count}`, `{aspect}`,
 // `{query}`, `{results}` et `{domains}` sont remplis par `scan-progress.ts`.
@@ -191,6 +207,22 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"identify.none": "Produit non identifié",
 		"identify.included": "Inclus avec l'identification",
 		"identify.queued": "En attente de l'identification…",
+		"identify.verified": "Critères vérifiés par Radarnaque",
+		"identify.unsourced": "Critères non confirmés par une source",
+		"identify.criteria": "Critères",
+		"identify.photo": "photo {n}",
+		"identify.check.match": "Vu",
+		"identify.check.contrary": "Contraire",
+		"identify.check.notVisible": "Non visible",
+		"identify.candidates": "Candidats restants",
+		"identify.askSeller": "À demander au vendeur",
+		"identify.copy": "Copier",
+		"identify.copied": "Copié",
+		"identify.accessories": "Accessoires",
+		"identify.object": "Objet",
+		"identify.pages": "Pages de référence",
+		"identify.howIdentified": "Déroulé de l'identification",
+		"ai.product": "Produit : {reference} ({level})",
 		"progress.start": "Démarrage de l'analyse",
 		"progress.cache": "Analyse déjà disponible",
 		"progress.photos": "Téléchargement de {count} photos",
@@ -294,6 +326,22 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"identify.none": "Product niet geïdentificeerd",
 		"identify.included": "Inbegrepen bij de identificatie",
 		"identify.queued": "Wacht op de identificatie…",
+		"identify.verified": "Criteria gecontroleerd door Radarnaque",
+		"identify.unsourced": "Criteria niet bevestigd door een bron",
+		"identify.criteria": "Criteria",
+		"identify.photo": "foto {n}",
+		"identify.check.match": "Gezien",
+		"identify.check.contrary": "Tegenstrijdig",
+		"identify.check.notVisible": "Niet zichtbaar",
+		"identify.candidates": "Overige kandidaten",
+		"identify.askSeller": "Te vragen aan de verkoper",
+		"identify.copy": "Kopiëren",
+		"identify.copied": "Gekopieerd",
+		"identify.accessories": "Accessoires",
+		"identify.object": "Object",
+		"identify.pages": "Referentiepagina's",
+		"identify.howIdentified": "Verloop van de identificatie",
+		"ai.product": "Product: {reference} ({level})",
 		"progress.start": "Analyse wordt gestart",
 		"progress.cache": "Analyse al beschikbaar",
 		"progress.photos": "{count} foto's downloaden",
