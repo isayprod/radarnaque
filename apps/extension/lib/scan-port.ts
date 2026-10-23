@@ -11,7 +11,7 @@ import type { SseMessage } from "./sse";
 export const SCAN_PORT = "scan/stream";
 
 /** Au-delà, sans fin de flux, la requête est annulée et l'onglet reçoit `timeout`. */
-export const SCAN_TIMEOUT_MS = 200_000;
+export const SCAN_TIMEOUT_MS = 310_000;
 
 /**
  * MV3 : Chrome arrête un service worker resté environ 30 s sans appel d'API d'extension.
@@ -39,7 +39,7 @@ export interface PortLike<Out = PortMessage> {
 }
 
 export interface ScanPortDeps {
-	api: Pick<ApiClient, "scanStream">;
+	api: Pick<ApiClient, "scanStream" | "identifyStream">;
 	/** Contrôle de l'émetteur, le même que pour les messages (`portSenderGuard`). */
 	allowSender: (sender: InternalSender | undefined) => boolean;
 	/** Debug du superuser : l'état partagé avec `createHandlers` (R3, R5). */
@@ -133,11 +133,17 @@ export function createScanPortListener(
 			) {
 				return failed("invalid_listing");
 			}
+			const purpose =
+				(message as ScanRequest).purpose === "identify"
+					? "identify"
+					: "analyze";
 			let stream: AsyncIterable<SseMessage>;
 			try {
 				const body = toScanIn(message as ScanRequest);
 				await debug.group("scan envoyé", body);
-				stream = await api.scanStream(body, controller.signal);
+				stream = await (purpose === "identify"
+					? api.identifyStream(body, controller.signal)
+					: api.scanStream(body, controller.signal));
 			} catch (error) {
 				// Même code que l'ancien `scan/run` (refus de l'API, session, réseau).
 				return over ? null : failed(errorCode(error));
@@ -145,7 +151,7 @@ export function createScanPortListener(
 			try {
 				for await (const m of stream) {
 					if (over) return null;
-					const parsed = parseStreamMessage(m);
+					const parsed = parseStreamMessage(m, purpose);
 					if (parsed === null) continue;
 					if (parsed.type === "result") {
 						await debug.group("scan reçu", {

@@ -5,6 +5,7 @@ export type {
 	CriteriaCachedEvent,
 	IdentificationErrorEvent,
 	IdentificationEvent,
+	IdentificationResult,
 	PageReadEvent,
 	ScanProgressEvent,
 	SearchAspect,

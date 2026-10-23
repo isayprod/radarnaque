@@ -61,6 +61,11 @@ export interface ApiClient {
 		body: ScanIn,
 		signal: AbortSignal,
 	): Promise<AsyncIterable<SseMessage>>;
+	/** Comme `scanStream`, pour `POST /api/identify/stream` : l'identification seule. */
+	identifyStream(
+		body: ScanIn,
+		signal: AbortSignal,
+	): Promise<AsyncIterable<SseMessage>>;
 }
 
 async function errorBody(res: Response): Promise<ApiErrorBody> {
@@ -141,6 +146,21 @@ export function createApiClient({
 		return (await (await request(path, init)).json()) as T;
 	}
 
+	/** POST d'un `ScanIn` sur un flux SSE. */
+	async function stream(
+		path: string,
+		body: ScanIn,
+		signal: AbortSignal,
+	): Promise<AsyncIterable<SseMessage>> {
+		const res = await request(path, {
+			method: "POST",
+			body: JSON.stringify(body),
+			signal,
+		});
+		// Sans corps : un flux vide, donc interrompu pour l'appelant.
+		return readSse(res.body ?? new Blob().stream());
+	}
+
 	return {
 		getMe: () => requestJson<Me>("/api/me"),
 		async deleteMe() {
@@ -152,14 +172,8 @@ export function createApiClient({
 				method: "POST",
 				body: JSON.stringify(body),
 			}),
-		async scanStream(body, signal) {
-			const res = await request("/api/scans/stream", {
-				method: "POST",
-				body: JSON.stringify(body),
-				signal,
-			});
-			// Sans corps : un flux vide, donc interrompu pour l'appelant.
-			return readSse(res.body ?? new Blob().stream());
-		},
+		scanStream: (body, signal) => stream("/api/scans/stream", body, signal),
+		identifyStream: (body, signal) =>
+			stream("/api/identify/stream", body, signal),
 	};
 }

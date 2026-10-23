@@ -120,6 +120,14 @@ function stageLine(e: Stage, t: (key: ContentKey) => string): string {
 				: fill(t("progress.analyzing"), { count });
 		case "writing":
 			return t("progress.writing");
+		case "reading_photos":
+			return t("progress.readingPhotos");
+		case "criteria":
+			return t("progress.criteria");
+		case "identifying":
+			return t("progress.identifying");
+		case "retrying":
+			return t("progress.retrying");
 	}
 }
 
@@ -139,6 +147,15 @@ export function eventLine(e: ScanProgressEvent, locale: Locale): string {
 				aspect: t(`progress.aspect.${e.aspect}`),
 				query: squeeze(e.query),
 			});
+		case "criteria_cached":
+			return t("progress.criteriaCached");
+		// Une page refusée ou en échec ne dit rien : la ligne d'état garde la précédente.
+		case "page_read":
+			return e.ok ? fill(t("progress.pageRead"), { domain: e.domain }) : "";
+		case "identification":
+			return t("progress.identification");
+		case "identification_error":
+			return t("progress.identificationError");
 		case "search_done": {
 			if (!e.ok) return t("progress.searchFailed");
 			// Règles de chaque langue : « 0 résultat » en FR, « 0 resultaten » en NL.

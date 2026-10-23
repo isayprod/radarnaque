@@ -1,14 +1,17 @@
 import type {
 	AnalysisResult,
+	IdentificationResult,
 	ScanProgressEvent,
 	SearchAspect,
 } from "@radarnaque/shared";
 import { cut } from "./scan-payload";
 import type { SseMessage } from "./sse";
 
+type StreamResult = AnalysisResult | IdentificationResult;
+
 /** Fin du flux telle que le port la poste à l'onglet. */
 export type StreamOutcome =
-	| { type: "result"; result: AnalysisResult }
+	| { type: "result"; result: StreamResult }
 	| { type: "error"; code: string };
 
 /** Bornes des chaînes relayées à la page (spec §10.1). */
@@ -23,6 +26,10 @@ const STAGES: ReadonlySet<string> = new Set([
 	"cache",
 	"photos",
 	"analyzing",
+	"reading_photos",
+	"criteria",
+	"identifying",
+	"retrying",
 	"writing",
 ]);
 const ASPECTS: ReadonlySet<string> = new Set<SearchAspect>([
@@ -32,6 +39,18 @@ const ASPECTS: ReadonlySet<string> = new Set<SearchAspect>([
 	"other",
 ]);
 const LEVELS: ReadonlySet<string> = new Set(["low", "medium", "high"]);
+const IDENTIFICATION_STATUSES: ReadonlySet<string> = new Set([
+	"identified",
+	"uncertain",
+	"none",
+]);
+const IDENTIFICATION_LEVELS: ReadonlySet<string> = new Set([
+	"sure",
+	"probable",
+	"uncertain",
+]);
+/** Objets d'une identification au plus (spec identification §6). */
+const MAX_OBJECTS = 4;
 const SEVERITIES: ReadonlySet<string> = new Set(["info", "warning", "danger"]);
 /** Code d'erreur de l'API : jamais de texte libre relayé à la page. */
 const ERROR_CODE = /^[a-z0-9_]{1,64}$/;
@@ -90,6 +109,38 @@ export function isAnalysisResult(value: unknown): value is AnalysisResult {
 	);
 }
 
+const isIdentifiedObject = (value: unknown): boolean =>
+	isRecord(value) &&
+	typeof value.role === "string" &&
+	typeof value.label === "string" &&
+	(value.reference === null || typeof value.reference === "string") &&
+	Array.isArray(value.checks) &&
+	Array.isArray(value.pages);
+
+/**
+ * Forme minimale d'un `IdentificationOut` reçu de l'API, vérifiée avant d'être relayée
+ * à la page ; le reste des champs est celui de l'API, sans autre contrôle.
+ */
+export function isIdentificationResult(
+	value: unknown,
+): value is IdentificationResult {
+	if (!isRecord(value)) return false;
+	const { confidence, objects } = value;
+	return (
+		typeof value.identificationId === "number" &&
+		typeof value.status === "string" &&
+		IDENTIFICATION_STATUSES.has(value.status) &&
+		Number.isInteger(confidence) &&
+		(confidence as number) >= 0 &&
+		(confidence as number) <= 100 &&
+		typeof value.level === "string" &&
+		IDENTIFICATION_LEVELS.has(value.level) &&
+		Array.isArray(objects) &&
+		objects.length <= MAX_OBJECTS &&
+		objects.every(isIdentifiedObject)
+	);
+}
+
 function stage(data: Record<string, unknown>): ScanProgressEvent | null {
 	const { stage: name, count } = data;
 	if (typeof name !== "string" || !STAGES.has(name)) return null;
@@ -130,6 +181,27 @@ function progress(
 				query: cut(data.query, EVENT_BOUNDS.query),
 				aspect: data.aspect as SearchAspect,
 			};
+		case "page_read":
+			if (typeof data.domain !== "string" || typeof data.ok !== "boolean") {
+				return null;
+			}
+			return {
+				type: "page_read",
+				domain: cut(data.domain, EVENT_BOUNDS.domain),
+				ok: data.ok,
+			};
+		case "criteria_cached":
+			return isCount(data.count)
+				? { type: "criteria_cached", count: data.count }
+				: null;
+		case "identification":
+			return isIdentificationResult(data)
+				? { ...data, type: "identification" }
+				: null;
+		case "identification_error":
+			return typeof data.code === "string" && ERROR_CODE.test(data.code)
+				? { type: "identification_error", code: data.code }
+				: null;
 		case "search_done": {
 			const { id, ok, count, domains } = data;
 			if (
@@ -168,16 +240,22 @@ function parseJson(data: string): unknown {
  * Événement du flux validé et borné, prêt à être relayé à la page : une progression,
  * ou la fin du flux (`result` ou `error`). `null` : événement inconnu ou invalide, ignoré.
  * Seul un `result` invalide n'est pas ignoré : il donne l'erreur `invalid_response`.
- * Seuls les champs connus sont recopiés.
+ * Seuls les champs connus sont recopiés. `purpose` : la forme attendue du `result`.
  */
 export function parseStreamMessage(
 	m: SseMessage,
+	purpose: "identify" | "analyze" = "analyze",
 ): ScanProgressEvent | StreamOutcome | null {
 	const data = parseJson(m.data);
 	if (m.event === "result") {
-		return isAnalysisResult(data)
-			? { type: "result", result: data }
-			: { type: "error", code: "invalid_response" };
+		if (
+			purpose === "identify"
+				? isIdentificationResult(data)
+				: isAnalysisResult(data)
+		) {
+			return { type: "result", result: data as StreamResult };
+		}
+		return { type: "error", code: "invalid_response" };
 	}
 	if (!isRecord(data)) return null;
 	if (m.event === "error") {

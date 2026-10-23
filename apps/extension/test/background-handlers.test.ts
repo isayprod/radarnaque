@@ -59,6 +59,9 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}) {
 		scanStream: vi.fn<
 			(body: ScanIn, signal: AbortSignal) => Promise<AsyncIterable<SseMessage>>
 		>(async () => sseMessages(sse("result", sampleAnalysis))),
+		identifyStream: vi.fn<
+			(body: ScanIn, signal: AbortSignal) => Promise<AsyncIterable<SseMessage>>
+		>(async () => sseMessages()),
 	};
 	const openPopup = vi.fn<() => Promise<void>>(async () => {});
 	const clear = vi.fn<() => Promise<void>>(async () => {});
@@ -80,7 +83,10 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}) {
  * `entrypoints/background.ts`. `scan` lance un scan par le port et rend le dernier
  * message posté à l'onglet.
  */
-function wire(deps: HandlerDeps, scanApi: Pick<ApiClient, "scanStream">) {
+function wire(
+	deps: HandlerDeps,
+	scanApi: Pick<ApiClient, "scanStream" | "identifyStream">,
+) {
 	const debug = createDebugState({
 		sessionToken: deps.sessionToken,
 		getMe: () => deps.api.getMe(),

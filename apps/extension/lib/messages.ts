@@ -18,6 +18,8 @@ export interface ScanRequest {
 	partial: boolean;
 	/** Superuser hors production : relance sans cache. Ignoré par le serveur pour les autres. */
 	noCache?: boolean;
+	/** Absent : `analyze`. `identify` : le flux d'identification, sans analyse (jamais envoyé à l'API). */
+	purpose?: "identify" | "analyze";
 }
 
 /**

@@ -83,7 +83,15 @@ type ProgressKey =
 	| "progress.resultsOne"
 	| "progress.searchDone"
 	| "progress.searchFailed"
-	| "progress.writing";
+	| "progress.writing"
+	| "progress.readingPhotos"
+	| "progress.criteria"
+	| "progress.criteriaCached"
+	| "progress.pageRead"
+	| "progress.identifying"
+	| "progress.retrying"
+	| "progress.identification"
+	| "progress.identificationError";
 
 // Section « Debug (superuser) » du panneau, réservée au superuser de développement.
 type DebugKey =
@@ -173,6 +181,14 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"progress.searchDone": "{results} : {domains}",
 		"progress.searchFailed": "Recherche indisponible, l'analyse continue",
 		"progress.writing": "Rédige le verdict",
+		"progress.readingPhotos": "Lecture des photos…",
+		"progress.criteria": "Recherche des critères…",
+		"progress.criteriaCached": "Critères connus de Radarnaque",
+		"progress.pageRead": "Lecture : {domain}",
+		"progress.identifying": "Vérification des critères…",
+		"progress.retrying": "Vérification complémentaire…",
+		"progress.identification": "Produit identifié",
+		"progress.identificationError": "Identification impossible",
 		"debug.title": "Debug (superuser)",
 		"debug.copy": "Copier",
 		"debug.copied": "Copié",
@@ -258,6 +274,14 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"progress.searchFailed":
 			"Zoekopdracht niet beschikbaar, de analyse gaat door",
 		"progress.writing": "Schrijft het oordeel",
+		"progress.readingPhotos": "Foto's lezen…",
+		"progress.criteria": "Criteria zoeken…",
+		"progress.criteriaCached": "Criteria al bekend bij Radarnaque",
+		"progress.pageRead": "Lezen: {domain}",
+		"progress.identifying": "Criteria controleren…",
+		"progress.retrying": "Extra controle…",
+		"progress.identification": "Product geïdentificeerd",
+		"progress.identificationError": "Identificatie mislukt",
 		"debug.title": "Debug (superuser)",
 		"debug.copy": "Kopiëren",
 		"debug.copied": "Gekopieerd",

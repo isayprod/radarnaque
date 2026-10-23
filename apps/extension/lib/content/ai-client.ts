@@ -117,7 +117,8 @@ function scanByPort(
 		if (!message) return;
 		if (message.type === "event") onEvent(message.event);
 		else if (message.type === "result")
-			finish({ ok: true, data: message.result });
+			// Sans `purpose`, le service worker ne relaie qu'une analyse.
+			finish({ ok: true, data: message.result as AnalysisResult });
 		else finish(failure(message.code));
 	});
 	// Le service worker ferme le port après l'issue ; avant, c'est une interruption.

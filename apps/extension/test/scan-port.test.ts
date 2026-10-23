@@ -15,7 +15,13 @@ import {
 	SCAN_PORT,
 } from "../lib/scan-port";
 import type { SseMessage } from "../lib/sse";
-import { fakePort, sampleAnalysis, sse, sseMessages } from "./helpers";
+import {
+	fakePort,
+	sampleAnalysis,
+	sampleIdentification,
+	sse,
+	sseMessages,
+} from "./helpers";
 
 function scanRequest(overrides: Partial<ScanRequest> = {}): ScanRequest {
 	return {
@@ -58,19 +64,22 @@ function setup(
 	const scanStream = vi.fn(async (_body: ScanIn, signal: AbortSignal) =>
 		stream(signal),
 	);
+	const identifyStream = vi.fn(async (_body: ScanIn, signal: AbortSignal) =>
+		stream(signal),
+	);
 	const debug: ScanDebugHooks = {
 		ensureKnown: vi.fn(async () => {}),
 		group: vi.fn(async () => {}),
 	};
 	const keepAlive = vi.fn(async () => ({ os: "linux" }));
 	const listener = createScanPortListener({
-		api: { scanStream },
+		api: { scanStream, identifyStream },
 		allowSender: options.allowSender ?? (() => true),
 		debug,
 		timeoutMs: options.timeoutMs,
 		keepAlive,
 	});
-	return { scanStream, debug, keepAlive, listener };
+	return { scanStream, identifyStream, debug, keepAlive, listener };
 }
 
 afterEach(() => {
@@ -246,16 +255,50 @@ describe("port scan/stream", () => {
 		expect(tab.posted.filter((m) => m.type === "error")).toHaveLength(1);
 	});
 
-	test("the default timeout is 200 s", async () => {
+	test("times out after SCAN_TIMEOUT_MS = 310 000", async () => {
 		vi.useFakeTimers();
 		const { listener } = setup((signal) => endless(signal));
 		const tab = fakePort();
 		listener(tab.port);
 		tab.send(scanRequest());
-		await vi.advanceTimersByTimeAsync(199_999);
+		await vi.advanceTimersByTimeAsync(309_999);
 		expect(tab.port.disconnect).not.toHaveBeenCalled();
 		await vi.advanceTimersByTimeAsync(1);
 		expect(tab.posted.at(-1)).toEqual({ type: "error", code: "timeout" });
+	});
+
+	test("routes purpose identify to identifyStream", async () => {
+		const { listener, scanStream, identifyStream } = setup(() =>
+			sseMessages(
+				sse("stage", { stage: "reading_photos" }),
+				sse("result", sampleIdentification),
+			),
+		);
+		const tab = fakePort();
+		listener(tab.port);
+		tab.send(scanRequest({ purpose: "identify" }));
+		expect(await tab.closed()).toEqual({
+			type: "result",
+			result: sampleIdentification,
+		});
+		expect(scanStream).not.toHaveBeenCalled();
+		expect(identifyStream).toHaveBeenCalledTimes(1);
+		// `purpose` ne part pas à l'API (ScanIn refuse les champs en trop).
+		expect(identifyStream.mock.calls[0]?.[0]).not.toHaveProperty("purpose");
+		expect(tab.posted[0]).toEqual({
+			type: "event",
+			event: { type: "stage", stage: "reading_photos" },
+		});
+	});
+
+	test("routes a request without purpose to scanStream", async () => {
+		const { listener, scanStream, identifyStream } = setup();
+		const tab = fakePort();
+		listener(tab.port);
+		tab.send(scanRequest());
+		await tab.closed();
+		expect(scanStream).toHaveBeenCalledTimes(1);
+		expect(identifyStream).not.toHaveBeenCalled();
 	});
 
 	test("maps ApiRequestError 402 to quota_exhausted", async () => {
