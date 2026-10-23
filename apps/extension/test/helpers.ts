@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AnalysisResult, Me, ScanIn } from "@radarnaque/shared";
+import type {
+	AnalysisResult,
+	IdentificationResult,
+	Me,
+	ScanIn,
+} from "@radarnaque/shared";
 import { expect, vi } from "vitest";
 import type { InternalSender } from "../lib/background-handlers";
 import { type PortLike, type PortMessage, SCAN_PORT } from "../lib/scan-port";
@@ -110,6 +115,46 @@ export const sampleAnalysis: AnalysisResult = {
 };
 
 /** Bloc `debug` d'un superuser (hors production), avec des empreintes longues. */
+/** `IdentificationOut` minimal : un objet identifié. */
+export const sampleIdentification: IdentificationResult = {
+	identificationId: 7,
+	status: "identified",
+	confidence: 95,
+	level: "sure",
+	objects: [
+		{
+			role: "main",
+			label: "Console",
+			reference: "Steam Deck OLED",
+			confidence: 95,
+			level: "sure",
+			remaining: ["Steam Deck OLED"],
+			checks: [],
+			pages: [
+				{
+					url: "https://www.steamdeck.com/fr/tech",
+					title: "Tech specs",
+					domain: "www.steamdeck.com",
+				},
+			],
+		},
+	],
+	sellerQuestion: null,
+	titleMismatch: null,
+	photoObservations: [
+		{ photo: 1, kind: "catalog", note: "photo du fabricant" },
+	],
+	searches: [
+		{ query: "Steam Deck OLED prix occasion", kind: "price", pagesRead: [] },
+	],
+	verifiedCriteria: false,
+	unsourced: false,
+	imagesAnalyzed: 2,
+	fromCache: false,
+	identifiedAt: "2026-10-23T10:00:00Z",
+	remaining: null,
+};
+
 export const sampleDebug: NonNullable<AnalysisResult["debug"]> = {
 	analysisId: 42,
 	contentHash:

@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { isAnalysisResult, parseStreamMessage } from "../lib/scan-events";
-import { debugAnalysis, sampleAnalysis } from "./helpers";
+import {
+	isAnalysisResult,
+	isIdentificationResult,
+	parseStreamMessage,
+} from "../lib/scan-events";
+import { debugAnalysis, sampleAnalysis, sampleIdentification } from "./helpers";
 
 const msg = (event: string, data: unknown) => ({
 	event,
@@ -138,68 +142,102 @@ describe("parseStreamMessage", () => {
 		expect(parseStreamMessage(msg("error", { code: "<script>" }))).toBeNull();
 	});
 
-	test("ignores identification events and keeps parsing the result", () => {
-		const identification = {
-			identificationId: 7,
-			status: "identified",
-			confidence: 95,
-			level: "sure",
-			objects: [
-				{
-					role: "main",
-					label: "Console",
-					reference: "Steam Deck OLED",
-					confidence: 95,
-					level: "sure",
-					remaining: ["Steam Deck OLED"],
-					checks: [],
-					pages: [
-						{
-							url: "https://www.steamdeck.com/fr/tech",
-							title: "Tech specs",
-							domain: "www.steamdeck.com",
-						},
-					],
-				},
-			],
-			sellerQuestion: null,
-			titleMismatch: null,
-			photoObservations: [
-				{ photo: 1, kind: "catalog", note: "photo du fabricant" },
-			],
-			searches: [
-				{
-					query: "Steam Deck OLED prix occasion",
-					kind: "price",
-					pagesRead: [],
-				},
-			],
-			verifiedCriteria: false,
-			unsourced: false,
-			imagesAnalyzed: 2,
-			fromCache: false,
-			identifiedAt: "2026-10-23T10:00:00Z",
-			remaining: null,
-		};
-		const stream = [
-			msg("stage", { stage: "photos", count: 2 }),
-			msg("stage", { stage: "reading_photos" }),
-			msg("search", { id: 1, query: "steam deck", aspect: "model" }),
-			msg("page_read", { domain: "versus.example", ok: true }),
-			msg("criteria_cached", { count: 3 }),
-			msg("identification", identification),
-			msg("identification_error", { code: "identify_resolve" }),
-			msg("stage", { stage: "analyzing", count: 0 }),
-			msg("result", { ...sampleAnalysis, identification }),
-		];
-		const out = stream.map(parseStreamMessage).filter((e) => e !== null);
-		expect(out).toEqual([
-			{ type: "stage", stage: "photos", count: 2 },
-			{ type: "search", id: 1, query: "steam deck", aspect: "model" },
-			{ type: "stage", stage: "analyzing", count: 0 },
-			{ type: "result", result: { ...sampleAnalysis, identification } },
-		]);
-		expect(isAnalysisResult({ ...sampleAnalysis, identification })).toBe(true);
+	test("accepts the identification stages", () => {
+		for (const stage of [
+			"reading_photos",
+			"criteria",
+			"identifying",
+			"retrying",
+		]) {
+			expect(parseStreamMessage(msg("stage", { stage }))).toEqual({
+				type: "stage",
+				stage,
+			});
+		}
+	});
+
+	test("parses identification events and bounds their strings", () => {
+		expect(
+			parseStreamMessage(
+				msg("page_read", { domain: "d".repeat(150), ok: false }),
+			),
+		).toEqual({ type: "page_read", domain: "d".repeat(100), ok: false });
+		expect(parseStreamMessage(msg("page_read", { domain: "a.be" }))).toBeNull();
+		expect(parseStreamMessage(msg("criteria_cached", { count: 3 }))).toEqual({
+			type: "criteria_cached",
+			count: 3,
+		});
+		expect(
+			parseStreamMessage(msg("criteria_cached", { count: -1 })),
+		).toBeNull();
+		expect(
+			parseStreamMessage(msg("identification", sampleIdentification)),
+		).toEqual({ ...sampleIdentification, type: "identification" });
+		expect(
+			parseStreamMessage(
+				msg("identification_error", { code: "identify_resolve" }),
+			),
+		).toEqual({ type: "identification_error", code: "identify_resolve" });
+		expect(
+			parseStreamMessage(msg("identification_error", { code: "<script>" })),
+		).toBeNull();
+		expect(
+			parseStreamMessage(
+				msg("search", { id: 1, query: "q".repeat(300), aspect: "model" }),
+			),
+		).toMatchObject({ query: "q".repeat(200) });
+	});
+
+	test("rejects an identification with an unknown level or more than 4 objects", () => {
+		const [object] = sampleIdentification.objects;
+		for (const bad of [
+			{ ...sampleIdentification, level: "certain" },
+			{ ...sampleIdentification, objects: Array(5).fill(object) },
+		]) {
+			expect(parseStreamMessage(msg("identification", bad))).toBeNull();
+			expect(parseStreamMessage(msg("result", bad), "identify")).toEqual({
+				type: "error",
+				code: "invalid_response",
+			});
+		}
+	});
+
+	test("an identify stream result must be an IdentificationOut", () => {
+		expect(
+			parseStreamMessage(msg("result", sampleIdentification), "identify"),
+		).toEqual({ type: "result", result: sampleIdentification });
+		expect(
+			parseStreamMessage(msg("result", sampleAnalysis), "identify"),
+		).toEqual({ type: "error", code: "invalid_response" });
+		expect(parseStreamMessage(msg("result", sampleIdentification))).toEqual({
+			type: "error",
+			code: "invalid_response",
+		});
+		expect(
+			parseStreamMessage(
+				msg("result", {
+					...sampleAnalysis,
+					identification: sampleIdentification,
+				}),
+			),
+		).toMatchObject({ type: "result" });
+	});
+});
+
+describe("isIdentificationResult", () => {
+	test("accepts the API shape, refuses a wrong one", () => {
+		expect(isIdentificationResult(sampleIdentification)).toBe(true);
+		for (const value of [
+			null,
+			[],
+			{ ...sampleIdentification, status: "maybe" },
+			{ ...sampleIdentification, confidence: 101 },
+			{ ...sampleIdentification, confidence: 1.5 },
+			{ ...sampleIdentification, identificationId: "7" },
+			{ ...sampleIdentification, objects: [{ role: "main" }] },
+		]) {
+			expect(isIdentificationResult(value)).toBe(false);
+		}
 	});
 });
 

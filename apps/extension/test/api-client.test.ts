@@ -313,6 +313,33 @@ describe("api client", () => {
 		expect(fetch.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
 	});
 
+	test("identifyStream posts to /api/identify/stream", async () => {
+		const fetch = fetchSequence(
+			sseResponse(sseEvent("stage", { stage: "reading_photos" })),
+		);
+		const api = createApiClient({
+			jwt: fakeJwt("jwt-1"),
+			fetch,
+			onUnauthenticated: vi.fn(),
+		});
+		const controller = new AbortController();
+		const messages = [];
+		for await (const m of await api.identifyStream(
+			sampleScanIn,
+			controller.signal,
+		)) {
+			messages.push(m);
+		}
+		expect(messages).toEqual([
+			{ event: "stage", data: '{"stage":"reading_photos"}' },
+		]);
+		const req = requestOf(fetch);
+		expect(req.url).toBe("http://localhost:8080/api/identify/stream");
+		expect(req.method).toBe("POST");
+		expect(req.body).toEqual(sampleScanIn);
+		expect(fetch.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+	});
+
 	test("scanStream: 401 then stream renews the JWT once; refusals before the stream throw", async () => {
 		const jwt = fakeJwt("old", "new", "jwt-2");
 		const fetch = fetchSequence(

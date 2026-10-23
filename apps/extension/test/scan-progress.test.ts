@@ -9,6 +9,7 @@ import {
 	statusLine,
 	thinkingTitle,
 } from "../lib/content/scan-progress";
+import { sampleIdentification } from "./helpers";
 
 /** Progression partie de 1 000 ms, puis un événement par seconde. */
 function progressOf(...events: ScanProgressEvent[]): ScanProgress {
@@ -333,5 +334,69 @@ describe("statusLine", () => {
 		expect(lineOf("nl", { type: "thinking", part: 1, text: "" })).toBe(
 			"Analyse wordt gestart",
 		);
+	});
+});
+
+describe("étapes et événements de l'identification", () => {
+	const cases: Array<[ScanProgressEvent, string, string]> = [
+		[
+			{ type: "stage", stage: "reading_photos" },
+			"Lecture des photos…",
+			"Foto's lezen…",
+		],
+		[
+			{ type: "stage", stage: "criteria" },
+			"Recherche des critères…",
+			"Criteria zoeken…",
+		],
+		[
+			{ type: "criteria_cached", count: 3 },
+			"Critères connus de Radarnaque",
+			"Criteria al bekend bij Radarnaque",
+		],
+		[
+			{ type: "page_read", domain: "versus.example", ok: true },
+			"Lecture : versus.example",
+			"Lezen: versus.example",
+		],
+		[
+			{ type: "stage", stage: "identifying" },
+			"Vérification des critères…",
+			"Criteria controleren…",
+		],
+		[
+			{ type: "stage", stage: "retrying" },
+			"Vérification complémentaire…",
+			"Extra controle…",
+		],
+		[
+			{ type: "identification_error", code: "identify_resolve" },
+			"Identification impossible",
+			"Identificatie mislukt",
+		],
+	];
+
+	test.each(cases)("%j : une ligne en FR et en NL", (event, fr, nl) => {
+		expect(lineOf("fr", event)).toBe(fr);
+		expect(lineOf("nl", event)).toBe(nl);
+	});
+
+	test("identification : Produit identifié", () => {
+		const event = {
+			...sampleIdentification,
+			type: "identification",
+		} as ScanProgressEvent;
+		expect(lineOf("fr", event)).toBe("Produit identifié");
+		expect(lineOf("nl", event)).toBe("Product geïdentificeerd");
+	});
+
+	test("page_read en échec ne change pas la ligne", () => {
+		const reading = { type: "stage", stage: "reading_photos" } as const;
+		const failed = {
+			type: "page_read",
+			domain: "x.example",
+			ok: false,
+		} as const;
+		expect(lineOf("fr", reading, failed)).toBe("Lecture des photos…");
 	});
 });

@@ -2,6 +2,9 @@ import type { components } from "./api";
 
 type IdentificationOut = components["schemas"]["IdentificationOut"];
 
+/** Résultat d'une identification : la fin d'un flux `identify`, ou le champ `identification` d'un scan. */
+export type IdentificationResult = IdentificationOut;
+
 /**
  * Événements de progression de `POST /api/scans/stream` (spec §8.3), écrits à la main :
  * miroir des événements SSE de l'API, absents du schéma OpenAPI. `result` et `error`
@@ -25,8 +28,7 @@ export type SearchAspect = "model" | "price" | "scam" | "other";
 export type ScanProgressEvent =
 	| {
 			type: "stage";
-			/** Étapes que l'extension traite ; `StreamStage` ajoute celles de l'identification. */
-			stage: "cache" | "photos" | "analyzing" | "writing";
+			stage: StreamStage;
 			/** Photos à télécharger (`photos`) ou envoyées au modèle (`analyzing`). */
 			count?: number;
 	  }
@@ -39,7 +41,11 @@ export type ScanProgressEvent =
 			ok: boolean;
 			count: number;
 			domains: string[];
-	  };
+	  }
+	| PageReadEvent
+	| CriteriaCachedEvent
+	| IdentificationErrorEvent
+	| IdentificationEvent;
 
 /** Page lue pour l'identification ; `ok` faux : refusée ou en échec. */
 export type PageReadEvent = { type: "page_read"; domain: string; ok: boolean };
