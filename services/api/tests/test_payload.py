@@ -333,3 +333,11 @@ def test_summarize_messages_accepts_plain_string_content():
     assert summarize_messages([{"role": "user", "content": "bonjour"}]) == [
         {"role": "user", "content": "bonjour"}
     ]
+
+
+def test_build_messages_appends_the_identification_block_after_the_facts():
+    block = "<identification>\nStatut : identified\n</identification>"
+    messages = build_messages(_listing(), RULES, [], today=TODAY, identification_block=block)
+    text = _user_text(messages)
+    assert text.endswith("</annonce>\n\n" + block)
+    assert _user_text(build_messages(_listing(), RULES, [], today=TODAY)).endswith("</annonce>")

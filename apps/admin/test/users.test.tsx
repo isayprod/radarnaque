@@ -331,6 +331,7 @@ describe("fiche d'un utilisateur", () => {
 							createdAt: "2026-10-05T08:00:00Z",
 							scanKind: "full",
 							trigger: "button",
+							purpose: "analyze",
 							site: "boutique.example",
 							title: "Montre de luxe",
 							score: 82,

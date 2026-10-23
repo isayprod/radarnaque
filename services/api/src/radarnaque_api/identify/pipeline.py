@@ -66,7 +66,7 @@ from radarnaque_api.identify.schemas import (
 )
 from radarnaque_api.identify.store import StepSetup, record_criteria_call
 from radarnaque_api.images import Resolver, fetch_images
-from radarnaque_api.llm.client import LLMClient, LLMError, StepResult
+from radarnaque_api.llm.client import LLMClient, LLMError, LLMErrorCode, StepResult
 from radarnaque_api.llm.events import CriteriaCached
 from radarnaque_api.llm.payload import summarize_messages
 from radarnaque_api.llm.providers import ReasoningEffort
@@ -92,6 +92,15 @@ _VALUE_RANK = {"high": 0, "medium": 1, "low": 2}
 _BAD_URL_CHARS = re.compile(r"[\s\x00-\x1f\x7f]")
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 NAME_MAX = 120
+
+
+class StepError(LLMError):
+    """`LLMError` d'un appel du pipeline, avec l'étape (`step`) qui l'a levée : l'appelant en
+    tire le code d'échec de l'identification (`identify_read_photos`, `identify_resolve`)."""
+
+    def __init__(self, step: StepCode, code: LLMErrorCode) -> None:
+        super().__init__(code)
+        self.step: StepCode = step
 
 
 @dataclass(frozen=True)
@@ -412,18 +421,25 @@ async def _call[T: BaseModel](
     reasoning: ReasoningEffort | None,
     on_event: ScanEventSink | None,
 ) -> StepResult[T]:
-    """Un appel `complete` sur le modèle de `setup`, tracé pour le bloc debug."""
+    """Un appel `complete` sur le modèle de `setup`, tracé pour le bloc debug. Une `LLMError`
+    devient une `StepError` (même code), qui nomme l'étape."""
     llm = ctx.llm_for(setup.provider)
     started = time.perf_counter()
-    result = await llm.complete(
-        model=setup.slug,
-        system_prompt=setup.system_prompt,
-        messages=messages,
-        output=output,
-        schema_name=schema_name,
-        reasoning=reasoning,
-        on_event=on_event,
-    )
+    failure: LLMError | None = None
+    try:
+        result = await llm.complete(
+            model=setup.slug,
+            system_prompt=setup.system_prompt,
+            messages=messages,
+            output=output,
+            schema_name=schema_name,
+            reasoning=reasoning,
+            on_event=on_event,
+        )
+    except LLMError as exc:
+        failure = exc
+    if failure is not None:  # hors du `except`, comme toute `LLMError` : rien de chaîné
+        raise StepError(_step_of(schema_name), failure.code)
     run.traces.append(
         StepTrace(
             step=_step_of(schema_name),

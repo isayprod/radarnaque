@@ -46,6 +46,10 @@ from radarnaque_api.services.scan_stream import (
     stream_scan,
 )
 
+# Analyse seule : l'identification qui la précède a ses propres tests (test_identify_routes.py,
+# test_scan_service.py).
+pytestmark = pytest.mark.usefixtures("without_identification")
+
 HITS = [
     SearchHit(title="iPhone 18 Pro", url="https://www.apple.com/be-fr/iphone", snippet="Prix"),
     SearchHit(title="Comparatif", url="https://exemple.be/iphone-18-pro", snippet="1 329 €"),

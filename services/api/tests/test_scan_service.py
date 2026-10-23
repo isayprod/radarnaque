@@ -3,7 +3,8 @@ import base64
 import io
 import json
 import logging
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -13,24 +14,43 @@ import pytest_asyncio
 import respx
 from fake_llm import FakeLLM
 from PIL import Image
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from test_identify_pipeline import (
+    CRITERIA,
+    LCD,
+    Q_PRICE,
+    FakeBackend,
+    _html,
+    identify_out,
+    read_out,
+)
 
 from radarnaque_api.auth.privileges import privileges_of
 from radarnaque_api.config import Settings
 from radarnaque_api.errors import ApiError
+from radarnaque_api.identify.schemas import (
+    SCHEMA_CRITERIA,
+    SCHEMA_IDENTIFY,
+    SCHEMA_READ_PHOTOS,
+    ReadPhotosOut,
+)
 from radarnaque_api.llm.client import (
     LLMError,
     OpenAICompatibleClient,
     SearchRecord,
 )
+from radarnaque_api.llm.events import CriteriaCached
 from radarnaque_api.llm.providers import ProviderConfig, ProviderError
 from radarnaque_api.models import (
     Analysis,
     AnalysisReason,
     AnalysisText,
     AnalysisWebSearch,
+    AppSettings,
     AuthUser,
+    Identification,
+    IdentificationResult,
     ListingSnapshot,
     PromptVersion,
     ScanEvent,
@@ -38,8 +58,16 @@ from radarnaque_api.models import (
     ScanResult,
     Subscription,
 )
+from radarnaque_api.pages import make_http_client
 from radarnaque_api.schemas import AnalysisResultOut, ScanIn
 from radarnaque_api.services import scans as scans_service
+from radarnaque_api.services.hashing import input_hash
+from radarnaque_api.services.identify_service import (
+    _record_failure_unless_linked,
+    admit_identify,
+    serve_identify,
+)
+from radarnaque_api.services.scan_stream import IdentificationFailed, IdentificationReady, Stage
 from radarnaque_api.services.scans import ScanError, from_cache_expr, risk_level, run_scan
 from radarnaque_api.services.usage import compute_usage
 
@@ -76,6 +104,14 @@ class FakeResolver:
 
     async def __call__(self, host: str) -> list[str]:
         return [self.address]
+
+
+@pytest.fixture(autouse=True)
+def _scam_only(request: pytest.FixtureRequest) -> None:
+    """Les tests de l'analyse seule la font sans identification ; ceux qui demandent la
+    fixture `identification` la gardent (fin du fichier)."""
+    if "identification" not in request.fixturenames:
+        request.getfixturevalue("without_identification")
 
 
 @pytest_asyncio.fixture
@@ -179,6 +215,7 @@ async def _scan_once(
         scan=scan,
         llm_for=llm.llm_for,
         http=http,
+        http_pages=kw.pop("http_pages", http),
         now=clock,
         resolve=kw.pop("resolve", FakeResolver()),
         **kw,
@@ -539,6 +576,7 @@ async def test_unknown_provider_is_a_configuration_failure(engine, http, clock, 
             scan=_scan(),
             llm_for=llm_for,
             http=http,
+            http_pages=http,
             now=clock,
         )
     assert (info.value.status, info.value.details) == (502, {"reason": "configuration"})
@@ -1259,6 +1297,7 @@ async def test_cached_debug_survives_an_unknown_provider(engine, http, mock, clo
         scan=scan,
         llm_for=unknown,
         http=http,
+        http_pages=http,
         now=clock,
         resolve=FakeResolver(),
     )
@@ -1479,3 +1518,321 @@ async def test_debug_block_summarizes_images_through_the_responses_api(engine, h
     assert result.debug.raw_response == json.dumps(analysis)
     assert "Schéma JSON exact" in result.debug.system_prompt
     assert "base64," not in result.model_dump_json(by_alias=True)
+
+
+# --- Identification avant l'analyse (spec §3.5) --------------------------------------------------
+
+
+@dataclass
+class _Identification:
+    """Ce qu'il faut à un scan pour identifier son produit : un moteur de recherche simulé, le
+    client du lecteur de pages (pages simulées par `mock`) et les événements reçus."""
+
+    backend: FakeBackend
+    pages: httpx.AsyncClient
+    events: list = field(default_factory=list)
+
+    async def sink(self, event) -> None:
+        self.events.append(event)
+
+    def kw(self) -> dict:
+        return {"search": self.backend, "http_pages": self.pages, "on_event": self.sink}
+
+
+@pytest_asyncio.fixture
+async def identification(mock, llm) -> AsyncIterator[_Identification]:
+    """Identification configurée : sorties des trois étapes, deux photos, deux pages de
+    critères ; l'analyse de l'arnaque reste celle du faux client."""
+    llm.step_outputs = {
+        SCHEMA_READ_PHOTOS: read_out(),
+        SCHEMA_CRITERIA: CRITERIA,
+        SCHEMA_IDENTIFY: identify_out(),
+    }
+    await _mock_photos(mock, 2)
+    mock.get(path="/oled-vs-lcd").mock(return_value=_html("OLED vs LCD"))
+    mock.get(path="/how-to-tell").mock(return_value=_html("How to tell"))
+    async with make_http_client() as pages:
+        yield _Identification(FakeBackend(), pages)
+
+
+@pytest_asyncio.fixture
+async def app_settings(engine) -> AsyncIterator[Callable[..., Awaitable[None]]]:
+    """`await app_settings(colonne=valeur)` modifie `settings`, remis en l'état après le test."""
+    changed: dict[str, object] = {}
+
+    async def change(**values) -> None:
+        async with AsyncSession(engine) as session:
+            row = (await session.execute(select(AppSettings))).scalar_one()
+            for name, value in values.items():
+                changed.setdefault(name, getattr(row, name))
+                setattr(row, name, value)
+            await session.commit()
+
+    yield change
+    if changed:
+        async with AsyncSession(engine) as session:
+            row = (await session.execute(select(AppSettings))).scalar_one()
+            for name, value in changed.items():
+                setattr(row, name, value)
+            await session.commit()
+
+
+def _schemas(llm: FakeLLM) -> list[str]:
+    return [c["schema_name"] for c in llm.step_calls]
+
+
+def _analysis_text(llm: FakeLLM, call: int = 0) -> str:
+    return llm.calls[call]["messages"][0]["content"][0]["text"]
+
+
+async def _max_web_searches(engine) -> int:
+    return await _scalar(engine, select(AppSettings.max_web_searches))
+
+
+def _photo_scan(**kw) -> ScanIn:
+    return _scan(images=_photo_urls(2), **kw)
+
+
+async def test_scan_runs_identification_first_then_scam_without_photos(
+    engine, http, clock, llm, identification
+):
+    user = await _user(engine)
+
+    result = await _scan_once(engine, user, _photo_scan(), llm, http, clock, **identification.kw())
+
+    assert _schemas(llm) == [SCHEMA_READ_PHOTOS, SCHEMA_CRITERIA, SCHEMA_IDENTIFY]
+    assert len(llm.calls) == 1
+    # Arnaque : sans photo, avec le bloc `<identification>` et une recherche web au plus.
+    assert _sent_images(llm) == 0 and result.images_analyzed == 0
+    text = _analysis_text(llm)
+    assert '"imagesSent":0' in text
+    assert text.endswith("</identification>") and "<identification>\nStatut : identified" in text
+    assert "référence Steam Deck OLED" in text
+    assert "- Prix Steam Deck (prix.example) : Extrait" in text  # résultats « prix » du pipeline
+    assert llm.calls[0]["tools"].max_searches == 1
+    assert identification.backend.queries.count(Q_PRICE) == 1
+    # Résultat : l'identification qui a nourri l'analyse.
+    assert result.identification is not None
+    assert (result.identification.status, result.identification.from_cache) == (
+        "identified",
+        False,
+    )
+    assert result.identification.remaining is None and result.identification.debug is None
+    assert result.remaining.scans == 2  # un seul scan décompté
+    # Événements : ceux de l'identification, `identification`, puis ceux de l'arnaque.
+    kinds = [
+        e.stage if isinstance(e, Stage) else type(e).__name__
+        for e in identification.events
+        if isinstance(e, Stage | IdentificationReady | IdentificationFailed)
+    ]
+    assert kinds == [
+        "photos",
+        "reading_photos",
+        "criteria",
+        "identifying",
+        "IdentificationReady",
+        "analyzing",
+    ]
+    # Un `analyze` n'est pas relié à l'identification (son résultat est son analyse).
+    assert await _count(engine, IdentificationResult) == 0
+
+
+async def test_scan_reuses_cached_identification(engine, http, clock, llm, identification):
+    first, second = await _user(engine), await _user(engine)
+    await _scan_once(engine, first, _photo_scan(), llm, http, clock, **identification.kw())
+    clock.advance(minutes=1)
+    calls = len(llm.step_calls)
+
+    result = await _scan_once(
+        engine, second, _photo_scan(), llm, http, clock, **identification.kw()
+    )
+
+    assert len(llm.step_calls) == calls  # aucune étape relancée
+    assert result.identification is not None and result.identification.from_cache is True
+    assert result.from_cache is True and len(llm.calls) == 1  # même identification, même analyse
+    # Résultats « prix » non enregistrés : la requête enregistrée est relancée (règle R11).
+    assert identification.backend.queries.count(Q_PRICE) == 2
+
+
+async def test_scam_cache_key_follows_identification(engine, http, clock, llm, identification):
+    user = await _user(engine)
+    first = await _scan_once(engine, user, _photo_scan(), llm, http, clock, **identification.kw())
+    # L'identification expire et se rafraîchit avec une autre référence ; l'analyse, elle,
+    # est encore en cache pour l'ancienne.
+    async with AsyncSession(engine) as session:
+        await session.execute(
+            update(Identification).values(created_at=Identification.created_at - timedelta(days=30))
+        )
+        await session.commit()
+    llm.step_outputs[SCHEMA_IDENTIFY] = identify_out(LCD)
+    clock.advance(minutes=1)
+
+    second = await _scan_once(engine, user, _photo_scan(), llm, http, clock, **identification.kw())
+
+    assert second.identification is not None
+    assert second.identification.objects[0].reference == LCD
+    assert second.identification.identification_id == first.identification.identification_id
+    assert len(llm.calls) == 2 and second.analysis_id != first.analysis_id
+    assert "référence Steam Deck LCD" in _analysis_text(llm, 1)
+
+
+async def test_scan_continues_without_identification_on_failure(
+    engine, http, clock, llm, identification
+):
+    user = await _user(engine)
+    llm.step_errors[SCHEMA_READ_PHOTOS] = LLMError("transport")
+
+    result = await _scan_once(engine, user, _photo_scan(), llm, http, clock, **identification.kw())
+
+    assert result.identification is None
+    assert IdentificationFailed("identify_read_photos") in identification.events
+    assert not any(isinstance(e, IdentificationReady) for e in identification.events)
+    # L'arnaque comme avant : photos envoyées, `max_web_searches`, aucun bloc.
+    assert _sent_images(llm) == 2 and result.images_analyzed == 2
+    assert "<identification>" not in _analysis_text(llm)
+    assert llm.calls[0]["tools"].max_searches == await _max_web_searches(engine)
+    assert await _count(engine, ScanFailure) == 0
+    assert result.remaining.scans == 2
+
+
+async def test_scan_survives_an_identification_timeout(engine, http, clock, llm, identification):
+    user = await _user(engine)
+    llm.delay = 0.3
+
+    result = await _scan_once(
+        engine,
+        user,
+        _photo_scan(),
+        llm,
+        http,
+        clock,
+        identify_timeout_s=0.1,
+        **identification.kw(),
+    )
+
+    assert IdentificationFailed("timeout") in identification.events
+    assert result.identification is None and _sent_images(llm) == 2
+    assert await _count(engine, ScanFailure) == 0
+
+
+async def test_scan_for_nothing_status_runs_like_before(engine, http, clock, llm, identification):
+    """Review Focus 3 : rien d'identifié (statut `none`), l'arnaque se fait comme avant, avec la
+    même clé de cache qu'une analyse sans identification."""
+    user = await _user(engine)
+    llm.step_outputs[SCHEMA_READ_PHOTOS] = ReadPhotosOut(
+        status="nothing",
+        objects=[],
+        clues=[],
+        read_reference=None,
+        hint_criteria=[],
+        photo_observations=[],
+        title_mismatch=None,
+    )
+    scan = _photo_scan()
+
+    result = await _scan_once(engine, user, scan, llm, http, clock, **identification.kw())
+
+    assert _schemas(llm) == [SCHEMA_READ_PHOTOS]
+    assert result.identification is not None and result.identification.status == "none"
+    assert _sent_images(llm) == 2 and "<identification>" not in _analysis_text(llm)
+    assert llm.calls[0]["tools"].max_searches == await _max_web_searches(engine)
+    analysis = await _scalar(engine, select(Analysis).where(Analysis.id == result.analysis_id))
+    assert analysis.input_hash == input_hash(scan, 2)
+    assert identification.backend.queries == []  # ni recherche, ni requête « prix »
+
+
+async def test_scam_sends_photos_setting(engine, http, clock, llm, identification, app_settings):
+    await app_settings(scam_sends_photos=True)
+    user = await _user(engine)
+
+    result = await _scan_once(engine, user, _photo_scan(), llm, http, clock, **identification.kw())
+
+    assert _sent_images(llm) == 2 and result.images_analyzed == 2
+    assert "<identification>" in _analysis_text(llm)
+    assert llm.calls[0]["tools"].max_searches == 1
+
+
+async def test_superuser_no_cache_reruns_identification_but_not_criteria(
+    engine, http, clock, llm, identification
+):
+    superuser = await _user(engine, role="superuser", plan=None)
+    scan = _photo_scan(noCache=True)
+    first = await _scan_once(engine, superuser, scan, llm, http, clock, **identification.kw())
+    clock.advance(minutes=1)
+
+    second = await _scan_once(engine, superuser, scan, llm, http, clock, **identification.kw())
+
+    assert _schemas(llm) == [
+        SCHEMA_READ_PHOTOS,
+        SCHEMA_CRITERIA,
+        SCHEMA_IDENTIFY,
+        SCHEMA_READ_PHOTOS,
+        SCHEMA_IDENTIFY,
+    ]
+    assert any(isinstance(e, CriteriaCached) for e in identification.events)
+    assert second.identification is not None and second.identification.from_cache is False
+    assert second.identification.identification_id == first.identification.identification_id
+    assert [s.step for s in second.identification.debug.steps] == ["read_photos", "identify"]
+    assert len(llm.calls) == 2  # l'analyse aussi est relancée
+
+
+async def test_concurrent_identify_and_analyze_run_one_pipeline(
+    engine, http, clock, llm, identification
+):
+    """R14 : un `identify` et un `analyze` simultanés de la même annonce n'ont qu'un pipeline."""
+    user = await _user(engine, plan="premium")
+    llm.delay = 0.05
+    kw = identification.kw()
+    kw.pop("on_event")
+    admitted = await admit_identify(
+        engine=engine,
+        user=user,
+        privileges=privileges_of(user, TEST_SETTINGS),
+        scan=_photo_scan(),
+        llm_for=llm.llm_for,
+        http=http,
+        now=clock,
+        resolve=FakeResolver(),
+        **kw,
+    )
+
+    identified, analysed = await asyncio.gather(
+        serve_identify(admitted),
+        _scan_once(engine, user, _photo_scan(), llm, http, clock, **kw),
+    )
+
+    assert _schemas(llm).count(SCHEMA_READ_PHOTOS) == 1
+    assert analysed.identification is not None
+    assert analysed.identification.identification_id == identified.identification_id
+    assert sorted([identified.from_cache, analysed.identification.from_cache]) == [False, True]
+
+
+async def test_linked_identify_is_never_given_back(engine, http, clock, llm, identification):
+    """Un `identify` relié à son identification n'a jamais de `scan_failures` ensuite (délai
+    ou annulation juste après le commit) ; sans lien, il est rendu."""
+    user = await _user(engine)
+    kw = identification.kw()
+    kw.pop("on_event")
+
+    async def admitted():
+        return await admit_identify(
+            engine=engine,
+            user=user,
+            privileges=privileges_of(user, TEST_SETTINGS),
+            scan=_photo_scan(),
+            llm_for=llm.llm_for,
+            http=http,
+            now=clock,
+            resolve=FakeResolver(),
+            **kw,
+        )
+
+    done = await admitted()
+    await serve_identify(done)
+    pending = await admitted()
+    maker = done.maker
+
+    assert not await _record_failure_unless_linked(maker, done.admission.event_id, "timeout", T0)
+    assert await _record_failure_unless_linked(maker, pending.admission.event_id, "timeout", T0)
+    failures = await _scalar(engine, select(func.array_agg(ScanFailure.scan_event_id)))
+    assert failures == [pending.admission.event_id]

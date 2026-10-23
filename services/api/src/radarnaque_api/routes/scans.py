@@ -37,9 +37,9 @@ def _now() -> datetime:
 
 
 class _ListingRoute(APIRoute):
-    """Un corps de `POST /api/scans` ou de `POST /api/scans/stream` invalide (JSON illisible,
-    champ manquant ou interdit) donne `422 invalid_listing` (spec §7.5), et non le
-    `invalid_request` des autres routes."""
+    """Un corps de `POST /api/scans`, `POST /api/identify` ou de leur version en flux invalide
+    (JSON illisible, champ manquant ou interdit) donne `422 invalid_listing` (spec §7.5), et non
+    le `invalid_request` des autres routes."""
 
     def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
         handler = super().get_route_handler()
@@ -83,7 +83,8 @@ class _GiveBackStreamingResponse(StreamingResponse):
 
 
 def _scan_args(scan: ScanIn, request: Request, user: AuthUser) -> dict[str, Any]:
-    """Arguments communs de `run_scan` et `admit_scan`, tirés de l'état de l'application."""
+    """Arguments communs de `run_scan`, `admit_scan` et `admit_identify`, tirés de l'état de
+    l'application."""
     state = request.app.state
     return {
         "engine": state.engine,
@@ -92,9 +93,15 @@ def _scan_args(scan: ScanIn, request: Request, user: AuthUser) -> dict[str, Any]
         "scan": scan,
         "llm_for": state.llm_for,
         "http": state.http_images,
+        "http_pages": state.http_pages,
         "search": state.search,
         "now": _now,
     }
+
+
+def _sse_headers() -> dict[str, str]:
+    # Ni cache ni tampon d'un proxy : chaque événement part aussitôt (Caddy : flush_interval).
+    return {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 
 async def create_scan(
@@ -106,8 +113,11 @@ async def create_scan(
     # La session de l'authentification n'a plus d'usage : sa connexion retourne au pool au lieu
     # de rester « idle in transaction » pendant l'analyse (jusqu'à 180 s, photos et LLM).
     await session.close()
+    state = request.app.state
     return await run_scan(
-        **_scan_args(scan, request, user), timeout_s=request.app.state.analysis_timeout_s
+        **_scan_args(scan, request, user),
+        timeout_s=state.analysis_timeout_s,
+        identify_timeout_s=state.identify_timeout_s,
     )
 
 
@@ -122,12 +132,15 @@ async def create_scan_stream(
     await session.close()  # comme `create_scan`
     admitted = await admit_scan(**_scan_args(scan, request, user))
     timeout_s = request.app.state.analysis_timeout_s
+    identify_timeout_s = request.app.state.identify_timeout_s
     served = False
 
     async def serve(sink: ScanEventSink) -> AnalysisResultOut:
         nonlocal served
         served = True  # dès lors, `serve_admitted` rend le scan s'il est annulé
-        return await serve_admitted(admitted, sink, timeout_s=timeout_s)
+        return await serve_admitted(
+            admitted, sink, timeout_s=timeout_s, identify_timeout_s=identify_timeout_s
+        )
 
     async def give_back_if_unserved() -> None:
         # Client parti avant que l'analyse ne commence (flux jamais lancé, ou tâche annulée
@@ -139,8 +152,7 @@ async def create_scan_stream(
     return _GiveBackStreamingResponse(
         stream_scan(serve),
         media_type="text/event-stream",
-        # Ni cache ni tampon d'un proxy : chaque événement part aussitôt (Caddy : flush_interval).
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers=_sse_headers(),
         give_back=give_back_if_unserved,
     )
 

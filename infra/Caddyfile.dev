@@ -31,9 +31,19 @@
 		respond 404
 	}
 
-	# Analyse en flux (SSE, POST /api/scans/stream) : chaque événement part aussitôt, sans
-	# tampon (flush_interval -1). Déclaré à part de /api/* (chemin plus précis, servi d'abord).
+	# Analyse et identification en flux (SSE, POST /api/scans/stream et /api/identify/stream) :
+	# chaque événement part aussitôt, sans tampon (flush_interval -1). Déclarées à part de
+	# /api/* : un seul chemin chacune, plus précis, donc servies d'abord (tri des `handle`).
 	handle /api/scans/stream {
+		request_body {
+			max_size 1MB
+		}
+		reverse_proxy host.docker.internal:8000 {
+			flush_interval -1
+		}
+	}
+
+	handle /api/identify/stream {
 		request_body {
 			max_size 1MB
 		}

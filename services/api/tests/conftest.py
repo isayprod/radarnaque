@@ -171,3 +171,16 @@ def bearer(settings: Settings, test_key_pair: KeyPair) -> Callable[[str], dict[s
         return {"Authorization": f"Bearer {token}"}
 
     return _bearer
+
+
+@pytest.fixture
+def without_identification(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Étapes de l'identification considérées comme non configurées : le scan analyse sans
+    identification, comme avant elle (aucun événement ni appel des étapes). Pour les tests de
+    l'analyse seule ; ceux de l'identification n'en veulent pas."""
+    from radarnaque_api.services import identify_service
+
+    async def unconfigured(session: AsyncSession) -> None:
+        return None
+
+    monkeypatch.setattr(identify_service, "active_steps", unconfigured)

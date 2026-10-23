@@ -1,3 +1,7 @@
+import type { components } from "./api";
+
+type IdentificationOut = components["schemas"]["IdentificationOut"];
+
 /**
  * Événements de progression de `POST /api/scans/stream` (spec §8.3), écrits à la main :
  * miroir des événements SSE de l'API, absents du schéma OpenAPI. `result` et `error`
@@ -50,11 +54,10 @@ export type IdentificationErrorEvent = {
 };
 
 /**
- * Identification terminée : les champs de `IdentificationOut`, à plat (comme l'événement SSE).
- * Typage complet quand `IdentificationOut` entrera dans le schéma OpenAPI généré.
+ * Identification terminée : les champs de `IdentificationOut`, à plat (comme l'événement SSE),
+ * `debug` absent plutôt que nul hors superuser.
  */
-export type IdentificationEvent = {
-	type: "identification";
-	identificationId: number;
-	status: "identified" | "uncertain" | "none";
-} & Record<string, unknown>;
+export type IdentificationEvent = { type: "identification" } & Omit<
+	IdentificationOut,
+	"debug"
+> & { debug?: IdentificationOut["debug"] };

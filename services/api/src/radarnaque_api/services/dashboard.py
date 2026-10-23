@@ -8,8 +8,9 @@ ou 25 h : les séries sont bâties sur des dates, jamais sur des multiples de 24
 Les coûts, les appels et les recherches web viennent de `llm_calls` (une ligne par appel au
 modèle), jamais de `analyses`, dont un rafraîchissement écrase le coût et la date. « Servi depuis
 le cache » se déduit : scans réussis moins appels. Un échec est un `scan_events` avec
-`scan_failures` et sans `scan_results` (règle R13, comme l'historique). Aucune donnée personnelle
-n'est lue ni renvoyée, seulement des nombres et des codes."""
+`scan_failures` et sans `scan_results` (règle R13, comme l'historique). Un `identify` (spec §6)
+est un scan : réussi s'il a un `identification_results` et aucun `scan_failures`. Aucune donnée
+personnelle n'est lue ni renvoyée, seulement des nombres et des codes."""
 
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -33,6 +34,7 @@ from radarnaque_api.config import Settings
 from radarnaque_api.models import (
     AdminAction,
     AuthUser,
+    IdentificationResult,
     LlmCall,
     Model,
     ScanEvent,
@@ -71,8 +73,11 @@ def _ratio(numerator: float, denominator: int) -> float | None:
 _EVENT_DAY = cast(func.timezone("Europe/Brussels", ScanEvent.created_at), Date)
 _CALL_DAY = cast(func.timezone("Europe/Brussels", LlmCall.created_at), Date)
 
-# Scan réussi : il a un résultat. Échec : une ligne d'échec et aucun résultat.
-_SUCCEEDED = ScanResult.scan_event_id.is_not(None)
+# Scan réussi : il a un résultat (une analyse ; ou une identification, sans échec, pour un
+# `identify`). Échec : une ligne d'échec et aucune analyse.
+_SUCCEEDED = ScanResult.scan_event_id.is_not(None) | (
+    IdentificationResult.scan_event_id.is_not(None) & ScanFailure.scan_event_id.is_(None)
+)
 _FAILED = ScanResult.scan_event_id.is_(None) & ScanFailure.scan_event_id.is_not(None)
 
 
@@ -81,6 +86,7 @@ def _events_query(*columns):
         select(*columns)
         .select_from(ScanEvent)
         .outerjoin(ScanResult, ScanResult.scan_event_id == ScanEvent.id)
+        .outerjoin(IdentificationResult, IdentificationResult.scan_event_id == ScanEvent.id)
         .outerjoin(ScanFailure, ScanFailure.scan_event_id == ScanEvent.id)
     )
 

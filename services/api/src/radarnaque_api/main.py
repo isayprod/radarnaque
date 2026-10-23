@@ -26,6 +26,7 @@ from radarnaque_api.routes import (
     admin_users,
     billing,
     health,
+    identify,
     internal,
     me,
     offer,
@@ -36,7 +37,7 @@ from radarnaque_api.services.admin_offer import PublicOfferCache
 from radarnaque_api.services.ai_probes import SearchHealth
 from radarnaque_api.services.purge import purge_forever
 from radarnaque_api.services.rate_window import SlidingWindowLimiter
-from radarnaque_api.services.scans import ANALYSIS_TIMEOUT_S
+from radarnaque_api.services.scans import ANALYSIS_TIMEOUT_S, IDENTIFY_TIMEOUT_S
 
 # En DEBUG, ces bibliothèques journalisent les URL et les corps des requêtes : l'annonce, les
 # photos, et les réponses du fournisseur.
@@ -179,6 +180,7 @@ def create_app(
     app.state.billing = ManualBillingProvider()
     app.state.public_offer_cache = PublicOfferCache()  # `GET /api/offer` : 60 s en mémoire
     app.state.analysis_timeout_s = ANALYSIS_TIMEOUT_S  # délai total d'une analyse (réduit en test)
+    app.state.identify_timeout_s = IDENTIFY_TIMEOUT_S  # délai de l'identification (réduit en test)
     app.state.jwt_verifier = JwtVerifier(
         jwks_fetcher or http_jwks_fetcher(settings.jwks_url),
         settings.jwt_issuer,
@@ -192,6 +194,7 @@ def create_app(
     app.include_router(health.router)
     app.include_router(me.router)
     app.include_router(scans.router)
+    app.include_router(identify.router)
     app.include_router(billing.router)
     app.include_router(internal.router)
     app.include_router(admin_users.router)

@@ -466,6 +466,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/identify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Identification
+         * @description Sans flux, pour les tests et `e2e`.
+         */
+        post: operations["create_identification_api_identify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/identify/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Identification Stream
+         * @description Événements du pipeline, `identification`, puis `result` (le même `IdentificationOut`)
+         *     ou `error`. L'admission se fait avant toute réponse : un refus reste une erreur JSON.
+         */
+        post: operations["create_identification_stream_api_identify_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/internal/users/{user_id}/bootstrap": {
         parameters: {
             query?: never;
@@ -917,6 +958,7 @@ export interface components {
             debug?: components["schemas"]["ScanDebugOut"] | null;
             /** Fromcache */
             fromCache: boolean;
+            identification?: components["schemas"]["IdentificationOut"] | null;
             /** Imagesanalyzed */
             imagesAnalyzed: number;
             /**
@@ -1082,6 +1124,23 @@ export interface components {
             plan: "standard" | "premium";
         };
         /**
+         * CriterionCheckOut
+         * @description Un critère vérifié sur les photos, tel qu'il l'a été (copie gardée avec l'identification).
+         *     `photo` : numéro de la photo (à partir de 1), `None` pour `not_visible`.
+         */
+        CriterionCheckOut: {
+            /**
+             * Observation
+             * @enum {string}
+             */
+            observation: "seen_match" | "seen_contrary" | "not_visible";
+            /** Photo */
+            photo: number | null;
+            /** Sources */
+            sources: components["schemas"]["PageLinkOut"][];
+            text: components["schemas"]["LocalizedTextOut"];
+        };
+        /**
          * DailyOut
          * @description Un point par jour, jours vides compris, du plus ancien au plus récent.
          */
@@ -1202,6 +1261,137 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * IdentificationOut
+         * @description Résultat d'une identification. `confidence`, `level` : ceux de l'objet principal (0 et
+         *     `uncertain` pour le statut `none`). `verified_criteria` : les critères de l'objet principal
+         *     étaient relus par un admin au moment de l'identification ; `unsourced` : des critères non
+         *     sourcés ont servi (§9).
+         */
+        IdentificationOut: {
+            /** Confidence */
+            confidence: number;
+            debug?: components["schemas"]["IdentifyDebugOut"] | null;
+            /** Fromcache */
+            fromCache: boolean;
+            /** Identificationid */
+            identificationId: number;
+            /**
+             * Identifiedat
+             * Format: date-time
+             */
+            identifiedAt: string;
+            /** Imagesanalyzed */
+            imagesAnalyzed: number;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "sure" | "probable" | "uncertain";
+            /** Objects */
+            objects: components["schemas"]["IdentifiedObjectPublicOut"][];
+            /** Photoobservations */
+            photoObservations: components["schemas"]["PhotoObservationOut"][];
+            remaining?: components["schemas"]["RemainingOut"] | null;
+            /** Searches */
+            searches: components["schemas"]["IdentificationSearchOut"][];
+            sellerQuestion: components["schemas"]["LocalizedTextOut"] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "identified" | "uncertain" | "none";
+            /** Titlemismatch */
+            titleMismatch: string | null;
+            /** Unsourced */
+            unsourced: boolean;
+            /** Verifiedcriteria */
+            verifiedCriteria: boolean;
+        };
+        /**
+         * IdentificationSearchOut
+         * @description Une recherche web de l'identification : requête (déjà masquée), type et domaines des
+         *     pages lues. Affichée aussi pour un résultat servi par le cache.
+         */
+        IdentificationSearchOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "criteria" | "price" | "reference" | "retry";
+            /** Pagesread */
+            pagesRead: string[];
+            /** Query */
+            query: string;
+        };
+        /**
+         * IdentifiedObjectPublicOut
+         * @description Un objet de l'annonce. `reference` : `None` quand plusieurs candidats restent possibles
+         *     (`remaining`). Confiance et niveau calculés par l'API, jamais recopiés du modèle.
+         */
+        IdentifiedObjectPublicOut: {
+            /** Checks */
+            checks: components["schemas"]["CriterionCheckOut"][];
+            /** Confidence */
+            confidence: number;
+            /** Label */
+            label: string;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "sure" | "probable" | "uncertain";
+            /** Pages */
+            pages: components["schemas"]["PageLinkOut"][];
+            /** Reference */
+            reference: string | null;
+            /** Remaining */
+            remaining: string[];
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "main" | "accessory";
+        };
+        /**
+         * IdentifyDebugOut
+         * @description Bloc de débogage du superuser hors production : les appels du pipeline, dans l'ordre.
+         */
+        IdentifyDebugOut: {
+            /** Steps */
+            steps: components["schemas"]["IdentifyStepDebugOut"][];
+        };
+        /**
+         * IdentifyStepDebugOut
+         * @description Un appel au modèle d'une étape (`read_photos`, `criteria`, `identify`) : prompt système
+         *     réellement envoyé, messages résumés (photos en `[image n : N octets]`), réponse brute, durée
+         *     en millisecondes, jetons et coût.
+         */
+        IdentifyStepDebugOut: {
+            /** Costusdmicros */
+            costUsdMicros: number;
+            /** Messages */
+            messages: components["schemas"]["DebugMessageOut"][];
+            /** Model */
+            model: string;
+            /** Ms */
+            ms: number;
+            /** Provider */
+            provider: string;
+            /** Rawresponse */
+            rawResponse: string;
+            /**
+             * Step
+             * @enum {string}
+             */
+            step: "read_photos" | "criteria" | "identify";
+            /** Systemprompt */
+            systemPrompt: string;
+            /** Tokensin */
+            tokensIn: number;
+            /** Tokensout */
+            tokensOut: number;
         };
         /** LastPurgeOut */
         LastPurgeOut: {
@@ -1413,6 +1603,31 @@ export interface components {
             /** Year */
             year?: number | null;
         };
+        /** PageLinkOut */
+        PageLinkOut: {
+            /** Domain */
+            domain: string;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * PhotoObservationOut
+         * @description Observation de `read_photos` utile à l'arnaque (photo de catalogue, capture d'écran,
+         *     filigrane, photos incohérentes, objet absent) ; `photo` : son numéro, ou `None`.
+         */
+        PhotoObservationOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "catalog" | "screenshot" | "watermark" | "inconsistency" | "missing_object";
+            /** Note */
+            note: string;
+            /** Photo */
+            photo: number | null;
+        };
         /** PriceIn */
         PriceIn: {
             /** Amountcents */
@@ -1599,9 +1814,10 @@ export interface components {
         };
         /**
          * ScanHistoryItemOut
-         * @description Un scan de l'historique. `site` et `title` viennent du snapshot de l'analyse servie :
-         *     `None` pour un scan sans résultat (échec ou en cours), qui n'est relié à aucun snapshot.
-         *     `score` et `level` sont `None` dans le même cas.
+         * @description Un scan de l'historique. `site` et `title` viennent du snapshot de l'analyse servie, ou
+         *     de l'identification pour un `identify` : `None` pour un scan sans résultat (échec ou en
+         *     cours), qui n'est relié à aucun snapshot. `score` et `level` sont `None` dans le même cas,
+         *     et pour un `identify` (aucune note de risque).
          */
         ScanHistoryItemOut: {
             /**
@@ -1615,6 +1831,11 @@ export interface components {
             fromCache: boolean;
             /** Level */
             level: ("low" | "medium" | "high") | null;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "identify" | "analyze";
             /** Scaneventid */
             scanEventId: number;
             /**
@@ -2518,6 +2739,70 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+        };
+    };
+    create_identification_api_identify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScanIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentificationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_identification_stream_api_identify_stream_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScanIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

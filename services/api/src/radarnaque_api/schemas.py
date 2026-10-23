@@ -256,6 +256,9 @@ class AnalysisResultOut(CamelModel):
     remaining: RemainingOut
     # Seulement pour un superuser hors production ; `None` (null) pour tout autre compte.
     debug: ScanDebugOut | None = None
+    # Identification qui a précédé l'analyse (spec §6) ; `None` si elle a échoué ou n'est pas
+    # configurée.
+    identification: "IdentificationOut | None" = None
 
 
 # Identification du produit (spec §6). Les liens viennent des résultats de recherche ou des
@@ -361,6 +364,9 @@ class IdentificationOut(CamelModel):
     debug: IdentifyDebugOut | None = None
 
 
+AnalysisResultOut.model_rebuild()  # résout `IdentificationOut`, défini après `AnalysisResultOut`
+
+
 # Événements de `POST /api/scans/stream` (spec §8.3), le champ `data` de chaque événement SSE.
 # Hors du schéma OpenAPI (la route n'a pas de modèle de réponse) : l'extension en tient un miroir
 # écrit à la main (`packages/shared/src/stream.ts`).
@@ -437,14 +443,16 @@ class ScanStreamErrorOut(CamelModel):
 
 
 class ScanHistoryItemOut(CamelModel):
-    """Un scan de l'historique. `site` et `title` viennent du snapshot de l'analyse servie :
-    `None` pour un scan sans résultat (échec ou en cours), qui n'est relié à aucun snapshot.
-    `score` et `level` sont `None` dans le même cas."""
+    """Un scan de l'historique. `site` et `title` viennent du snapshot de l'analyse servie, ou
+    de l'identification pour un `identify` : `None` pour un scan sans résultat (échec ou en
+    cours), qui n'est relié à aucun snapshot. `score` et `level` sont `None` dans le même cas,
+    et pour un `identify` (aucune note de risque)."""
 
     scan_event_id: int
     created_at: datetime
     scan_kind: ScanKindCode
     trigger: TriggerCode
+    purpose: Literal["identify", "analyze"]
     site: str | None
     title: str | None
     score: int | None

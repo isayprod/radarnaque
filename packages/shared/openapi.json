@@ -890,6 +890,16 @@
             "title": "Fromcache",
             "type": "boolean"
           },
+          "identification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IdentificationOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "imagesAnalyzed": {
             "title": "Imagesanalyzed",
             "type": "integer"
@@ -1275,6 +1285,49 @@
         "title": "CheckoutIn",
         "type": "object"
       },
+      "CriterionCheckOut": {
+        "description": "Un crit\u00e8re v\u00e9rifi\u00e9 sur les photos, tel qu'il l'a \u00e9t\u00e9 (copie gard\u00e9e avec l'identification).\n`photo` : num\u00e9ro de la photo (\u00e0 partir de 1), `None` pour `not_visible`.",
+        "properties": {
+          "observation": {
+            "enum": [
+              "seen_match",
+              "seen_contrary",
+              "not_visible"
+            ],
+            "title": "Observation",
+            "type": "string"
+          },
+          "photo": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/PageLinkOut"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "text": {
+            "$ref": "#/components/schemas/LocalizedTextOut"
+          }
+        },
+        "required": [
+          "text",
+          "observation",
+          "photo",
+          "sources"
+        ],
+        "title": "CriterionCheckOut",
+        "type": "object"
+      },
       "DailyOut": {
         "description": "Un point par jour, jours vides compris, du plus ancien au plus r\u00e9cent.",
         "properties": {
@@ -1595,6 +1648,329 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IdentificationOut": {
+        "description": "R\u00e9sultat d'une identification. `confidence`, `level` : ceux de l'objet principal (0 et\n`uncertain` pour le statut `none`). `verified_criteria` : les crit\u00e8res de l'objet principal\n\u00e9taient relus par un admin au moment de l'identification ; `unsourced` : des crit\u00e8res non\nsourc\u00e9s ont servi (\u00a79).",
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "integer"
+          },
+          "debug": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IdentifyDebugOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fromCache": {
+            "title": "Fromcache",
+            "type": "boolean"
+          },
+          "identificationId": {
+            "title": "Identificationid",
+            "type": "integer"
+          },
+          "identifiedAt": {
+            "format": "date-time",
+            "title": "Identifiedat",
+            "type": "string"
+          },
+          "imagesAnalyzed": {
+            "title": "Imagesanalyzed",
+            "type": "integer"
+          },
+          "level": {
+            "enum": [
+              "sure",
+              "probable",
+              "uncertain"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "objects": {
+            "items": {
+              "$ref": "#/components/schemas/IdentifiedObjectPublicOut"
+            },
+            "title": "Objects",
+            "type": "array"
+          },
+          "photoObservations": {
+            "items": {
+              "$ref": "#/components/schemas/PhotoObservationOut"
+            },
+            "title": "Photoobservations",
+            "type": "array"
+          },
+          "remaining": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RemainingOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "searches": {
+            "items": {
+              "$ref": "#/components/schemas/IdentificationSearchOut"
+            },
+            "title": "Searches",
+            "type": "array"
+          },
+          "sellerQuestion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalizedTextOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "identified",
+              "uncertain",
+              "none"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "titleMismatch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Titlemismatch"
+          },
+          "unsourced": {
+            "title": "Unsourced",
+            "type": "boolean"
+          },
+          "verifiedCriteria": {
+            "title": "Verifiedcriteria",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "identificationId",
+          "status",
+          "confidence",
+          "level",
+          "objects",
+          "sellerQuestion",
+          "titleMismatch",
+          "photoObservations",
+          "searches",
+          "verifiedCriteria",
+          "unsourced",
+          "imagesAnalyzed",
+          "fromCache",
+          "identifiedAt"
+        ],
+        "title": "IdentificationOut",
+        "type": "object"
+      },
+      "IdentificationSearchOut": {
+        "description": "Une recherche web de l'identification : requ\u00eate (d\u00e9j\u00e0 masqu\u00e9e), type et domaines des\npages lues. Affich\u00e9e aussi pour un r\u00e9sultat servi par le cache.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "criteria",
+              "price",
+              "reference",
+              "retry"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "pagesRead": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Pagesread",
+            "type": "array"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "kind",
+          "pagesRead"
+        ],
+        "title": "IdentificationSearchOut",
+        "type": "object"
+      },
+      "IdentifiedObjectPublicOut": {
+        "description": "Un objet de l'annonce. `reference` : `None` quand plusieurs candidats restent possibles\n(`remaining`). Confiance et niveau calcul\u00e9s par l'API, jamais recopi\u00e9s du mod\u00e8le.",
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/CriterionCheckOut"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "sure",
+              "probable",
+              "uncertain"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/PageLinkOut"
+            },
+            "title": "Pages",
+            "type": "array"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "remaining": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Remaining",
+            "type": "array"
+          },
+          "role": {
+            "enum": [
+              "main",
+              "accessory"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "label",
+          "reference",
+          "confidence",
+          "level",
+          "remaining",
+          "checks",
+          "pages"
+        ],
+        "title": "IdentifiedObjectPublicOut",
+        "type": "object"
+      },
+      "IdentifyDebugOut": {
+        "description": "Bloc de d\u00e9bogage du superuser hors production : les appels du pipeline, dans l'ordre.",
+        "properties": {
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/IdentifyStepDebugOut"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "steps"
+        ],
+        "title": "IdentifyDebugOut",
+        "type": "object"
+      },
+      "IdentifyStepDebugOut": {
+        "description": "Un appel au mod\u00e8le d'une \u00e9tape (`read_photos`, `criteria`, `identify`) : prompt syst\u00e8me\nr\u00e9ellement envoy\u00e9, messages r\u00e9sum\u00e9s (photos en `[image n : N octets]`), r\u00e9ponse brute, dur\u00e9e\nen millisecondes, jetons et co\u00fbt.",
+        "properties": {
+          "costUsdMicros": {
+            "title": "Costusdmicros",
+            "type": "integer"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/DebugMessageOut"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "ms": {
+            "title": "Ms",
+            "type": "integer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "rawResponse": {
+            "title": "Rawresponse",
+            "type": "string"
+          },
+          "step": {
+            "enum": [
+              "read_photos",
+              "criteria",
+              "identify"
+            ],
+            "title": "Step",
+            "type": "string"
+          },
+          "systemPrompt": {
+            "title": "Systemprompt",
+            "type": "string"
+          },
+          "tokensIn": {
+            "title": "Tokensin",
+            "type": "integer"
+          },
+          "tokensOut": {
+            "title": "Tokensout",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "step",
+          "provider",
+          "model",
+          "systemPrompt",
+          "messages",
+          "rawResponse",
+          "ms",
+          "tokensIn",
+          "tokensOut",
+          "costUsdMicros"
+        ],
+        "title": "IdentifyStepDebugOut",
         "type": "object"
       },
       "LastPurgeOut": {
@@ -2259,6 +2635,67 @@
         "title": "OfferPricesIn",
         "type": "object"
       },
+      "PageLinkOut": {
+        "properties": {
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "title",
+          "domain"
+        ],
+        "title": "PageLinkOut",
+        "type": "object"
+      },
+      "PhotoObservationOut": {
+        "description": "Observation de `read_photos` utile \u00e0 l'arnaque (photo de catalogue, capture d'\u00e9cran,\nfiligrane, photos incoh\u00e9rentes, objet absent) ; `photo` : son num\u00e9ro, ou `None`.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "catalog",
+              "screenshot",
+              "watermark",
+              "inconsistency",
+              "missing_object"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "photo": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo"
+          }
+        },
+        "required": [
+          "photo",
+          "kind",
+          "note"
+        ],
+        "title": "PhotoObservationOut",
+        "type": "object"
+      },
       "PriceIn": {
         "additionalProperties": false,
         "properties": {
@@ -2723,7 +3160,7 @@
         "type": "object"
       },
       "ScanHistoryItemOut": {
-        "description": "Un scan de l'historique. `site` et `title` viennent du snapshot de l'analyse servie :\n`None` pour un scan sans r\u00e9sultat (\u00e9chec ou en cours), qui n'est reli\u00e9 \u00e0 aucun snapshot.\n`score` et `level` sont `None` dans le m\u00eame cas.",
+        "description": "Un scan de l'historique. `site` et `title` viennent du snapshot de l'analyse servie, ou\nde l'identification pour un `identify` : `None` pour un scan sans r\u00e9sultat (\u00e9chec ou en\ncours), qui n'est reli\u00e9 \u00e0 aucun snapshot. `score` et `level` sont `None` dans le m\u00eame cas,\net pour un `identify` (aucune note de risque).",
         "properties": {
           "createdAt": {
             "format": "date-time",
@@ -2753,6 +3190,14 @@
               }
             ],
             "title": "Level"
+          },
+          "purpose": {
+            "enum": [
+              "identify",
+              "analyze"
+            ],
+            "title": "Purpose",
+            "type": "string"
           },
           "scanEventId": {
             "title": "Scaneventid",
@@ -2814,6 +3259,7 @@
           "createdAt",
           "scanKind",
           "trigger",
+          "purpose",
           "site",
           "title",
           "score",
@@ -4376,6 +4822,77 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/api/identify": {
+      "post": {
+        "description": "Sans flux, pour les tests et `e2e`.",
+        "operationId": "create_identification_api_identify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentificationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Identification"
+      }
+    },
+    "/api/identify/stream": {
+      "post": {
+        "description": "\u00c9v\u00e9nements du pipeline, `identification`, puis `result` (le m\u00eame `IdentificationOut`)\nou `error`. L'admission se fait avant toute r\u00e9ponse : un refus reste une erreur JSON.",
+        "operationId": "create_identification_stream_api_identify_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Identification Stream"
       }
     },
     "/api/internal/users/{user_id}/bootstrap": {

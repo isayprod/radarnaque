@@ -10,6 +10,10 @@ from sqlalchemy import text
 from radarnaque_api.llm.client import LLMError, LLMResult
 from radarnaque_api.llm.tools import SearchRecord
 
+# Analyse seule : l'identification qui la précède a ses propres tests (test_identify_routes.py,
+# test_scan_service.py).
+pytestmark = pytest.mark.usefixtures("without_identification")
+
 FakeLLM = test_scans_routes.FakeLLM
 _body = test_scans_routes._body
 # Fixtures de test_scans_routes.py : le faux LLM et l'utilisateur avec un essai actif.

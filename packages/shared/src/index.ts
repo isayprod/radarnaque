@@ -14,6 +14,7 @@ export type {
 export type Me = components["schemas"]["MeOut"];
 export type ScanIn = components["schemas"]["ScanIn"];
 export type AnalysisResult = components["schemas"]["AnalysisResultOut"];
+export type Identification = components["schemas"]["IdentificationOut"];
 export type ScanHistory = components["schemas"]["ScanHistoryOut"];
 
 export type ApiErrorBody = {

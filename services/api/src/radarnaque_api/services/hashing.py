@@ -33,7 +33,9 @@ def content_hash(listing: ListingIn, masked_title: str, masked_description: str)
     )
 
 
-def input_hash(scan: ScanIn, images_requested: int) -> str:
+def input_hash(
+    scan: ScanIn, images_requested: int, identification_digest: str | None = None
+) -> str:
     """Empreinte de ce qui, hors contenu du snapshot, change l'analyse : faits sur le vendeur (le
     schéma d'entrée refuse son identité), catégorie, état, caractéristiques, date de publication et
     lieu, version des règles, signaux triés par identifiant (avec leurs paramètres), scan partiel
@@ -44,20 +46,25 @@ def input_hash(scan: ScanIn, images_requested: int) -> str:
     par `content_hash` ou par cette empreinte, sinon une annonce forgée (signaux, catégorie…)
     empoisonnerait le cache de tous les utilisateurs. `imagesSent` l'est par `images_requested`.
     Seule exception : `today`, la date du jour, change chaque jour sans que l'annonce change ; la
-    durée du cache (en heures) borne l'écart. Vérifié par tests/test_hashing.py."""
+    durée du cache (en heures) borne l'écart. Vérifié par tests/test_hashing.py.
+
+    `identification_digest` (`identify.store.identification_digest`) : l'identification qui
+    nourrit l'analyse (bloc `<identification>`) ; une autre identification, une autre analyse.
+    Sans identification, l'empreinte reste celle d'avant l'identification (clé absente)."""
     listing = scan.listing
     signals = [s.model_dump(mode="json", by_alias=True) for s in scan.rules.signals]
-    return _sha256(
-        {
-            "seller": listing.seller.model_dump(mode="json", by_alias=True),
-            "category": listing.category,
-            "condition": listing.condition,
-            "attributes": [a.model_dump(mode="json") for a in listing.attributes],
-            "postedAt": listing.posted_at,
-            "location": listing.location.model_dump(mode="json", by_alias=True),
-            "rulesVersion": scan.rules.version,
-            "signals": sorted(signals, key=lambda s: (s["id"], canonical_json(s))),
-            "partial": scan.partial,
-            "imagesRequested": images_requested,
-        }
-    )
+    facts = {
+        "seller": listing.seller.model_dump(mode="json", by_alias=True),
+        "category": listing.category,
+        "condition": listing.condition,
+        "attributes": [a.model_dump(mode="json") for a in listing.attributes],
+        "postedAt": listing.posted_at,
+        "location": listing.location.model_dump(mode="json", by_alias=True),
+        "rulesVersion": scan.rules.version,
+        "signals": sorted(signals, key=lambda s: (s["id"], canonical_json(s))),
+        "partial": scan.partial,
+        "imagesRequested": images_requested,
+    }
+    if identification_digest is not None:
+        facts["identification"] = identification_digest
+    return _sha256(facts)
