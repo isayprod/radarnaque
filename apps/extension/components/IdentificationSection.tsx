@@ -25,6 +25,11 @@ import { ScanProgressView } from "./ScanProgressView";
 export interface IdentificationSectionProps extends AccessActionsProps {
 	identification: IdentifyState;
 	onIdentify(): void;
+	/**
+	 * Section reprise sous l'analyse du risque (« Détail du produit ») : son pied
+	 * ne répète pas « Analyses restantes », déjà dit par la section du risque.
+	 */
+	hideRemaining?: boolean;
 }
 
 type IdentifiedObject = IdentificationResult["objects"][number];
@@ -81,6 +86,7 @@ export function IdentificationSection(props: IdentificationSectionProps) {
 					access={props.access}
 					result={identification.result}
 					progress={identification.progress}
+					hideRemaining={props.hideRemaining === true}
 				/>
 			) : (
 				<AccessBody {...props}>
@@ -125,6 +131,12 @@ function IdentifyBlock(props: IdentificationSectionProps) {
 					text={statusLine(progress, locale, "identify.start")}
 					waiting={waiting}
 				/>
+			)}
+			{/* Hors de la région annoncée : le déroulé change sans cesse. */}
+			{progress && (
+				<div className="w-full">
+					<ScanProgressView progress={progress} locale={locale} live />
+				</div>
 			)}
 		</div>
 	);
@@ -272,8 +284,10 @@ function ResultView({
 	access,
 	result,
 	progress,
+	hideRemaining,
 }: {
 	locale: Locale;
+	hideRemaining: boolean;
 	access: AccessActionsProps["access"];
 	result: IdentificationResult;
 	progress: Extract<IdentifyState, { status: "done" }>["progress"];
@@ -295,7 +309,10 @@ function ResultView({
 	// Le repli sur l'accès lu ne vaut que pour une identification sans
 	// `remaining` (celle embarquée dans une analyse) : un `scans` nul dans le
 	// résultat dit « illimité » (comme `AiSection`).
-	const remaining = result.remaining ? result.remaining.scans : accessRemaining;
+	const shownRemaining = result.remaining
+		? result.remaining.scans
+		: accessRemaining;
+	const remaining = hideRemaining ? null : shownRemaining;
 	const live = progress && progress.steps.length > 0 ? progress : null;
 	const shownProgress = live ?? progressFromSearches(result.searches);
 	const hasSteps = shownProgress.steps.length > 0;

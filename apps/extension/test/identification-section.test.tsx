@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { IdentificationSection } from "../components/IdentificationSection";
 import type { IdentifyState } from "../lib/content/ai-client";
 import { progressFromSearches } from "../lib/content/identification-progress";
+import { addEvent, startProgress } from "../lib/content/scan-progress";
 import { contentText } from "../lib/content-i18n";
 import type { ContentAccess } from "../lib/messages";
 import { sampleIdentification } from "./helpers";
@@ -36,7 +37,12 @@ function setup(
 	{
 		locale = "fr",
 		access = active,
-	}: { locale?: Locale; access?: ContentAccess } = {},
+		hideRemaining = false,
+	}: {
+		locale?: Locale;
+		access?: ContentAccess;
+		hideRemaining?: boolean;
+	} = {},
 ) {
 	const props = {
 		locale,
@@ -46,6 +52,7 @@ function setup(
 		onLogin: vi.fn(),
 		loginUnavailable: false,
 		pricingUrl: PRICING,
+		hideRemaining,
 	};
 	return { ...render(<IdentificationSection {...props} />), props };
 }
@@ -545,5 +552,30 @@ describe("IdentificationSection : accès et erreurs", () => {
 	test("déconnecté : phrase et connexion", () => {
 		setup({ status: "idle" }, { access: { status: "signedOut" } as never });
 		expect(screen.getByRole("button", { name: "Se connecter" })).not.toBeNull();
+	});
+});
+
+describe("IdentificationSection : repris sous le risque (hideRemaining)", () => {
+	test("le pied ne répète pas « Analyses restantes », le déroulé reste", () => {
+		setup(doneState(sampleIdentification), { hideRemaining: true });
+		expect(screen.queryByText(/Analyses restantes/)).toBeNull();
+		expect(
+			screen.getByText(contentText("fr", "identify.howIdentified")),
+		).not.toBeNull();
+	});
+
+	test("identification en cours : le déroulé de l'étape est affiché", () => {
+		setup({
+			status: "loading",
+			progress: addEvent(
+				startProgress(0),
+				{ type: "page_read", domain: "www.steamdeck.com", ok: true },
+				1,
+			),
+		});
+		// La ligne d'état et, dessous, la liste du déroulé.
+		expect(
+			within(screen.getByRole("list")).getByText(/www\.steamdeck\.com/),
+		).not.toBeNull();
 	});
 });

@@ -3,7 +3,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { AiSection } from "../components/AiSection";
+import { AiSection, RiskAction } from "../components/AiSection";
 import type { ScanState } from "../lib/content/ai-client";
 import { addEvent, startProgress } from "../lib/content/scan-progress";
 import { shownResult } from "../lib/content/shown-result";
@@ -773,5 +773,67 @@ describe("AiSection : ligne produit", () => {
 		cleanup();
 		setup({ ai: done() });
 		expect(screen.queryByText(/^Produit/)).toBeNull();
+	});
+});
+
+describe("RiskAction : « Analyser le risque » du panneau", () => {
+	const render1 = (props: Partial<ComponentProps<typeof RiskAction>> = {}) => {
+		const onAnalyze = vi.fn();
+		render(
+			<RiskAction
+				locale="fr"
+				access={standard}
+				ai={idle}
+				onAnalyze={onAnalyze}
+				onLogin={vi.fn()}
+				loginUnavailable={false}
+				pricingUrl={PRICING}
+				empty={false}
+				included={false}
+				{...props}
+			/>,
+		);
+		return onAnalyze;
+	};
+	const action = () =>
+		screen.getByRole("button", { name: "Analyser le risque" });
+
+	test("pilule blanche pleine largeur, clic = onAnalyze, jamais « Lancer une analyse IA »", async () => {
+		const onAnalyze = render1();
+		expect(action().className).toContain("w-full");
+		expect(action().className).toContain("bg-white");
+		expect(screen.queryByText("Lancer une analyse IA")).toBeNull();
+		await userEvent.setup().click(action());
+		expect(onAnalyze).toHaveBeenCalledTimes(1);
+	});
+
+	test("grisé : aria-disabled et raison lue avec le bouton", () => {
+		render1({ empty: true });
+		expect(action().getAttribute("aria-disabled")).toBe("true");
+		const id = action().getAttribute("aria-describedby") ?? "";
+		expect(document.getElementById(id)?.textContent).toBe(
+			contentText("fr", "ai.noScansLeft"),
+		);
+	});
+
+	test("inclus : décrit par « Inclus avec l'identification »", () => {
+		render1({ included: true });
+		const id = action().getAttribute("aria-describedby") ?? "";
+		expect(document.getElementById(id)?.textContent).toBe(
+			contentText("fr", "identify.included"),
+		);
+	});
+
+	test("après une coupure : « Relancer » ; sans abonnement : lien vers les formules", () => {
+		render1({ ai: { status: "error", code: "stream_interrupted" } });
+		expect(screen.getByRole("button", { name: "Relancer" })).not.toBeNull();
+		cleanup();
+		render1({ access: { status: "noSubscription" } });
+		expect(
+			screen.getByRole("link", { name: contentText("fr", "ai.pricing") }),
+		).not.toBeNull();
+		expect(
+			screen.queryByRole("button", { name: "Analyser le risque" }),
+		).toBeNull();
 	});
 });

@@ -18,6 +18,9 @@ vi.mock("../components/AiSection", () => ({
 	AiSection: () => {
 		throw new Error("rendu IA en échec");
 	},
+	RiskAction: () => {
+		throw new Error("rendu IA en échec");
+	},
 }));
 
 function Throwing(): never {

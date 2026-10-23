@@ -77,6 +77,8 @@ type IdentifyKey =
 	| "identify.launch"
 	| "identify.launchShort"
 	| "identify.title"
+	| "identify.product"
+	| "identify.detail"
 	| "identify.level.sure"
 	| "identify.level.probable"
 	| "identify.level.uncertain"
@@ -203,6 +205,8 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"identify.launch": "Identifier le produit",
 		"identify.launchShort": "Identifier",
 		"identify.title": "Identification",
+		"identify.product": "Produit",
+		"identify.detail": "Détail du produit",
 		"identify.level.sure": "Sûr",
 		"identify.level.probable": "Probable",
 		"identify.level.uncertain": "Incertain",
@@ -324,6 +328,8 @@ export const CONTENT_TEXTS: Record<Locale, Record<ContentKey, string>> = {
 		"identify.launch": "Product identificeren",
 		"identify.launchShort": "Identificeren",
 		"identify.title": "Identificatie",
+		"identify.product": "Product",
+		"identify.detail": "Productdetails",
 		"identify.level.sure": "Zeker",
 		"identify.level.probable": "Waarschijnlijk",
 		"identify.level.uncertain": "Onzeker",
