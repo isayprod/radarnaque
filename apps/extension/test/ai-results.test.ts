@@ -607,4 +607,92 @@ describe("createAiResultStore : identification", () => {
 			NO_REMAINING,
 		);
 	});
+
+	test("identifiedByUser survives a same-fingerprint analysis embedding an identification", async () => {
+		const clock = IDENTIFIED_AT;
+		const store = createAiResultStore(memoryArea().area, () => clock);
+		await store.put("2ememain.be", "m1", identOnly(clock));
+		await store.put(
+			"2ememain.be",
+			"m1",
+			fullEntry(clock, {
+				result: { ...sameDay, identification: sampleIdentification },
+			}),
+		);
+		const got = await store.get("2ememain.be", "m1");
+		expect(got?.identifiedByUser).toBe(true);
+		expect(got?.identification).not.toBeNull();
+		expect(got?.result).not.toBeNull();
+		// Autre empreinte : la valeur entrante.
+		await store.put(
+			"2ememain.be",
+			"m1",
+			fullEntry(clock, { fingerprint: "x" }),
+		);
+		expect((await store.get("2ememain.be", "m1"))?.identifiedByUser).toBe(
+			false,
+		);
+	});
+
+	test("a partial analysis adds an identification to a full one without replacing it", async () => {
+		const clock = IDENTIFIED_AT;
+		const store = createAiResultStore(memoryArea().area, () => clock);
+		await store.put("2ememain.be", "m1", fullEntry(clock));
+		await store.put(
+			"2ememain.be",
+			"m1",
+			fullEntry(clock, {
+				result: { ...sameDay, partial: true },
+				identification: sampleIdentification,
+				identifiedByUser: true,
+			}),
+		);
+		const got = await store.get("2ememain.be", "m1");
+		expect(got?.result?.partial).toBe(false);
+		expect(got?.identification).not.toBeNull();
+		expect(got?.identifiedByUser).toBe(true);
+	});
+
+	test("a partial analysis without identification over a full one writes nothing", async () => {
+		const clock = IDENTIFIED_AT;
+		const mem = memoryArea();
+		const store = createAiResultStore(mem.area, () => clock);
+		await store.put("2ememain.be", "m1", fullEntry(clock));
+		const writes = mem.area.setValue.mock.calls.length;
+		await store.put(
+			"2ememain.be",
+			"m1",
+			fullEntry(clock + 5, { result: { ...sameDay, partial: true } }),
+		);
+		expect(mem.area.setValue).toHaveBeenCalledTimes(writes);
+	});
+
+	test("a garbage identification degrades to null (v2 and v3), dropped without analysis", async () => {
+		const clock = IDENTIFIED_AT;
+		const garbage = { identificationId: "x" };
+		const base = fullEntry(clock);
+		const mem = memoryArea({
+			"2ememain.be|a": {
+				...legacyV2(base),
+				result: { ...sameDay, identification: garbage },
+			} as never,
+			"2ememain.be|b": {
+				...v3(base),
+				identification: garbage,
+				identifiedByUser: true,
+			} as never,
+			"2ememain.be|c": {
+				...v3(identOnly(clock)),
+				identification: garbage,
+			} as never,
+		});
+		const store = createAiResultStore(mem.area, () => clock);
+		for (const id of ["a", "b"]) {
+			const got = await store.get("2ememain.be", id);
+			expect(got?.result).not.toBeNull();
+			expect(got?.identification).toBeNull();
+			expect(got?.identifiedByUser).toBe(false);
+		}
+		expect(await store.get("2ememain.be", "c")).toBeNull();
+	});
 });
