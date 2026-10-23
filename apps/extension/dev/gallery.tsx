@@ -450,29 +450,27 @@ async function waitFor<T extends Element>(
 	throw new Error(`galerie : ${selector} introuvable`);
 }
 
-/** Pilule « Analyser » : la seconde de la ligne, après « Identifier ». */
-const ANALYZE = "[data-pill='analyze']";
+/** La pilule unique de la fiche (les états de la galerie sont refaits ensuite). */
+const ANALYZE = "[data-pill]";
 
-/** Clic sur la pilule « Analyser » (son bouton), une fois qu'elle est rendue. */
-const clickPill = async (root: ShadowRoot, selector = `${ANALYZE} button`) =>
-	(await waitFor<HTMLElement>(root, selector)).click();
+/**
+ * Clic sur l'action de la pilule, une fois qu'elle est rendue : « Identifier »
+ * au repos, « Analyser le risque » une fois le produit identifié (le seul
+ * bouton sans `aria-expanded`).
+ */
+const clickPill = async (
+	root: ShadowRoot,
+	selector = `${ANALYZE} button:not([aria-expanded])`,
+) => (await waitFor<HTMLElement>(root, selector)).click();
 
-/** Pilule « Identifier » : la première de la ligne. */
-const IDENTIFY = "[data-pill='identify']";
+const IDENTIFY = "[data-pill]";
 
 const clickIdentify = async (root: ShadowRoot) =>
 	clickPill(root, `${IDENTIFY} button`);
 
-/** Ouvre le panneau Identification sur un résultat déjà là (magasin). */
+/** Ouvre le panneau sur un produit déjà identifié (magasin). */
 const openIdentification = async (root: ShadowRoot) =>
 	clickPill(root, `${IDENTIFY} button[aria-expanded='false']`);
-
-/** Lance l'identification, puis demande l'analyse pendant qu'elle tourne. */
-async function identifyThenQueueAnalysis(root: ShadowRoot) {
-	await clickIdentify(root);
-	await clickPill(root, `${IDENTIFY} button[aria-busy='true']`).catch(() => {});
-	await clickPill(root);
-}
 
 /** Lance l'analyse, puis ouvre le panneau sur son résultat. */
 async function launchThenOpen(root: ShadowRoot) {
@@ -722,17 +720,6 @@ const IDENTIFY_PILLS: Stage[] = [
 				identifyOutcome: { ok: false, error: { code: "stream_interrupted" } },
 			}),
 			script: clickIdentify,
-		}),
-	},
-	{
-		id: "analyze-queued",
-		label: "« Analyser » en attente de l'identification",
-		render: (locale) => ({
-			node: badge("analyser-attente", locale, {
-				access: active(3),
-				identifyEvents: SEARCHES,
-			}),
-			script: identifyThenQueueAnalysis,
 		}),
 	},
 	{

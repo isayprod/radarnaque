@@ -24,7 +24,6 @@ import { activeIn, BadgePill, focusPill, useLaunch } from "./BadgePill";
 import { DebugBoundary, DebugSection } from "./DebugSection";
 import { Icon } from "./Icon";
 import { IdentificationSection } from "./IdentificationSection";
-import { IdentifyPill } from "./IdentifyPill";
 import { Logo } from "./Logo";
 import { LABEL_CLASS } from "./risk-styles";
 import { useKeepInView } from "./useKeepInView";
@@ -104,13 +103,9 @@ const PANEL_CLASS =
 const CLOSE_CLASS =
 	"-my-1 -mr-1.5 inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-pill text-text-2 hover:bg-white/8 hover:text-text-1 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
 
-/** Panneau ouvert : celui de l'identification, celui de l'analyse, ou aucun. */
-type OpenPanel = null | "identify" | "analyze";
-
 /**
- * Carte d'un panneau (`PANEL_CLASS`) : en-tête avec le logo, le titre en style
- * `label` qui nomme la boîte de dialogue, et « Fermer ». Les deux panneaux,
- * Identification et Analyse, ont la même.
+ * Carte du panneau (`PANEL_CLASS`) : en-tête avec le logo, le titre en style
+ * `label` qui nomme la boîte de dialogue, et « Fermer ».
  */
 function Panel({
 	panelRef,
@@ -174,28 +169,21 @@ export function RiskBadge({
 	/** Logs de debug du superuser (scan demandé, scan reçu). */
 	debugLog?: DebugLog;
 }) {
-	// Un seul panneau à la fois : ouvrir l'un ferme l'autre.
-	const [open, setOpen] = useState<OpenPanel>(null);
+	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const pillRef = useRef<HTMLSpanElement>(null);
-	const identifyPillRef = useRef<HTMLSpanElement>(null);
 	const panelRef = useRef<HTMLDivElement>(null);
-	const identifyPanelRef = useRef<HTMLDivElement>(null);
-	// Un appel par panneau : chacun garde son écoute du redimensionnement.
-	useKeepInView(panelRef, open === "analyze");
-	useKeepInView(identifyPanelRef, open === "identify");
-	const close = useCallback(() => setOpen(null), []);
+	useKeepInView(panelRef, open);
+	const close = useCallback(() => setOpen(false), []);
 	// « Fermer », ou Escape avec le focus dans la pastille : le focus revient à la
-	// pilule qui a ouvert le panneau (le bouton, l'action de la pilule d'erreur, ou
-	// la pilule d'erreur elle-même), avant que le panneau, qui peut le contenir,
-	// ne disparaisse.
+	// pilule (son bouton, son action, ou la pilule d'erreur elle-même), avant que
+	// le panneau, qui peut le contenir, ne disparaisse.
 	const closeToPill = useCallback(() => {
-		focusPill(open === "identify" ? identifyPillRef.current : pillRef.current);
-		setOpen(null);
-	}, [open]);
-	const openAnalyze = useCallback(() => setOpen("analyze"), []);
-	const openIdentify = useCallback(() => setOpen("identify"), []);
-	useDismiss(open !== null, rootRef, close, closeToPill);
+		focusPill(pillRef.current);
+		setOpen(false);
+	}, []);
+	const openPanel = useCallback(() => setOpen(true), []);
+	useDismiss(open, rootRef, close, closeToPill);
 	// L'état IA vit ici, pas dans le panneau : il survit à sa fermeture.
 	const scan = useAiScan(
 		ai,
@@ -206,13 +194,11 @@ export function RiskBadge({
 		debugLog,
 	);
 	const { loadAccess } = scan;
-	// Accès lu au clic sur une pilule (`useLaunch`) ou à l'ouverture d'un panneau,
-	// jamais avant. Panneau ouvert, il est relu
-	// au retour sur l'onglet (connexion faite dans la popup) ; `loadAccess` ne fait
-	// rien s'il est déjà actif.
-	const anyOpen = open !== null;
+	// Accès lu au clic sur une action de la pilule (`useLaunch`) ou à l'ouverture
+	// du panneau, jamais avant. Panneau ouvert, il est relu au retour sur l'onglet
+	// (connexion faite dans la popup) ; `loadAccess` ne fait rien s'il est déjà actif.
 	useEffect(() => {
-		if (!anyOpen) return;
+		if (!open) return;
 		loadAccess();
 		const onFocus = () => loadAccess();
 		const onVisibility = () => {
@@ -224,7 +210,7 @@ export function RiskBadge({
 			window.removeEventListener("focus", onFocus);
 			document.removeEventListener("visibilitychange", onVisibility);
 		};
-	}, [anyOpen, loadAccess]);
+	}, [open, loadAccess]);
 
 	// Seul le résultat IA est affiché ; le rapport local ne sert qu'à la demande.
 	const shown = shownResult(scan.ai);
@@ -243,23 +229,22 @@ export function RiskBadge({
 		shown?.professional === true;
 
 	const key = `${listing.site}|${listing.externalId}`;
-	const launch = useLaunch(
+	const identify = useLaunch(scan, key, openPanel, scan.identify);
+	const analyze = useLaunch(
 		scan,
 		key,
-		openAnalyze,
+		openPanel,
 		scan.scan,
 		scan.analysisIncluded,
 	);
-	const launchIdentify = useLaunch(scan, key, openIdentify, scan.identify);
-	// Chaque pilule ouvre ou ferme son propre panneau.
-	const toggle = useCallback(
-		() => setOpen((value) => (value === "analyze" ? null : "analyze")),
-		[],
-	);
-	const toggleIdentify = useCallback(
-		() => setOpen((value) => (value === "identify" ? null : "identify")),
-		[],
-	);
+	const toggle = useCallback(() => setOpen((value) => !value), []);
+	// Contenu du panneau en attendant sa refonte : la section Identification,
+	// puis la section IA. Chaque état d'accès n'est montré qu'une fois : avant
+	// toute analyse du risque, par la section Identification seule ; ensuite,
+	// par la section IA, sous l'identification si elle est faite.
+	const identified = scan.identification.status === "done";
+	const showIdentification = identified || scan.ai.status === "idle";
+	const showAi = identified || scan.ai.status !== "idle";
 
 	// Police en px et reset explicite : le site hôte ne doit ni agrandir ni styler la pastille.
 	return (
@@ -267,45 +252,16 @@ export function RiskBadge({
 			ref={rootRef}
 			className="radarnaque-root relative ml-2 inline-block align-middle text-[13px] leading-[1.4] font-normal"
 		>
-			<span className="inline-flex max-w-full items-center gap-2 align-middle">
-				<IdentifyPill
-					scan={scan}
-					locale={locale}
-					open={open === "identify"}
-					onToggle={toggleIdentify}
-					onLaunch={launchIdentify}
-					pillRef={identifyPillRef}
-				/>
-				<BadgePill
-					scan={scan}
-					locale={locale}
-					open={open === "analyze"}
-					onToggle={toggle}
-					onLaunch={launch}
-					pillRef={pillRef}
-				/>
-			</span>
-			{open === "identify" && (
-				<Panel
-					panelRef={identifyPanelRef}
-					title={contentText(locale, "identify.title")}
-					locale={locale}
-					onClose={closeToPill}
-				>
-					<AiErrorBoundary key={key} locale={locale}>
-						<IdentificationSection
-							locale={locale}
-							identification={scan.identification}
-							access={scan.access}
-							onIdentify={() => scan.identify()}
-							onLogin={scan.login}
-							loginUnavailable={scan.loginUnavailable}
-							pricingUrl={scan.pricingUrl}
-						/>
-					</AiErrorBoundary>
-				</Panel>
-			)}
-			{open === "analyze" && (
+			<BadgePill
+				scan={scan}
+				locale={locale}
+				open={open}
+				onToggle={toggle}
+				onIdentify={identify}
+				onAnalyze={analyze}
+				pillRef={pillRef}
+			/>
+			{open && (
 				<Panel
 					panelRef={panelRef}
 					title={contentText(locale, "panel.title")}
@@ -314,15 +270,31 @@ export function RiskBadge({
 				>
 					{professional && <ProNotice locale={locale} />}
 					<AiErrorBoundary key={key} locale={locale}>
-						<AiSection
-							locale={locale}
-							access={scan.access}
-							ai={scan.ai}
-							onScan={() => scan.scan()}
-							onLogin={scan.login}
-							loginUnavailable={scan.loginUnavailable}
-							pricingUrl={scan.pricingUrl}
-						/>
+						{showIdentification && (
+							<IdentificationSection
+								locale={locale}
+								identification={scan.identification}
+								access={scan.access}
+								onIdentify={() => scan.identify()}
+								onLogin={scan.login}
+								loginUnavailable={scan.loginUnavailable}
+								pricingUrl={scan.pricingUrl}
+							/>
+						)}
+						{showIdentification && showAi && (
+							<hr className="my-4 h-px border-0 bg-white/12" />
+						)}
+						{showAi && (
+							<AiSection
+								locale={locale}
+								access={scan.access}
+								ai={scan.ai}
+								onScan={() => scan.scan()}
+								onLogin={scan.login}
+								loginUnavailable={scan.loginUnavailable}
+								pricingUrl={scan.pricingUrl}
+							/>
+						)}
 						{debug && (
 							// Nouvelle tentative de rendu pour chaque nouveau bloc debug. La durée
 							// totale distingue une relance sans cache, qui réécrit l'analyse en

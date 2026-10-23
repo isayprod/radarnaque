@@ -9,6 +9,7 @@ import {
 	useRef,
 } from "react";
 import type { ScanState } from "../lib/content/ai-client";
+import { identificationHeadline } from "../lib/content/identification-headline";
 import { statusLine } from "../lib/content/scan-progress";
 import { shownResult } from "../lib/content/shown-result";
 import type { AiScan } from "../lib/content/use-ai-scan";
@@ -37,9 +38,18 @@ export const BADGE_PILL_CLASS = `${PILL_CLASS} h-7 max-w-[340px] min-w-0 gap-2 p
 // Pilule cliquable : repos, analyse en cours, résultat.
 export const ACTION_PILL_CLASS = `${BADGE_PILL_CLASS} cursor-pointer hover:border-border-strong aria-disabled:cursor-default aria-disabled:text-text-3 aria-disabled:hover:border-white/12`;
 
-// Action dans la pilule d'erreur : « Relancer », « Analyser » ou « Identifier », soulignée.
-const INLINE_ACTION_CLASS =
-	"shrink-0 cursor-pointer rounded-xs text-text-1 underline underline-offset-2 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
+// Action dans la pilule : « Relancer », « Identifier » ou « Analyser le risque »,
+// soulignée. Grisée (`aria-disabled`), elle n'est plus soulignée.
+export const INLINE_ACTION_CLASS =
+	"shrink-0 cursor-pointer rounded-xs text-text-1 underline underline-offset-2 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden aria-disabled:cursor-default aria-disabled:text-text-3 aria-disabled:no-underline";
+
+// Partie produit de la pilule « Produit identifié » : un bouton sans surface
+// propre, dans la pilule, qui ouvre ou ferme le panneau.
+const PRODUCT_CLASS =
+	"inline-flex min-w-0 cursor-pointer items-center gap-2 rounded-xs text-text-1 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-hidden";
+
+// Séparateur vertical entre deux parties de la pilule.
+const SEPARATOR_CLASS = "h-3.5 w-px shrink-0 bg-white/12";
 
 /**
  * Ce qui reçoit le focus dans la pilule : son bouton ou son lien, l'action de la
@@ -168,8 +178,8 @@ export function badgeError(ai: ScanState, locale: Locale): string | null {
 }
 
 /**
- * Clic sur « Analyser » ou « Identifier » : l'action `start` (`scan.scan` ou
- * `scan.identify`) si le compte a encore une analyse, la connexion s'il est
+ * Clic sur « Identifier » ou « Analyser le risque » : l'action `start`
+ * (`scan.identify` ou `scan.scan`) si le compte a encore une analyse, la connexion s'il est
  * déconnecté. `included` : l'action ne compte pas dans le quota (l'analyse
  * incluse avec l'identification, acceptée à 0 analyse restante). Accès inconnu ou déconnecté (R8 : toujours relu), l'accès est
  * d'abord lu, puis l'action suit la réponse. Un accès en erreur, ou sans
@@ -263,8 +273,8 @@ export function PricingLink({
 
 /**
  * Action de la pilule d'erreur : « Relancer » après une requête coupée en route,
- * le lien vers les formules sans abonnement, sinon l'action de repos (« Analyser »,
- * « Identifier »). Aucune si l'accès relu ne laisse plus d'analyse (`empty`) :
+ * le lien vers les formules sans abonnement, sinon l'action de l'étape en échec
+ * (« Identifier », « Analyser le risque »). Aucune si l'accès relu ne laisse plus d'analyse (`empty`) :
  * jamais un bouton qui ne ferait rien.
  */
 export function errorAction({
@@ -343,7 +353,7 @@ export function ErrorPill({
 				</span>
 			)}
 			{error !== null && action !== null && (
-				<span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-white/12" />
+				<span aria-hidden="true" className={SEPARATOR_CLASS} />
 			)}
 			{action}
 		</span>
@@ -351,19 +361,17 @@ export function ErrorPill({
 }
 
 /**
- * Cadre d'une pilule de la fiche : le conteneur (où `focusPill` cherche quoi
- * focaliser), ses descriptions masquées (`hidden`), puis la région annoncée de
- * sa ligne d'état, au plus une annonce toutes les 2 s (`announced`). `name`
- * (`data-pill`) distingue les deux pilules pour la galerie.
+ * Cadre de la pilule de la fiche : le conteneur (`data-pill`, où `focusPill`
+ * cherche quoi focaliser), ses descriptions masquées (`hidden`), puis la seule
+ * région annoncée de la pastille, sa ligne d'état ou son erreur, au plus une
+ * annonce toutes les 2 s (`announced`).
  */
 export function PillFrame({
-	name,
 	containerRef,
 	children,
 	hidden,
 	announced,
 }: {
-	name: "identify" | "analyze";
 	containerRef: RefObject<HTMLSpanElement | null>;
 	children: ReactNode;
 	hidden?: ReactNode;
@@ -373,7 +381,7 @@ export function PillFrame({
 		<>
 			<span
 				ref={containerRef}
-				data-pill={name}
+				data-pill=""
 				className="inline-flex max-w-full items-center align-middle"
 			>
 				{children}
@@ -386,37 +394,73 @@ export function PillFrame({
 	);
 }
 
+/** Ce que montre la pilule, dans l'ordre de priorité de `pillStep`. */
+type PillStep =
+	| "restoring"
+	| "result"
+	| "analyzing"
+	| "analysisError"
+	| "identified"
+	| "identifying"
+	| "identificationError"
+	| "rest";
+
 /**
- * La pilule « Analyser » de la fiche, seule à porter le résultat de l'analyse,
- * et toujours celui de l'IA. Selon l'état, dans cet ordre :
- * 1. résultat IA : point, niveau, score ; le clic ouvre ou ferme le panneau ;
- * 2. analyse en cours : le logo animé et la ligne d'état, même clic ;
- * 3. analyse en file derrière l'identification (`queued`) : le logo et « En
- *    attente de l'identification… », même clic ;
- * 4. erreur : le logo atténué, son texte (sauf panneau ouvert, qui l'affiche
- *    déjà), puis « Relancer » (analyse coupée en route) ou « Analyser », ni l'un
- *    ni l'autre si l'accès relu ne laisse plus d'analyse ;
- * 5. repos : le logo et « Analyser », nommé « Analyser avec l'IA » ; un lien vers
- *    les formules sans abonnement ; grisé sans analyse restante, mais focusable,
- *    la raison lue avec lui. Après une identification de l'utilisateur, décrit
- *    par « Inclus avec l'identification », et jamais grisé : l'analyse incluse
- *    est acceptée à 0 analyse restante.
- * Repos, analyse en cours et résultat sont un même `<button>` à la même place :
- * lancée au clavier, l'analyse garde le focus sur la pilule. Quand l'élément
- * change (erreur, action perdue, « Relancer »), `useKeepPillFocus` y remet le
- * focus si la pilule l'avait. Une erreur de l'identification ne s'affiche
- * jamais ici : elle est sur la pilule « Identifier ».
- * Rien tant que le magasin des résultats IA n'est pas lu (`restoring`) : une
- * fiche déjà analysée affiche directement son résultat, sans « Analyser » avant.
- * L'analyse locale (règles) n'est jamais affichée : elle part seulement avec la
- * demande, comme contexte pour l'IA.
+ * État affiché par la pilule. L'analyse du risque passe avant l'identification :
+ * lancée, elle refait l'identification côté serveur (servie par le cache), et
+ * la pilule montre l'analyse en cours, jamais « Identifier ».
+ */
+function pillStep(scan: AiScan): PillStep {
+	const { ai, identification } = scan;
+	if (scan.restoring) return "restoring";
+	if (shownResult(ai)) return "result";
+	if (ai.status === "loading") return "analyzing";
+	if (ai.status === "error") return "analysisError";
+	if (identification.status === "done") return "identified";
+	if (identification.status === "loading") return "identifying";
+	if (identification.status === "error") return "identificationError";
+	return "rest";
+}
+
+/**
+ * La pilule unique de la fiche : l'identification, puis l'analyse du risque à
+ * la demande. Selon l'état (`pillStep`), dans cet ordre :
+ * 1. lecture du magasin des résultats (`restoring`) : rien, pour qu'une fiche
+ *    déjà analysée affiche directement son résultat ;
+ * 2. résultat du risque : point, niveau, score ; le clic ouvre ou ferme le
+ *    panneau ;
+ * 3. analyse du risque en cours : le logo animé, « {référence courte} · {ligne
+ *    d'état} » (la ligne seule sans référence), même clic ;
+ * 4. analyse du risque en échec : le logo atténué, son texte (sauf panneau
+ *    ouvert, qui l'affiche déjà), puis « Relancer » (analyse coupée en route) ou
+ *    « Analyser le risque » ;
+ * 5. produit identifié : glyphe, référence courte (ou « A ou B ? »), niveau et
+ *    pourcentage, ou « Produit non identifié », dans un bouton qui ouvre ou
+ *    ferme le panneau ; un séparateur ; l'action « Analyser le risque ». Décrite
+ *    par « Inclus avec l'identification » quand l'analyse est incluse (alors
+ *    acceptée à 0 analyse restante) ; grisée sans inclusion ni analyse
+ *    restante, mais focusable, la raison lue avec elle ; un lien vers les
+ *    formules sans abonnement ;
+ * 6. identification en cours : le logo animé et sa ligne d'état, même clic ;
+ * 7. identification en échec : comme l'erreur du risque, l'action étant
+ *    « Identifier » (ou « Relancer ») ;
+ * 8. repos : le logo et « Identifier », nommé « Identifier le produit » ; un
+ *    lien vers les formules sans abonnement ; grisé sans analyse restante.
+ * Chaque action passe par `onIdentify` ou `onAnalyze`, qui suivent les règles
+ * d'accès de `useLaunch` ; aucune couleur sémantique du risque avant le
+ * résultat. Repos et chargements sont un même `<button>` à la même place :
+ * lancée au clavier, l'étape garde le focus sur la pilule. Quand l'élément
+ * change (produit, erreur, action perdue), `useKeepPillFocus` y remet le focus
+ * si la pilule l'avait. L'analyse locale (règles) n'est jamais affichée : elle
+ * part seulement avec la demande, comme contexte pour l'IA.
  */
 export function BadgePill({
 	scan,
 	locale,
 	open,
 	onToggle,
-	onLaunch,
+	onIdentify,
+	onAnalyze,
 	pillRef,
 }: {
 	scan: AiScan;
@@ -424,7 +468,10 @@ export function BadgePill({
 	/** Panneau ouvert : l'erreur y est déjà affichée et annoncée. */
 	open: boolean;
 	onToggle(): void;
-	onLaunch(): void;
+	/** « Identifier » et « Relancer » d'une identification en échec. */
+	onIdentify(): void;
+	/** « Analyser le risque » et « Relancer » d'une analyse en échec. */
+	onAnalyze(): void;
 	/** Conteneur de la pilule : la fermeture du panneau y rend le focus (`focusPill`). */
 	pillRef?: RefObject<HTMLSpanElement | null>;
 }) {
@@ -435,22 +482,42 @@ export function BadgePill({
 	const scoreId = useId();
 	const reasonId = useId();
 	const includedId = useId();
-	const { ai, access, queued, analysisIncluded } = scan;
-	const shown = shownResult(ai);
-	// Analyse en cours : le logo animé et la ligne d'état du dernier événement.
-	const progress = ai.status === "loading" ? ai.progress : null;
-	const waitingLine =
-		!progress && queued ? contentText(locale, "identify.queued") : "";
-	const line = progress ? statusLine(progress, locale) : waitingLine;
+	const { ai, identification, access, analysisIncluded } = scan;
+	const step = pillStep(scan);
+	// Étape en cours : le logo animé et la ligne d'état de son dernier événement.
+	const progress =
+		step === "analyzing" && ai.status === "loading"
+			? ai.progress
+			: step === "identifying" && identification.status === "loading"
+				? identification.progress
+				: null;
+	const line = !progress
+		? ""
+		: step === "analyzing"
+			? statusLine(progress, locale)
+			: statusLine(progress, locale, "identify.start");
 	const waiting = useWaiting(progress?.lastAt ?? 0, progress !== null);
-	// Analyse en échec : son texte dans la pilule et dans la région annoncée,
-	// sauf panneau ouvert, qui l'affiche et l'annonce déjà (`role="alert"`).
-	const error = open ? null : badgeError(ai, locale);
+	// Étape en échec : son texte dans la pilule et dans la région annoncée, sauf
+	// panneau ouvert, qui l'affiche et l'annonce déjà (`role="alert"`).
+	const failed =
+		step === "analysisError" && ai.status === "error"
+			? ai.code
+			: step === "identificationError" && identification.status === "error"
+				? identification.code
+				: null;
+	const error = failed !== null && !open ? aiErrorText(locale, failed) : null;
 	const announced = useThrottled(line || error || "");
+	// Produit identifié : sa référence dans la pilule, et pendant l'analyse du risque.
+	const headline =
+		identification.status === "done"
+			? identificationHeadline(identification.result, locale)
+			: null;
 	const ariaLabel = contentText(locale, "badge.aria");
-	const launchLabel = contentText(locale, "ai.launch");
-	const launchText = contentText(locale, "ai.launchShort");
-	const empty = noScansLeft(access) && !analysisIncluded;
+	const identifyLabel = contentText(locale, "identify.launch");
+	const identifyText = contentText(locale, "identify.launchShort");
+	const analyzeText = contentText(locale, "ai.analyzeRisk");
+	const emptyIdentify = noScansLeft(access);
+	const emptyAnalyze = emptyIdentify && !analysisIncluded;
 	const reason = contentText(locale, "ai.noScansLeft");
 	const includedText = contentText(locale, "identify.included");
 	const noSubscription =
@@ -459,36 +526,43 @@ export function BadgePill({
 		access.status === "noSubscription";
 
 	let pill: ReactNode = null;
-	// Pilule de repos grisée : la raison, lue avec elle.
+	// Action grisée : la raison, lue avec elle.
 	let disabledReason = false;
-	// « Analyser » décrit par « Inclus avec l'identification ».
+	// « Analyser le risque » décrit par « Inclus avec l'identification ».
 	let included = false;
-	if (scan.restoring) {
-		// Lecture du magasin en cours : rien à cliquer.
-	} else if (shown) {
-		const style = LEVEL_STYLE[shown.level];
-		pill = (
-			<button
-				type="button"
-				aria-expanded={open}
-				aria-label={ariaLabel}
-				aria-describedby={`${levelId} ${scoreId}`}
-				onClick={onToggle}
-				className={ACTION_PILL_CLASS}
-			>
-				<span
-					aria-hidden="true"
-					className={`size-2 shrink-0 rounded-full ${style.dot}`}
-				/>
-				<span id={levelId}>{contentText(locale, LEVEL_KEY[shown.level])}</span>
-				<span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-white/12" />
-				<span id={scoreId} className="text-text-2 tabular-nums">
-					{shown.score}/100
-				</span>
-			</button>
-		);
-	} else if (progress || queued) {
-		// En file, rien ne tourne encore : le logo reste immobile.
+	const describedBy = () =>
+		[disabledReason ? reasonId : null, included ? includedId : null]
+			.filter((id) => id !== null)
+			.join(" ") || undefined;
+
+	if (step === "result") {
+		const shown = shownResult(ai);
+		if (shown) {
+			const style = LEVEL_STYLE[shown.level];
+			pill = (
+				<button
+					type="button"
+					aria-expanded={open}
+					aria-label={ariaLabel}
+					aria-describedby={`${levelId} ${scoreId}`}
+					onClick={onToggle}
+					className={ACTION_PILL_CLASS}
+				>
+					<span
+						aria-hidden="true"
+						className={`size-2 shrink-0 rounded-full ${style.dot}`}
+					/>
+					<span id={levelId}>
+						{contentText(locale, LEVEL_KEY[shown.level])}
+					</span>
+					<span aria-hidden="true" className={SEPARATOR_CLASS} />
+					<span id={scoreId} className="text-text-2 tabular-nums">
+						{shown.score}/100
+					</span>
+				</button>
+			);
+		}
+	} else if (step === "analyzing" || step === "identifying") {
 		pill = (
 			<button
 				type="button"
@@ -498,65 +572,156 @@ export function BadgePill({
 				onClick={onToggle}
 				className={ACTION_PILL_CLASS}
 			>
-				<Logo size={16} animated={progress !== null} className="shrink-0" />
+				<Logo size={16} animated className="shrink-0" />
+				{step === "analyzing" && headline && (
+					<>
+						<span data-reference="" className="min-w-0 truncate">
+							{headline.short}
+						</span>
+						<span aria-hidden="true" className="shrink-0 text-text-3">
+							·
+						</span>
+					</>
+				)}
 				<LiveLine text={line} waiting={waiting} />
 			</button>
 		);
-	} else if (ai.status === "error") {
+	} else if (step === "analysisError" && failed !== null) {
 		included = analysisIncluded;
 		pill = (
 			<ErrorPill
 				error={error}
 				action={errorAction({
-					code: ai.code,
-					empty,
+					code: failed,
+					empty: emptyAnalyze,
 					noSubscription,
-					onLaunch,
+					onLaunch: onAnalyze,
 					pricingUrl: scan.pricingUrl,
-					launchLabel,
-					launchText,
+					launchLabel: analyzeText,
+					launchText: analyzeText,
 					locale,
 					describedBy: included ? includedId : undefined,
 				})}
 			/>
 		);
-	} else if (noSubscription) {
+	} else if (step === "identified" && identification.status === "done") {
+		const label = headline
+			? `${headline.reference} · ${headline.level} ${headline.percent}`
+			: contentText(locale, "identify.none");
+		// « Identification : Steam Deck OLED · Sûr 95 % » : la référence entière.
+		const name = contentText(locale, "identify.name").replace(
+			"{name}",
+			() => label,
+		);
+		let action: ReactNode;
+		if (noSubscription)
+			action = (
+				<PricingLink
+					href={scan.pricingUrl}
+					label={analyzeText}
+					className={INLINE_ACTION_CLASS}
+				>
+					{analyzeText}
+				</PricingLink>
+			);
+		else {
+			disabledReason = emptyAnalyze;
+			included = analysisIncluded;
+			action = (
+				<button
+					type="button"
+					aria-disabled={emptyAnalyze ? true : undefined}
+					aria-describedby={describedBy()}
+					title={emptyAnalyze ? reason : included ? includedText : undefined}
+					onClick={onAnalyze}
+					className={INLINE_ACTION_CLASS}
+				>
+					{analyzeText}
+				</button>
+			);
+		}
+		pill = (
+			<span className={BADGE_PILL_CLASS}>
+				<button
+					type="button"
+					aria-expanded={open}
+					aria-label={name}
+					onClick={onToggle}
+					className={PRODUCT_CLASS}
+				>
+					{headline ? (
+						<>
+							<span data-glyph="" aria-hidden="true" className="shrink-0">
+								{headline.glyph}
+							</span>
+							<span data-reference="" className="min-w-0 truncate">
+								{headline.short}
+							</span>
+							<span aria-hidden="true" className="shrink-0 text-text-3">
+								·
+							</span>
+							<span data-level="" className="shrink-0 text-text-2">
+								{headline.level}{" "}
+								<span data-percent="" className="tabular-nums">
+									{headline.percent}
+								</span>
+							</span>
+						</>
+					) : (
+						<span className="min-w-0 truncate">{label}</span>
+					)}
+				</button>
+				<span aria-hidden="true" className={SEPARATOR_CLASS} />
+				{action}
+			</span>
+		);
+	} else if (step === "identificationError" && failed !== null) {
+		pill = (
+			<ErrorPill
+				error={error}
+				action={errorAction({
+					code: failed,
+					empty: emptyIdentify,
+					noSubscription,
+					onLaunch: onIdentify,
+					pricingUrl: scan.pricingUrl,
+					launchLabel: identifyLabel,
+					launchText: identifyText,
+					locale,
+				})}
+			/>
+		);
+	} else if (step === "rest" && noSubscription) {
 		pill = (
 			<PricingLink
 				href={scan.pricingUrl}
-				label={launchLabel}
+				label={identifyLabel}
 				className={ACTION_PILL_CLASS}
 			>
 				<Logo size={16} className="shrink-0" />
-				{launchText}
+				{identifyText}
 			</PricingLink>
 		);
-	} else {
-		disabledReason = empty;
-		included = analysisIncluded;
-		const describedBy = [
-			empty ? reasonId : null,
-			included ? includedId : null,
-		].filter((id) => id !== null);
+	} else if (step === "rest") {
+		disabledReason = emptyIdentify;
 		pill = (
 			<button
 				type="button"
-				aria-label={launchLabel}
-				aria-disabled={empty ? true : undefined}
-				aria-describedby={describedBy.join(" ") || undefined}
-				title={empty ? reason : included ? includedText : undefined}
-				onClick={onLaunch}
+				aria-label={identifyLabel}
+				aria-disabled={emptyIdentify ? true : undefined}
+				aria-describedby={describedBy()}
+				title={emptyIdentify ? reason : undefined}
+				onClick={onIdentify}
 				className={ACTION_PILL_CLASS}
 			>
 				<Logo size={16} className="shrink-0" />
-				{launchText}
+				{identifyText}
 			</button>
 		);
 	}
 
 	return (
 		<PillFrame
-			name="analyze"
 			containerRef={containerRef}
 			announced={announced}
 			hidden={

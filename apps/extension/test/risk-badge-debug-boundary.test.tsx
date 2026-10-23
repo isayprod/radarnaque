@@ -9,7 +9,7 @@ import { contentText } from "../lib/content-i18n";
 import type { Listing } from "../lib/listing/types";
 import type { BgResponse, ContentAccess } from "../lib/messages";
 import type { RiskReport } from "../lib/rules/score";
-import { debugAnalysis, sampleDebug } from "./helpers";
+import { debugAnalysis, sampleDebug, sampleIdentification } from "./helpers";
 
 /** Vrai : la section Debug échoue tant qu'une relance est en cours. */
 const failure = vi.hoisted(() => ({ whileRescanning: false }));
@@ -86,7 +86,10 @@ describe("RiskBadge : section Debug après une erreur de rendu", () => {
 				done: reply(),
 				cancel: () => {},
 			})),
-			identify: vi.fn<AiClient["identify"]>(),
+			identify: vi.fn<AiClient["identify"]>(() => ({
+				done: Promise.resolve({ ok: true, data: sampleIdentification }),
+				cancel: () => {},
+			})),
 			openLogin: vi.fn<AiClient["openLogin"]>(async () => ({
 				ok: true,
 				data: null,
@@ -94,8 +97,16 @@ describe("RiskBadge : section Debug après une erreur de rendu", () => {
 		};
 		const debugTitle = contentText("fr", "debug.title");
 		render(<RiskBadge report={low} listing={listing} locale="fr" ai={ai} />);
+		// Identification, puis « Analyser le risque ».
 		await user.click(
-			screen.getByRole("button", { name: contentText("fr", "ai.launch") }),
+			screen.getByRole("button", {
+				name: contentText("fr", "identify.launch"),
+			}),
+		);
+		await user.click(
+			await screen.findByRole("button", {
+				name: contentText("fr", "ai.analyzeRisk"),
+			}),
 		);
 		// Résultat affiché dans la pilule, puis panneau ouvert.
 		await vi.waitFor(() =>

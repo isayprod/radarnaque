@@ -133,7 +133,7 @@ describe("textes de la section IA", () => {
 		const expected: Record<string, string> = {
 			"ai.title": "Analyse IA",
 			"ai.run": "Lancer une analyse IA",
-			"ai.launch": "Analyser avec l'IA",
+			"ai.analyzeRisk": "Analyser le risque",
 			"ai.launchShort": "Analyser",
 			"ai.retry": "Relancer",
 			"ai.noScansLeft": "Plus d'analyses IA disponibles",
@@ -181,18 +181,23 @@ describe("textes de la section IA", () => {
 		expect(aiKeys("fr")).toEqual(Object.keys(expected).sort());
 	});
 
-	test("bouton de la pastille : nom accessible FR et NL, qui contient le texte visible", () => {
-		expect(contentText("nl", "ai.launch")).toBe("Analyseren met AI");
+	test("action de la pastille : « Analyser le risque » en FR et NL", () => {
+		expect(contentText("fr", "ai.analyzeRisk")).toBe("Analyser le risque");
+		expect(contentText("nl", "ai.analyzeRisk")).toBe("Risico analyseren");
 		expect(contentText("nl", "ai.noScansLeft")).toBe(
 			"Geen AI-analyses meer beschikbaar",
 		);
 		expect(contentText("nl", "ai.error.quota_exhausted")).toBe(
 			"Je hebt al je AI-analyses voor deze periode gebruikt.",
 		);
-		for (const locale of ["fr", "nl"] as const)
-			expect(contentText(locale, "ai.launch")).toContain(
-				contentText(locale, "ai.launchShort"),
-			);
+	});
+
+	test("plus de file d'attente ni de « Analyser avec l'IA » : clés retirées des deux langues", () => {
+		for (const locale of ["fr", "nl"] as const) {
+			const texts = CONTENT_TEXTS[locale] as Record<string, string>;
+			expect(texts["identify.queued"]).toBeUndefined();
+			expect(texts["ai.launch"]).toBeUndefined();
+		}
 	});
 
 	test("ai.remaining garde {count} dans les deux langues", () => {

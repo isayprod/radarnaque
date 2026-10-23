@@ -22,7 +22,10 @@ import { createAccessCache, RECHECK_MS } from "../lib/content/access-policy";
 import type { AiClient } from "../lib/content/ai-client";
 import {
 	type AiResultStore,
+	createAiResultStore,
 	listingFingerprint,
+	type StorageAreaLike,
+	type StoredAiEntry,
 	type StoredAiResult,
 } from "../lib/content/ai-results";
 import { aiErrorText, contentText } from "../lib/content-i18n";
@@ -70,12 +73,22 @@ let ai: AiClient & {
 	identify: ReturnType<typeof vi.fn<AiClient["identify"]>>;
 	openLogin: ReturnType<typeof vi.fn<AiClient["openLogin"]>>;
 };
+/** Issue d'une identification simulée, réglée par chaque test. */
+type IdentifyReply = (
+	req: ScanRequest,
+) => Promise<BgResponse<IdentificationResult>>;
 /** L'issue de chaque analyse (`done`), sans événement de progression. */
 let scanReply: ReturnType<typeof vi.fn<ScanReply>>;
+/** L'issue de chaque identification : Steam Deck OLED, sûr à 95 %. */
+let identifyReply: ReturnType<typeof vi.fn<IdentifyReply>>;
 beforeEach(() => {
 	scanReply = vi.fn<ScanReply>(async () => ({
 		ok: true,
 		data: sampleAnalysis,
+	}));
+	identifyReply = vi.fn<IdentifyReply>(async () => ({
+		ok: true,
+		data: sampleIdentification,
 	}));
 	ai = {
 		access: vi.fn<AiClient["access"]>(async () => ({ ok: true, data: active })),
@@ -83,7 +96,10 @@ beforeEach(() => {
 			done: scanReply(req),
 			cancel: () => {},
 		})),
-		identify: vi.fn<AiClient["identify"]>(),
+		identify: vi.fn<AiClient["identify"]>((req) => ({
+			done: identifyReply(req),
+			cancel: () => {},
+		})),
 		openLogin: vi.fn<AiClient["openLogin"]>(async () => ({
 			ok: true,
 			data: null,
@@ -131,18 +147,48 @@ const aiHigh: AnalysisResult = {
 	summary: { fr: "Arnaque probable.", nl: "Waarschijnlijk oplichting." },
 };
 
-const LAUNCH = contentText("fr", "ai.launch");
+const LAUNCH = contentText("fr", "ai.analyzeRisk");
+const IDENTIFY = contentText("fr", "identify.launch");
 const PANEL_CLOSE = contentText("fr", "panel.close");
-/** Pilule au repos : « Analyser », nommée « Analyser avec l'IA ». */
+/** Nom accessible de la partie produit de la pilule « Produit identifié ». */
+const SURE = "Identification : Steam Deck OLED · Sûr 95 %";
+/** Action « Analyser le risque » de la pilule (produit identifié, ou erreur). */
 const launch = () => screen.getByRole("button", { name: LAUNCH });
 const queryLaunch = () => screen.queryByRole("button", { name: LAUNCH });
-/** Tous les contrôles de lancement de la pastille (bouton ou lien). */
+const findLaunch = () => screen.findByRole("button", { name: LAUNCH });
+/** Tous les contrôles « Analyser le risque » de la pastille (bouton ou lien). */
 const launchControls = (locale: "fr" | "nl" = "fr") => [
 	...screen.queryAllByRole("button", {
-		name: contentText(locale, "ai.launch"),
+		name: contentText(locale, "ai.analyzeRisk"),
 	}),
-	...screen.queryAllByRole("link", { name: contentText(locale, "ai.launch") }),
+	...screen.queryAllByRole("link", {
+		name: contentText(locale, "ai.analyzeRisk"),
+	}),
 ];
+/**
+ * Pilule au repos : « Identifier », nommée « Identifier le produit » (le
+ * panneau a son propre bouton du même nom).
+ */
+const identifyButton = () => {
+	const [button, ...others] = screen
+		.getAllByRole("button", { name: IDENTIFY })
+		.filter((element) => !element.closest("[role='dialog']"));
+	if (!button || others.length > 0)
+		throw new Error("une seule pilule « Identifier » attendue");
+	return button;
+};
+/** Tous les contrôles « Identifier » de la pilule (bouton ou lien), hors panneau. */
+const identifyControls = (locale: "fr" | "nl" = "fr") =>
+	[
+		...screen.queryAllByRole("button", {
+			name: contentText(locale, "identify.launch"),
+		}),
+		...screen.queryAllByRole("link", {
+			name: contentText(locale, "identify.launch"),
+		}),
+	].filter((element) => !element.closest("[role='dialog']"));
+/** Partie produit de la pilule : elle ouvre ou ferme le panneau. */
+const product = () => screen.getByRole("button", { name: SURE });
 /** Pilule d'une analyse en cours ou de son résultat : elle ouvre le panneau. */
 const toggle = () => screen.getByRole("button", { name: /Radarnaque/ });
 const findToggle = () => screen.findByRole("button", { name: /Radarnaque/ });
@@ -166,19 +212,77 @@ const storeWith = (entries: Record<string, StoredAiResult>): AiResultStore => ({
 	forgetIdentifiedByUser: async () => {},
 });
 
-/** Lance l'analyse depuis la pilule et attend son résultat (`score`/100). */
+/** Identification faite par l'utilisateur, gardée pour `l` (sans analyse). */
+const identifiedEntry = (l: Listing = listing, byUser = true) => ({
+	[`${l.site}|${l.externalId}`]: {
+		result: null,
+		identification: sampleIdentification,
+		identifiedByUser: byUser,
+		fingerprint: listingFingerprint(l),
+		storedAt: 1,
+	},
+});
+
+/** Identifie depuis la pilule au repos ; rend l'action « Analyser le risque ». */
+async function identifyFirst(user: ReturnType<typeof userEvent.setup>) {
+	await user.click(identifyButton());
+	return findLaunch();
+}
+
+/**
+ * Pastille déjà identifiée (identification reprise du magasin, faite par
+ * l'utilisateur sauf `byUser: false`) : l'action « Analyser le risque » est
+ * affichée, aucun accès n'a encore été lu.
+ */
+async function renderIdentified({
+	byUser = true,
+	page = false,
+	...props
+}: Partial<Parameters<typeof RiskBadge>[0]> & {
+	byUser?: boolean;
+	/** Un bouton « page » de la page hôte avant la pastille. */
+	page?: boolean;
+} = {}) {
+	const badge = (
+		<RiskBadge
+			report={high}
+			listing={listing}
+			locale="fr"
+			ai={ai}
+			aiResults={storeWith(identifiedEntry(listing, byUser))}
+			{...props}
+		/>
+	);
+	const view = render(
+		page ? (
+			<div>
+				<button type="button">page</button>
+				{badge}
+			</div>
+		) : (
+			badge
+		),
+	);
+	await findLaunch();
+	return view;
+}
+
+/**
+ * Lance l'analyse du risque depuis la pilule (identifie d'abord si besoin) et
+ * attend son résultat (`score`/100).
+ */
 async function launchToResult(
 	user: ReturnType<typeof userEvent.setup>,
 	score = sampleAnalysis.score,
 ) {
-	await user.click(launch());
+	await user.click(queryLaunch() ?? (await identifyFirst(user)));
 	await vi.waitFor(() =>
 		expect(toggle().textContent).toContain(`${score}/100`),
 	);
 }
 
 describe("RiskBadge", () => {
-	test("au repos : une seule pilule « Analyser », aucun niveau ni score local", () => {
+	test("au repos : une seule pilule « Identifier », aucun niveau ni score local", () => {
 		const { container } = render(
 			<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />,
 		);
@@ -189,14 +293,20 @@ describe("RiskBadge", () => {
 			container.querySelector(".bg-danger, .bg-warning, .bg-success"),
 		).toBeNull();
 		expect(screen.queryByRole("button", { name: /Radarnaque/ })).toBeNull();
-		expect(launchControls()).toHaveLength(1);
-		expect(launch().textContent).toBe(contentText("fr", "ai.launchShort"));
-		expect(launch().getAttribute("type")).toBe("button");
-		expect(launch().hasAttribute("aria-expanded")).toBe(false);
+		expect(identifyControls()).toHaveLength(1);
+		expect(launchControls()).toHaveLength(0);
+		expect(identifyButton().textContent).toBe(
+			contentText("fr", "identify.launchShort"),
+		);
+		expect(identifyButton().getAttribute("type")).toBe("button");
+		expect(identifyButton().hasAttribute("aria-expanded")).toBe(false);
+		// Une seule pilule : un seul conteneur et une seule région annoncée.
+		expect(container.querySelectorAll("[data-pill]")).toHaveLength(1);
+		expect(screen.getAllByRole("status")).toHaveLength(1);
 		expect(screen.queryByRole("dialog")).toBeNull();
 	});
 
-	test("au repos, le clic lance l'analyse (accès actif en cache) sans ouvrir de panneau", () => {
+	test("au repos, le clic lance l'identification (accès actif en cache) sans ouvrir de panneau", () => {
 		render(
 			<RiskBadge
 				report={high}
@@ -206,8 +316,9 @@ describe("RiskBadge", () => {
 				accessCache={cached(active)}
 			/>,
 		);
-		fireEvent.click(launch());
-		expect(ai.scan).toHaveBeenCalledTimes(1);
+		fireEvent.click(identifyButton());
+		expect(ai.identify).toHaveBeenCalledTimes(1);
+		expect(ai.scan).not.toHaveBeenCalled();
 		expect(ai.access).not.toHaveBeenCalled();
 		expect(screen.queryByRole("dialog")).toBeNull();
 	});
@@ -311,7 +422,10 @@ describe("RiskBadge", () => {
 			<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />,
 			{ container },
 		);
-		await user.click(within(container).getByRole("button", { name: LAUNCH }));
+		await user.click(within(container).getByRole("button", { name: IDENTIFY }));
+		await user.click(
+			await within(container).findByRole("button", { name: LAUNCH }),
+		);
 		await user.click(
 			await within(container).findByRole("button", { name: /Radarnaque/ }),
 		);
@@ -329,10 +443,19 @@ describe("RiskBadge", () => {
 		scanReply.mockResolvedValue({ ok: true, data: aiHigh });
 		render(<RiskBadge report={high} listing={listing} locale="nl" ai={ai} />);
 		const button = screen.getByRole("button", {
-			name: contentText("nl", "ai.launch"),
+			name: contentText("nl", "identify.launch"),
 		});
-		expect(button.textContent).toBe("Analyseren");
+		expect(button.textContent).toBe("Identificeren");
 		await user.click(button);
+		const action = await screen.findByRole("button", {
+			name: "Risico analyseren",
+		});
+		expect(
+			screen.getByRole("button", {
+				name: "Identificatie: Steam Deck OLED · Zeker 95%",
+			}),
+		).toBeTruthy();
+		await user.click(action);
 		await vi.waitFor(() => expect(toggle().textContent).toContain("82/100"));
 		expect(toggle().textContent).toContain("Hoog risico");
 		expect(toggle().getAttribute("aria-label")).toBe(
@@ -399,7 +522,14 @@ describe("RiskBadge : panneau", () => {
 			/>,
 		);
 		await user.click(
-			screen.getByRole("button", { name: contentText(locale, "ai.launch") }),
+			screen.getByRole("button", {
+				name: contentText(locale, "identify.launch"),
+			}),
+		);
+		await user.click(
+			await screen.findByRole("button", {
+				name: contentText(locale, "ai.analyzeRisk"),
+			}),
 		);
 		await vi.waitFor(() => expect(toggle().textContent).toContain("82/100"));
 		await user.click(toggle());
@@ -525,7 +655,7 @@ describe("RiskBadge : panneau", () => {
 				accessCache={cached(active)}
 			/>,
 		);
-		await user.click(launch());
+		await user.click(await identifyFirst(user));
 		await user.click(await findToggle());
 		const dialog = screen.getByRole("dialog");
 		expect(dialog.style.left).toBe("-168px");
@@ -567,16 +697,20 @@ describe("RiskBadge : panneau", () => {
 		expect(
 			within(dialog).getByText("Risque élevé").closest("[data-verdict]"),
 		).not.toBeNull();
-		const fill = dialog.querySelector("[role='presentation']")
+		// La barre de la section IA, après celle de l'identification.
+		const analysis = within(dialog).getAllByRole("region").at(-1);
+		const fill = analysis?.querySelector("[role='presentation']")
 			?.firstElementChild as HTMLElement | null;
 		expect(fill?.style.width).toBe("82%");
 	});
 });
 
 describe("RiskBadge : analyse IA", () => {
-	/** Bouton « Lancer une analyse IA » du panneau, affiché une fois l'accès chargé. */
-	const findRun = () =>
-		screen.findByRole("button", { name: contentText("fr", "ai.run") });
+	/** Bouton « Identifier le produit » du panneau, affiché une fois l'accès chargé. */
+	const findRun = async () =>
+		within(await screen.findByRole("dialog")).findByRole("button", {
+			name: IDENTIFY,
+		});
 	/** Déconnecté, popup de connexion impossible : le clic ouvre le panneau. */
 	const signedOutWithoutPopup = () => {
 		ai.access.mockImplementation(async () => ({
@@ -608,27 +742,36 @@ describe("RiskBadge : analyse IA", () => {
 	test("la demande d'analyse contient toujours signals et rulesVersion du rapport local", async () => {
 		const user = userEvent.setup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(launch());
+		await user.click(await identifyFirst(user));
 		await vi.waitFor(() => expect(ai.scan).toHaveBeenCalledTimes(1));
-		expect(ai.scan).toHaveBeenCalledWith(
-			{
-				listing,
-				signals: high.signals,
-				rulesVersion: high.rulesVersion,
-				trigger: "button",
-				partial: false,
-			},
-			expect.any(Function),
-		);
+		const request = {
+			listing,
+			signals: high.signals,
+			rulesVersion: high.rulesVersion,
+			trigger: "button",
+			partial: false,
+		};
+		expect(ai.scan).toHaveBeenCalledWith(request, expect.any(Function));
+		// L'identification part avec la même demande.
+		expect(ai.identify).toHaveBeenCalledWith(request, expect.any(Function));
 	});
 
-	test("double clic sur « Analyser » : une seule requête", async () => {
+	test("double clic sur « Analyser le risque » : une seule requête", async () => {
 		const user = userEvent.setup();
 		scanReply.mockImplementation(() => new Promise(() => {}));
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.dblClick(launch());
+		await user.dblClick(await identifyFirst(user));
 		await findToggle();
 		expect(ai.scan).toHaveBeenCalledTimes(1);
+	});
+
+	test("double clic sur « Identifier » : une seule identification", async () => {
+		const user = userEvent.setup();
+		identifyReply.mockImplementation(() => new Promise(() => {}));
+		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await user.dblClick(identifyButton());
+		await findToggle();
+		expect(ai.identify).toHaveBeenCalledTimes(1);
 	});
 
 	test("R3 : session expirée pendant un scan, l'accès relu (signedOut) ne laisse que la connexion", async () => {
@@ -642,7 +785,7 @@ describe("RiskBadge : analyse IA", () => {
 				answer = resolve;
 			}),
 		);
-		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await renderIdentified();
 		await user.click(launch());
 		// Analyse en cours : le panneau est ouvert sur son déroulé.
 		await user.click(await findToggle());
@@ -661,7 +804,7 @@ describe("RiskBadge : analyse IA", () => {
 		).toHaveLength(1);
 	});
 
-	test("R8 : accès en erreur, le clic ouvre le panneau ; nouvel essai après 30 s seulement, puis le bouton d'analyse", async () => {
+	test("R8 : accès en erreur, le clic ouvre le panneau ; nouvel essai après 30 s seulement, puis le bouton d'identification", async () => {
 		const user = userEvent.setup();
 		let clock = 0;
 		const accessCache = createAccessCache(() => clock);
@@ -678,18 +821,19 @@ describe("RiskBadge : analyse IA", () => {
 				accessCache={accessCache}
 			/>,
 		);
-		await user.click(launch());
+		await user.click(identifyButton());
 		await screen.findByText(aiErrorText("fr", "background_unavailable"));
 		expect(screen.getByRole("dialog")).toBeTruthy();
 		await user.keyboard("{Escape}");
-		await user.click(launch());
+		await user.click(identifyButton());
 		expect(screen.getByRole("dialog")).toBeTruthy();
 		expect(ai.access).toHaveBeenCalledTimes(1);
 		await user.keyboard("{Escape}");
 		clock += RECHECK_MS;
-		await user.click(launch());
+		await user.click(identifyButton());
 		await findRun();
 		expect(ai.access).toHaveBeenCalledTimes(2);
+		expect(ai.identify).not.toHaveBeenCalled();
 		expect(ai.scan).not.toHaveBeenCalled();
 	});
 
@@ -697,7 +841,7 @@ describe("RiskBadge : analyse IA", () => {
 		const user = userEvent.setup();
 		signedOutWithoutPopup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(launch());
+		await user.click(identifyButton());
 		await screen.findByText(contentText("fr", "ai.loginHint"));
 		const reads = ai.access.mock.calls.length;
 
@@ -715,7 +859,7 @@ describe("RiskBadge : analyse IA", () => {
 		const user = userEvent.setup();
 		signedOutWithoutPopup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(launch());
+		await user.click(identifyButton());
 		await screen.findByText(contentText("fr", "ai.loginHint"));
 		const reads = ai.access.mock.calls.length;
 		ai.access.mockImplementation(async () => ({ ok: true, data: active }));
@@ -732,22 +876,23 @@ describe("RiskBadge : analyse IA", () => {
 		const user = userEvent.setup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
 		await launchToResult(user);
-		// Lu au clic, puis relu après le scan.
-		await vi.waitFor(() => expect(ai.access).toHaveBeenCalledTimes(2));
+		// Lu au clic sur « Identifier », puis relu après l'identification et
+		// après l'analyse.
+		await vi.waitFor(() => expect(ai.access).toHaveBeenCalledTimes(3));
 		await user.click(toggle());
 		act(() => {
 			window.dispatchEvent(new Event("focus"));
 		});
 		await user.click(toggle());
 		await user.click(toggle());
-		expect(ai.access).toHaveBeenCalledTimes(2);
+		expect(ai.access).toHaveBeenCalledTimes(3);
 	});
 
 	test("panneau fermé : focus ne relit pas l'accès", async () => {
 		const user = userEvent.setup();
 		signedOutWithoutPopup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(launch());
+		await user.click(identifyButton());
 		await screen.findByText(contentText("fr", "ai.loginHint"));
 		await user.keyboard("{Escape}");
 		const reads = ai.access.mock.calls.length;
@@ -768,7 +913,7 @@ describe("RiskBadge : analyse IA", () => {
 				ai={ai}
 			/>,
 		);
-		await user.click(launch());
+		await user.click(identifyButton());
 		await screen.findByText(contentText("fr", "ai.loginHint"));
 		ai.access.mockImplementation(async () => ({ ok: true, data: active }));
 		act(() => {
@@ -783,7 +928,8 @@ describe("RiskBadge : analyse IA", () => {
 		expect(screen.queryByText(/photos/)).toBeNull();
 	});
 
-	test("description modifiée puis clic : la requête porte la nouvelle description", () => {
+	test("description modifiée puis clic : les requêtes portent la nouvelle description", async () => {
+		const user = userEvent.setup();
 		const accessCache = cached(active);
 		const view = render(
 			<RiskBadge
@@ -803,7 +949,10 @@ describe("RiskBadge : analyse IA", () => {
 				accessCache={accessCache}
 			/>,
 		);
-		fireEvent.click(launch());
+		await user.click(await identifyFirst(user));
+		expect(ai.identify.mock.calls[0]?.[0].listing.description).toBe(
+			"Description complétée.",
+		);
 		expect(ai.scan.mock.calls[0]?.[0].listing.description).toBe(
 			"Description complétée.",
 		);
@@ -817,7 +966,9 @@ describe("RiskBadge : analyse IA", () => {
 		});
 		render(<RiskBadge report={high} listing={listing} locale="nl" ai={ai} />);
 		await user.click(
-			screen.getByRole("button", { name: contentText("nl", "ai.launch") }),
+			screen.getByRole("button", {
+				name: contentText("nl", "identify.launch"),
+			}),
 		);
 		const link = await screen.findByRole("link", {
 			name: contentText("nl", "ai.pricing"),
@@ -826,6 +977,7 @@ describe("RiskBadge : analyse IA", () => {
 			"http://localhost:8080/pricing/?lang=nl",
 		);
 		expect(screen.getByRole("dialog")).toBeTruthy();
+		expect(ai.identify).not.toHaveBeenCalled();
 		expect(ai.scan).not.toHaveBeenCalled();
 	});
 
@@ -833,7 +985,7 @@ describe("RiskBadge : analyse IA", () => {
 		const user = userEvent.setup();
 		signedOutWithoutPopup();
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(launch());
+		await user.click(identifyButton());
 		await screen.findByText(contentText("fr", "ai.loginFallback"));
 		await user.click(
 			screen.getByRole("button", { name: contentText("fr", "ai.login") }),
@@ -864,18 +1016,18 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		act(() => onEvent(e));
 	};
 	const statusLineEl = () => toggle().querySelector(".radarnaque-status");
-	/** Région annoncée de « Analyser » : après celle de « Identifier ». */
-	const region = () => screen.getAllByRole("status").at(-1) as HTMLElement;
+	/** La seule région annoncée de la pastille. */
+	const region = () => screen.getByRole("status");
 	const announced = () => region().textContent;
 
 	test("launch button starts scan without opening panel", async () => {
 		const user = userEvent.setup();
 		scanReply.mockImplementation(() => new Promise(() => {}));
-		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await renderIdentified();
 		expect(ai.access).not.toHaveBeenCalled();
 		const button = launch();
 		expect(button.getAttribute("type")).toBe("button");
-		expect(button.textContent).toBe("Analyser");
+		expect(button.textContent).toBe("Analyser le risque");
 		await user.click(button);
 		// Accès inconnu : lu d'abord, puis l'analyse part. Elle part dans un effet,
 		// après la réponse de l'accès (hors `act`) : `ai.scan` est appelé avant le
@@ -888,9 +1040,12 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		expect(screen.queryByRole("dialog")).toBeNull();
 		expect(toggle().getAttribute("aria-expanded")).toBe("false");
 		expect(toggle().getAttribute("aria-busy")).toBe("true");
-		// Pendant l'analyse, la ligne en direct remplace « Analyser ».
+		// Pendant l'analyse, la ligne en direct remplace le produit et l'action.
 		expect(queryLaunch()).toBeNull();
+		expect(screen.queryByRole("button", { name: SURE })).toBeNull();
 		expect(toggle().textContent).not.toContain("90/100");
+		// La référence du produit reste devant la ligne d'état.
+		expect(toggle().textContent).toContain("Steam Deck OLED");
 	});
 
 	test("analyse en cours : le clic ouvre le panneau avec le déroulé", async () => {
@@ -905,7 +1060,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 				accessCache={cached(active)}
 			/>,
 		);
-		await user.click(launch());
+		await user.click(await identifyFirst(user));
 		emit(searchEvent);
 		await user.click(toggle());
 		expect(toggle().getAttribute("aria-expanded")).toBe("true");
@@ -928,7 +1083,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		expect(queryLaunch()).toBeNull();
 	});
 
-	test("launch button when signed out opens login", async () => {
+	test("identify button when signed out opens login", async () => {
 		const user = userEvent.setup();
 		// Chaque réponse du service worker est un objet neuf (clone du message).
 		ai.access.mockImplementation(async () => ({
@@ -936,17 +1091,31 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 			data: { status: "signedOut" },
 		}));
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(launch());
+		await user.click(identifyButton());
 		await vi.waitFor(() => expect(ai.openLogin).toHaveBeenCalledTimes(1));
+		expect(ai.identify).not.toHaveBeenCalled();
 		expect(ai.scan).not.toHaveBeenCalled();
 		expect(screen.queryByRole("dialog")).toBeNull();
 		// Déjà connu signedOut : relu (R8), puis la connexion à nouveau.
-		await user.click(launch());
+		await user.click(identifyButton());
 		await vi.waitFor(() => expect(ai.openLogin).toHaveBeenCalledTimes(2));
 		expect(ai.access).toHaveBeenCalledTimes(2);
 	});
 
-	test("launch disabled when no scans left", async () => {
+	test("« Analyser le risque » déconnecté : la connexion, sans analyse", async () => {
+		const user = userEvent.setup();
+		ai.access.mockImplementation(async () => ({
+			ok: true,
+			data: { status: "signedOut" },
+		}));
+		await renderIdentified();
+		await user.click(launch());
+		await vi.waitFor(() => expect(ai.openLogin).toHaveBeenCalledTimes(1));
+		expect(ai.scan).not.toHaveBeenCalled();
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
+	test("identify disabled when no scans left", async () => {
 		const user = userEvent.setup();
 		const empty: ContentAccess = { ...active, remaining: { scans: 0 } };
 		render(
@@ -958,7 +1127,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 				accessCache={cached(empty)}
 			/>,
 		);
-		const button = launch();
+		const button = identifyButton();
 		// Grisé mais focusable : la raison est lue avec le bouton.
 		expect(button.hasAttribute("disabled")).toBe(false);
 		expect(button.getAttribute("aria-disabled")).toBe("true");
@@ -970,21 +1139,21 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		button.focus();
 		expect(document.activeElement).toBe(button);
 		await user.click(button);
-		expect(ai.scan).not.toHaveBeenCalled();
+		expect(ai.identify).not.toHaveBeenCalled();
 		expect(ai.access).not.toHaveBeenCalled();
 		cleanup();
 
-		// Accès inconnu au clic : lu, puis grisé sans analyse.
+		// Accès inconnu au clic : lu, puis grisé sans identification.
 		ai.access.mockResolvedValue({ ok: true, data: empty });
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(launch());
+		await user.click(identifyButton());
 		await vi.waitFor(() =>
-			expect(launch().getAttribute("aria-disabled")).toBe("true"),
+			expect(identifyButton().getAttribute("aria-disabled")).toBe("true"),
 		);
-		expect(ai.scan).not.toHaveBeenCalled();
+		expect(ai.identify).not.toHaveBeenCalled();
 	});
 
-	test("accès relu pendant que le panneau est ouvert (signedOut → sans abonnement) : la pilule devient le lien vers les formules, un seul contrôle de lancement", async () => {
+	test("accès relu pendant que le panneau est ouvert (signedOut → sans abonnement) : la pilule devient le lien vers les formules, un seul contrôle « Identifier »", async () => {
 		const user = userEvent.setup();
 		ai.access.mockImplementation(async () => ({
 			ok: true,
@@ -995,9 +1164,9 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 			error: { code: "popup_unavailable" },
 		});
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(launch());
+		await user.click(identifyButton());
 		await screen.findByText(contentText("fr", "ai.loginFallback"));
-		expect(launchControls()).toHaveLength(1);
+		expect(identifyControls()).toHaveLength(1);
 
 		// Connexion faite dans la popup, sans abonnement ; la page reprend le focus.
 		ai.access.mockImplementation(async () => ({
@@ -1007,11 +1176,10 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		act(() => {
 			window.dispatchEvent(new Event("focus"));
 		});
-		const link = await screen.findByRole("link", { name: LAUNCH });
+		const link = await screen.findByRole("link", { name: IDENTIFY });
 		expect(link.getAttribute("href")).toMatch(/\/pricing\/\?lang=fr$/);
-		expect(link.textContent).toBe(contentText("fr", "ai.launchShort"));
-		expect(launchControls()).toHaveLength(1);
-		expect(queryLaunch()).toBeNull();
+		expect(link.textContent).toBe(contentText("fr", "identify.launchShort"));
+		expect(identifyControls()).toHaveLength(1);
 		// Le panneau, toujours ouvert, dit pourquoi.
 		expect(screen.getByRole("dialog").textContent).toContain(
 			aiErrorText("fr", "no_active_subscription"),
@@ -1029,7 +1197,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 			error: { code: "popup_unavailable" },
 		});
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(launch());
+		await user.click(identifyButton());
 		await screen.findByText(contentText("fr", "ai.loginFallback"));
 
 		ai.access.mockImplementation(async () => ({
@@ -1040,9 +1208,9 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 			window.dispatchEvent(new Event("focus"));
 		});
 		await vi.waitFor(() =>
-			expect(launch().getAttribute("aria-disabled")).toBe("true"),
+			expect(identifyButton().getAttribute("aria-disabled")).toBe("true"),
 		);
-		const button = launch();
+		const button = identifyButton();
 		expect(button.hasAttribute("disabled")).toBe(false);
 		const reason = contentText("fr", "ai.noScansLeft");
 		expect(button.getAttribute("title")).toBe(reason);
@@ -1052,9 +1220,9 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		).toBe(reason);
 		button.focus();
 		expect(document.activeElement).toBe(button);
-		expect(launchControls()).toHaveLength(1);
+		expect(identifyControls()).toHaveLength(1);
 		await user.click(button);
-		expect(ai.scan).not.toHaveBeenCalled();
+		expect(ai.identify).not.toHaveBeenCalled();
 	});
 
 	test("analysis_failed lancée depuis la pastille : son texte, annoncé, et le bouton de lancement", async () => {
@@ -1063,21 +1231,13 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 			ok: false,
 			error: { code: "analysis_failed" },
 		});
-		render(
-			<RiskBadge
-				report={high}
-				listing={listing}
-				locale="fr"
-				ai={ai}
-				accessCache={cached(active)}
-			/>,
-		);
+		await renderIdentified({ accessCache: cached(active) });
 		await user.click(launch());
 		const text = aiErrorText("fr", "analysis_failed");
 		expect(await screen.findByText(text)).toBeTruthy();
 		expect(screen.queryByRole("dialog")).toBeNull();
 		await vi.waitFor(() => expect(announced()).toBe(text), { timeout: 3_000 });
-		// Pas « Relancer » : le bouton de lancement, qui relance l'analyse.
+		// Pas « Relancer » : « Analyser le risque », qui relance l'analyse.
 		expect(screen.queryByRole("button", { name: "Relancer" })).toBeNull();
 		expect(launchControls()).toHaveLength(1);
 		await user.click(launch());
@@ -1094,15 +1254,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 			ok: true,
 			data: { ...active, remaining: { scans: 0 } },
 		}));
-		render(
-			<RiskBadge
-				report={high}
-				listing={listing}
-				locale="fr"
-				ai={ai}
-				accessCache={cached(active)}
-			/>,
-		);
+		await renderIdentified({ accessCache: cached(active) });
 		await user.click(launch());
 		expect(
 			await screen.findByText(aiErrorText("fr", "quota_exhausted")),
@@ -1112,7 +1264,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		await vi.waitFor(() => expect(queryLaunch()).toBeNull());
 	});
 
-	test("analyse interrompue, accès relu à 0 : ni « Relancer » muet, ni bouton de lancement", async () => {
+	test("analyse interrompue, accès relu à 0 sans inclusion : ni « Relancer » muet, ni bouton de lancement", async () => {
 		const user = userEvent.setup();
 		scanReply.mockResolvedValueOnce({
 			ok: false,
@@ -1122,15 +1274,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 			ok: true,
 			data: { ...active, remaining: { scans: 0 } },
 		}));
-		render(
-			<RiskBadge
-				report={high}
-				listing={listing}
-				locale="fr"
-				ai={ai}
-				accessCache={cached(active)}
-			/>,
-		);
+		await renderIdentified({ accessCache: cached(active), byUser: false });
 		await user.click(launch());
 		expect(
 			await screen.findByText(aiErrorText("fr", "stream_interrupted")),
@@ -1150,15 +1294,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 				answer = resolve;
 			}),
 		);
-		render(
-			<RiskBadge
-				report={high}
-				listing={listing}
-				locale="fr"
-				ai={ai}
-				accessCache={cached(active)}
-			/>,
-		);
+		await renderIdentified({ accessCache: cached(active) });
 		await user.click(launch());
 		await user.click(toggle());
 		const dialog = screen.getByRole("dialog");
@@ -1189,7 +1325,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 			error: { code: "popup_unavailable" },
 		});
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(launch());
+		await user.click(identifyButton());
 		const fallback = contentText("fr", "ai.loginFallback");
 		expect(await screen.findByText(fallback)).toBeTruthy();
 		expect(screen.getByRole("dialog")).toBeTruthy();
@@ -1197,7 +1333,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		// Déjà su impossible : le panneau rouvre dès le clic.
 		await user.keyboard("{Escape}");
 		expect(screen.queryByRole("dialog")).toBeNull();
-		await user.click(launch());
+		await user.click(identifyButton());
 		expect(await screen.findByText(fallback)).toBeTruthy();
 	});
 
@@ -1211,24 +1347,16 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 				accessCache={cached({ status: "noSubscription" })}
 			/>,
 		);
-		const link = screen.getByRole("link", { name: "Analyseren met AI" });
+		const link = screen.getByRole("link", { name: "Product identificeren" });
 		expect(link.getAttribute("href")).toMatch(/\/pricing\/\?lang=nl$/);
 		expect(link.getAttribute("target")).toBe("_blank");
 		expect(link.getAttribute("rel")).toBe("noopener noreferrer");
-		expect(launchControls("nl")).toHaveLength(1);
+		expect(identifyControls("nl")).toHaveLength(1);
 	});
 
-	test("live line follows last event", () => {
+	test("live line follows last event", async () => {
 		scanReply.mockImplementation(() => new Promise(() => {}));
-		render(
-			<RiskBadge
-				report={high}
-				listing={listing}
-				locale="fr"
-				ai={ai}
-				accessCache={cached(active)}
-			/>,
-		);
+		await renderIdentified({ accessCache: cached(active) });
 		fireEvent.click(launch());
 		expect(statusLineEl()?.textContent).toBe("Démarrage de l'analyse");
 		emit({ type: "stage", stage: "photos", count: 3 });
@@ -1242,18 +1370,11 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		);
 	});
 
-	test("waiting class after 4s", () => {
-		vi.useFakeTimers();
+	test("waiting class after 4s", async () => {
 		scanReply.mockImplementation(() => new Promise(() => {}));
-		render(
-			<RiskBadge
-				report={high}
-				listing={listing}
-				locale="fr"
-				ai={ai}
-				accessCache={cached(active)}
-			/>,
-		);
+		await renderIdentified({ accessCache: cached(active) });
+		// Horloge simulée une fois la pastille identifiée (lecture du magasin faite).
+		vi.useFakeTimers();
 		fireEvent.click(launch());
 		emit(searchEvent);
 		expect(statusLineEl()?.classList.contains("is-waiting")).toBe(false);
@@ -1267,18 +1388,11 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		expect(statusLineEl()?.classList.contains("is-waiting")).toBe(false);
 	});
 
-	test("aria-live throttled to 2s", () => {
-		vi.useFakeTimers();
+	test("aria-live throttled to 2s", async () => {
 		scanReply.mockImplementation(() => new Promise(() => {}));
-		render(
-			<RiskBadge
-				report={high}
-				listing={listing}
-				locale="fr"
-				ai={ai}
-				accessCache={cached(active)}
-			/>,
-		);
+		await renderIdentified({ accessCache: cached(active) });
+		// Horloge simulée une fois la pastille identifiée (lecture du magasin faite).
+		vi.useFakeTimers();
 		expect(region().getAttribute("aria-live")).toBe("polite");
 		expect(announced()).toBe("");
 		fireEvent.click(launch());
@@ -1306,15 +1420,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		async (code) => {
 			const user = userEvent.setup();
 			scanReply.mockResolvedValueOnce({ ok: false, error: { code } });
-			render(
-				<RiskBadge
-					report={high}
-					listing={listing}
-					locale="fr"
-					ai={ai}
-					accessCache={cached(active)}
-				/>,
-			);
+			await renderIdentified({ accessCache: cached(active) });
 			await user.click(launch());
 			expect(await screen.findByText(aiErrorText("fr", code))).toBeTruthy();
 			// Jamais un logo qui tourne sans fin.
@@ -1330,15 +1436,9 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 	test("model text rendered as text", async () => {
 		const user = userEvent.setup();
 		scanReply.mockImplementation(() => new Promise(() => {}));
-		const { container } = render(
-			<RiskBadge
-				report={high}
-				listing={listing}
-				locale="fr"
-				ai={ai}
-				accessCache={cached(active)}
-			/>,
-		);
+		const { container } = await renderIdentified({
+			accessCache: cached(active),
+		});
 		await user.click(launch());
 		const text = "<img src=x onerror=alert(1)>";
 		emit({ type: "thinking", part: 1, text });
@@ -1356,13 +1456,13 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 
 	test("au repos : le logo est présent, sans rq-logo--loading", () => {
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		const pill = launch();
+		const pill = identifyButton();
 		const logo = logoOf(pill);
 		expect(logo).not.toBeNull();
 		expect(logo?.getAttribute("aria-hidden")).toBe("true");
 		expect(logo?.getAttribute("width")).toBe("16");
 		expect(logo?.classList.contains("rq-logo--loading")).toBe(false);
-		expect(pill.textContent).toBe(contentText("fr", "ai.launchShort"));
+		expect(pill.textContent).toBe(contentText("fr", "identify.launchShort"));
 		// Verre sombre, Inter, anneau de focus au clavier.
 		for (const name of [
 			"h-7",
@@ -1384,17 +1484,9 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		);
 	});
 
-	test("en cours : le logo porte rq-logo--loading et la ligne d'état rq-shimmer ; plus aucun radarnaque-spin", () => {
+	test("en cours : le logo porte rq-logo--loading et la ligne d'état rq-shimmer ; plus aucun radarnaque-spin", async () => {
 		scanReply.mockImplementation(() => new Promise(() => {}));
-		render(
-			<RiskBadge
-				report={high}
-				listing={listing}
-				locale="fr"
-				ai={ai}
-				accessCache={cached(active)}
-			/>,
-		);
+		await renderIdentified({ accessCache: cached(active) });
 		fireEvent.click(launch());
 		emit(searchEvent);
 		const logo = logoOf(toggle());
@@ -1442,15 +1534,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 			ok: false,
 			error: { code: "stream_interrupted" },
 		});
-		render(
-			<RiskBadge
-				report={high}
-				listing={listing}
-				locale="fr"
-				ai={ai}
-				accessCache={cached(active)}
-			/>,
-		);
+		await renderIdentified({ accessCache: cached(active) });
 		await user.click(launch());
 		const message = await screen.findByText(
 			aiErrorText("fr", "stream_interrupted"),
@@ -1466,17 +1550,9 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		expect(logo?.classList.contains("opacity-60")).toBe(true);
 	});
 
-	test("ligne d'état de 200 caractères : tronquée (classe truncate) dans une pilule bornée à 340 px", () => {
+	test("ligne d'état de 200 caractères : tronquée (classe truncate) dans une pilule bornée à 340 px", async () => {
 		scanReply.mockImplementation(() => new Promise(() => {}));
-		render(
-			<RiskBadge
-				report={high}
-				listing={listing}
-				locale="fr"
-				ai={ai}
-				accessCache={cached(active)}
-			/>,
-		);
+		await renderIdentified({ accessCache: cached(active) });
 		fireEvent.click(launch());
 		const query = "iPhone 18 Pro ".repeat(15).slice(0, 200);
 		emit({ type: "search", id: 2, query, aspect: "price" });
@@ -1495,9 +1571,14 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		expect(logoOf(pill)?.classList.contains("shrink-0")).toBe(true);
 	});
 
-	test("lancée au clavier, l'analyse garde le focus sur la pilule", async () => {
+	test("lancée au clavier, l'identification garde le focus sur la pilule, puis sur le produit", async () => {
 		const user = userEvent.setup();
-		scanReply.mockImplementation(() => new Promise(() => {}));
+		let finish!: (value: BgResponse<IdentificationResult>) => void;
+		identifyReply.mockReturnValueOnce(
+			new Promise((resolve) => {
+				finish = resolve;
+			}),
+		);
 		render(
 			<RiskBadge
 				report={high}
@@ -1507,20 +1588,34 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 				accessCache={cached(active)}
 			/>,
 		);
-		const pill = launch();
+		const pill = identifyButton();
 		pill.focus();
+		await user.keyboard("{Enter}");
+		expect(ai.identify).toHaveBeenCalledTimes(1);
+		expect(toggle().getAttribute("aria-busy")).toBe("true");
+		// Le même élément passe du repos à l'identification en cours.
+		expect(toggle()).toBe(pill);
+		expect(document.activeElement).toBe(pill);
+		await act(async () => finish({ ok: true, data: sampleIdentification }));
+		// La pilule change d'élément : le focus passe à sa partie produit.
+		expect(document.activeElement).toBe(product());
+	});
+
+	test("lancée au clavier depuis « Analyser le risque », l'analyse garde le focus sur la pilule", async () => {
+		const user = userEvent.setup();
+		scanReply.mockImplementation(() => new Promise(() => {}));
+		await renderIdentified({ accessCache: cached(active) });
+		launch().focus();
 		await user.keyboard("{Enter}");
 		expect(ai.scan).toHaveBeenCalledTimes(1);
 		expect(toggle().getAttribute("aria-busy")).toBe("true");
-		// Le même élément passe du repos à l'analyse en cours.
-		expect(toggle()).toBe(pill);
-		expect(document.activeElement).toBe(pill);
+		expect(document.activeElement).toBe(toggle());
 	});
 
 	test("lancée au clavier avec un accès inconnu : le focus reste sur la pilule une fois l'accès lu", async () => {
 		const user = userEvent.setup();
 		scanReply.mockImplementation(() => new Promise(() => {}));
-		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
+		await renderIdentified();
 		const pill = launch();
 		pill.focus();
 		await user.keyboard("{Enter}");
@@ -1542,15 +1637,9 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 			ok: true,
 			data: { ...active, remaining: { scans: 0 } },
 		}));
-		const { container } = render(
-			<RiskBadge
-				report={high}
-				listing={listing}
-				locale="fr"
-				ai={ai}
-				accessCache={cached(active)}
-			/>,
-		);
+		const { container } = await renderIdentified({
+			accessCache: cached(active),
+		});
 		await user.click(launch());
 		await user.click(toggle());
 		const dialog = screen.getByRole("dialog");
@@ -1564,12 +1653,9 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 		expect(
 			within(dialog).getByText(aiErrorText("fr", "quota_exhausted")),
 		).toBeTruthy();
-		// Hors du panneau et de la pilule « Identifier ».
-		const identify = screen.getByRole("button", {
-			name: contentText("fr", "identify.launch"),
-		});
+		// Hors du panneau : le logo atténué de la pilule seul.
 		const logos = Array.from(container.querySelectorAll("svg")).filter(
-			(svg) => !dialog.contains(svg) && !identify.contains(svg),
+			(svg) => !dialog.contains(svg),
 		);
 		expect(logos).toHaveLength(1);
 		expect(logos[0]?.classList.contains("opacity-60")).toBe(true);
@@ -1578,7 +1664,7 @@ describe("RiskBadge : pilule et ligne en direct", () => {
 });
 
 describe("RiskBadge : seule l'IA donne un résultat", () => {
-	test("résultat repris du magasin : niveau et score affichés tout de suite, aucun scan, aucun « Analyser »", async () => {
+	test("résultat repris du magasin : niveau et score affichés tout de suite, aucun scan, aucun « Identifier »", async () => {
 		const user = userEvent.setup();
 		const aiResults = storeWith({
 			"2ememain.be|m123": {
@@ -1599,15 +1685,16 @@ describe("RiskBadge : seule l'IA donne un résultat", () => {
 				accessCache={cached(active)}
 			/>,
 		);
-		// Premier rendu, magasin pas encore lu : aucun « Analyser » à cliquer, qui
-		// lancerait un vrai scan (accès actif en cache) sur une fiche déjà analysée.
-		expect(launchControls()).toHaveLength(0);
+		// Premier rendu, magasin pas encore lu : aucun « Identifier » à cliquer, qui
+		// lancerait une vraie requête (accès actif en cache) sur une fiche déjà analysée.
+		expect(identifyControls()).toHaveLength(0);
 		expect(container.textContent).not.toContain(
-			contentText("fr", "ai.launchShort"),
+			contentText("fr", "identify.launchShort"),
 		);
 		await vi.waitFor(() => expect(toggle().textContent).toContain("82/100"));
 		expect(toggle().textContent).toContain("Risque élevé");
 		expect(described()).toEqual(["Risque élevé", "82/100"]);
+		expect(identifyControls()).toHaveLength(0);
 		expect(launchControls()).toHaveLength(0);
 		await user.click(toggle());
 		const dialog = screen.getByRole("dialog", {
@@ -1619,7 +1706,7 @@ describe("RiskBadge : seule l'IA donne un résultat", () => {
 		expect(ai.scan).not.toHaveBeenCalled();
 	});
 
-	test("fiche sans résultat en magasin : « Analyser » apparaît une fois la lecture finie", async () => {
+	test("fiche sans résultat en magasin : « Identifier » apparaît une fois la lecture finie", async () => {
 		render(
 			<RiskBadge
 				report={medium}
@@ -1629,12 +1716,14 @@ describe("RiskBadge : seule l'IA donne un résultat", () => {
 				aiResults={storeWith({})}
 			/>,
 		);
-		expect(launchControls()).toHaveLength(0);
-		await vi.waitFor(() => expect(launchControls()).toHaveLength(1));
-		expect(launch().textContent).toBe(contentText("fr", "ai.launchShort"));
+		expect(identifyControls()).toHaveLength(0);
+		await vi.waitFor(() => expect(identifyControls()).toHaveLength(1));
+		expect(identifyButton().textContent).toBe(
+			contentText("fr", "identify.launchShort"),
+		);
 	});
 
-	test("magasin dont la lecture échoue : « Analyser » apparaît, jamais une pastille vide", async () => {
+	test("magasin dont la lecture échoue : « Identifier » apparaît, jamais une pastille vide", async () => {
 		const failing: AiResultStore = {
 			...storeWith({}),
 			get: async () => {
@@ -1650,11 +1739,12 @@ describe("RiskBadge : seule l'IA donne un résultat", () => {
 				aiResults={failing}
 			/>,
 		);
-		await vi.waitFor(() => expect(launchControls()).toHaveLength(1));
+		await vi.waitFor(() => expect(identifyControls()).toHaveLength(1));
+		expect(ai.identify).not.toHaveBeenCalled();
 		expect(ai.scan).not.toHaveBeenCalled();
 	});
 
-	test("I2 : résultat repris, puis prix changé sous la même clé : retour à « Analyser », sans score", async () => {
+	test("I2 : résultat repris, puis prix changé sous la même clé : retour à « Identifier », sans score", async () => {
 		const aiResults = storeWith({
 			"2ememain.be|m123": {
 				result: aiHigh,
@@ -1686,8 +1776,98 @@ describe("RiskBadge : seule l'IA donne un résultat", () => {
 				aiResults={aiResults}
 			/>,
 		);
-		expect(launchControls()).toHaveLength(1);
+		expect(identifyControls()).toHaveLength(1);
+		expect(launchControls()).toHaveLength(0);
 		expect(view.container.textContent).not.toContain("/100");
+		expect(ai.scan).not.toHaveBeenCalled();
+	});
+
+	test("restored analysis shows the risk result; restored identification shows the product and the action; v2 entry shows the risk result", async () => {
+		const now = Date.parse("2026-10-23T11:00:00Z");
+		const analysis: AnalysisResult = {
+			...aiHigh,
+			analyzedAt: "2026-10-23T10:00:00Z",
+		};
+		const of = (id: string): Listing => ({
+			...listing,
+			externalId: id,
+			url: `https://www.2ememain.be/v/velo/${id}`,
+		});
+		const fingerprint = listingFingerprint(listing);
+		const stored: Record<string, StoredAiEntry> = {
+			// Analyse gardée (et son identification).
+			"2ememain.be|analyse": {
+				v: 3,
+				result: analysis,
+				identification: sampleIdentification,
+				identifiedByUser: true,
+				fingerprint,
+				storedAt: now,
+			},
+			// Identification seule, faite par l'utilisateur.
+			"2ememain.be|identification": {
+				v: 3,
+				result: null,
+				identification: sampleIdentification,
+				identifiedByUser: true,
+				fingerprint,
+				storedAt: now,
+			},
+			// Ancienne entrée `v: 2` : l'analyse seule, identification embarquée.
+			"2ememain.be|v2": {
+				v: 2,
+				result: { ...analysis, identification: sampleIdentification },
+				fingerprint,
+				storedAt: now,
+			} as unknown as StoredAiEntry,
+		};
+		const area: StorageAreaLike = {
+			getValue: async () => stored,
+			setValue: async () => {},
+		};
+		const aiResults = createAiResultStore(area, () => now);
+		const view = render(
+			<RiskBadge
+				report={medium}
+				listing={of("analyse")}
+				locale="fr"
+				ai={ai}
+				aiResults={aiResults}
+			/>,
+		);
+		await vi.waitFor(() => expect(toggle().textContent).toContain("82/100"));
+		expect(identifyControls()).toHaveLength(0);
+		expect(launchControls()).toHaveLength(0);
+		expect(screen.queryByRole("button", { name: SURE })).toBeNull();
+
+		view.rerender(
+			<RiskBadge
+				report={medium}
+				listing={of("identification")}
+				locale="fr"
+				ai={ai}
+				aiResults={aiResults}
+			/>,
+		);
+		await findLaunch();
+		expect(product().getAttribute("aria-expanded")).toBe("false");
+		expect(screen.queryByRole("button", { name: /Radarnaque/ })).toBeNull();
+		expect(view.container.textContent).not.toContain("/100");
+		expect(identifyControls()).toHaveLength(0);
+
+		view.rerender(
+			<RiskBadge
+				report={medium}
+				listing={of("v2")}
+				locale="fr"
+				ai={ai}
+				aiResults={aiResults}
+			/>,
+		);
+		await vi.waitFor(() => expect(toggle().textContent).toContain("82/100"));
+		expect(launchControls()).toHaveLength(0);
+		expect(identifyControls()).toHaveLength(0);
+		expect(ai.identify).not.toHaveBeenCalled();
 		expect(ai.scan).not.toHaveBeenCalled();
 	});
 });
@@ -1842,7 +2022,7 @@ describe("RiskBadge : bandeau des annonces professionnelles", () => {
 		...listing,
 		seller: { ...listing.seller, sellerKind: "professional" },
 	};
-	/** Sans abonnement, accès inconnu : le clic sur « Analyser » ouvre le panneau. */
+	/** Sans abonnement, accès inconnu : le clic sur « Identifier » ouvre le panneau. */
 	const openAtRest = async (
 		user: ReturnType<typeof userEvent.setup>,
 		locale: "fr" | "nl" = "fr",
@@ -1852,7 +2032,9 @@ describe("RiskBadge : bandeau des annonces professionnelles", () => {
 			data: { status: "noSubscription" },
 		});
 		await user.click(
-			screen.getByRole("button", { name: contentText(locale, "ai.launch") }),
+			screen.getByRole("button", {
+				name: contentText(locale, "identify.launch"),
+			}),
 		);
 		return screen.findByRole("dialog");
 	};
@@ -1914,20 +2096,12 @@ describe("RiskBadge : bandeau des annonces professionnelles", () => {
 describe("RiskBadge : focus clavier", () => {
 	const RETRY = contentText("fr", "ai.retry");
 	const retry = () => screen.getByRole("button", { name: RETRY });
-	/** Pastille avec accès actif en cache, et un bouton de la page hôte à côté. */
+	/**
+	 * Pastille identifiée (« Analyser le risque » affiché) avec accès actif en
+	 * cache, et un bouton de la page hôte à côté.
+	 */
 	const renderWithPage = () =>
-		render(
-			<div>
-				<button type="button">page</button>
-				<RiskBadge
-					report={high}
-					listing={listing}
-					locale="fr"
-					ai={ai}
-					accessCache={cached(active)}
-				/>
-			</div>,
-		);
+		renderIdentified({ accessCache: cached(active), page: true });
 	/** Analyse suivie à la main : `answer` la termine. */
 	const pendingScan = () => {
 		let answer!: (value: BgResponse<AnalysisResult>) => void;
@@ -1942,7 +2116,7 @@ describe("RiskBadge : focus clavier", () => {
 
 	test("Échap, focus dans le panneau : le focus revient à la pilule", async () => {
 		const user = userEvent.setup();
-		renderWithPage();
+		await renderWithPage();
 		await launchToResult(user);
 		await user.click(toggle());
 		screen.getByRole("button", { name: PANEL_CLOSE }).focus();
@@ -1953,7 +2127,7 @@ describe("RiskBadge : focus clavier", () => {
 
 	test("Échap, focus sur la page hôte : le panneau se ferme sans lui voler le focus", async () => {
 		const user = userEvent.setup();
-		renderWithPage();
+		await renderWithPage();
 		await launchToResult(user);
 		await user.click(toggle());
 		const page = screen.getByRole("button", { name: "page" });
@@ -1974,7 +2148,10 @@ describe("RiskBadge : focus clavier", () => {
 			<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />,
 			{ container },
 		);
-		await user.click(within(container).getByRole("button", { name: LAUNCH }));
+		await user.click(within(container).getByRole("button", { name: IDENTIFY }));
+		await user.click(
+			await within(container).findByRole("button", { name: LAUNCH }),
+		);
 		const pill = await within(container).findByRole("button", {
 			name: /Radarnaque/,
 		});
@@ -1993,7 +2170,7 @@ describe("RiskBadge : focus clavier", () => {
 	test("analyse lancée au clavier puis interrompue : le focus passe à « Relancer »", async () => {
 		const user = userEvent.setup();
 		const finish = pendingScan();
-		renderWithPage();
+		await renderWithPage();
 		launch().focus();
 		await user.keyboard("{Enter}");
 		expect(document.activeElement).toBe(toggle());
@@ -2001,10 +2178,10 @@ describe("RiskBadge : focus clavier", () => {
 		expect(document.activeElement).toBe(retry());
 	});
 
-	test("analyse lancée au clavier puis en échec : le focus passe à « Analyser » de la pilule d'erreur", async () => {
+	test("analyse lancée au clavier puis en échec : le focus passe à « Analyser le risque » de la pilule d'erreur", async () => {
 		const user = userEvent.setup();
 		const finish = pendingScan();
-		renderWithPage();
+		await renderWithPage();
 		launch().focus();
 		await user.keyboard("{Enter}");
 		await finish({ ok: false, error: { code: "analysis_failed" } });
@@ -2015,7 +2192,7 @@ describe("RiskBadge : focus clavier", () => {
 	test("« Relancer » au clavier : le focus passe à la pilule de l'analyse en cours, puis du résultat", async () => {
 		const user = userEvent.setup();
 		const first = pendingScan();
-		renderWithPage();
+		await renderWithPage();
 		launch().focus();
 		await user.keyboard("{Enter}");
 		await first({ ok: false, error: { code: "timeout" } });
@@ -2033,7 +2210,7 @@ describe("RiskBadge : focus clavier", () => {
 	test("échec arrivé alors que le focus est sur la page hôte : il y reste", async () => {
 		const user = userEvent.setup();
 		const finish = pendingScan();
-		renderWithPage();
+		await renderWithPage();
 		launch().focus();
 		await user.keyboard("{Enter}");
 		const page = screen.getByRole("button", { name: "page" });
@@ -2046,7 +2223,7 @@ describe("RiskBadge : focus clavier", () => {
 	test("lancée au clavier, quota relu à 0 après l'échec : le focus reste sur la pilule d'erreur, hors de l'ordre de tabulation", async () => {
 		const user = userEvent.setup();
 		const finish = pendingScan();
-		renderWithPage();
+		await renderWithPage();
 		launch().focus();
 		await user.keyboard("{Enter}");
 		ai.access.mockImplementation(async () => ({
@@ -2064,7 +2241,7 @@ describe("RiskBadge : focus clavier", () => {
 	test("panneau ouvert, erreur sans action (quota relu à 0) : « Fermer » rend le focus à la pilule réduite au logo", async () => {
 		const user = userEvent.setup();
 		const finish = pendingScan();
-		renderWithPage();
+		await renderWithPage();
 		await user.click(launch());
 		await user.click(toggle());
 		ai.access.mockImplementation(async () => ({
@@ -2078,8 +2255,8 @@ describe("RiskBadge : focus clavier", () => {
 		).toBeTruthy();
 		await vi.waitFor(() => expect(queryLaunch()).toBeNull());
 		// Pilule réduite au logo : ni message (dans le panneau), ni action. Son
-		// conteneur précède la région annoncée de « Analyser », la dernière.
-		const pill = screen.getAllByRole("status").at(-1)?.previousElementSibling
+		// conteneur précède la seule région annoncée.
+		const pill = screen.getByRole("status").previousElementSibling
 			?.firstElementChild as HTMLElement | undefined;
 		expect(pill?.textContent).toBe("");
 		expect(pill?.getAttribute("tabindex")).toBe("-1");
@@ -2138,30 +2315,31 @@ describe("RiskBadge : focus clavier", () => {
 		test("analyse lancée au clavier puis interrompue : le focus passe à « Relancer »", async () => {
 			const user = userEvent.setup();
 			const finish = pendingScan();
-			renderWithPage();
+			await renderWithPage();
 			launch().focus();
 			await user.keyboard("{Enter}");
 			expect(document.activeElement).toBe(toggle());
 			await finish({ ok: false, error: { code: "stream_interrupted" } });
-			expect(chrome.blurred()).toBe(1);
+			// L'action retirée au départ de l'analyse, puis la pilule en cours.
+			expect(chrome.blurred()).toBe(2);
 			expect(document.activeElement).toBe(retry());
 		});
 
-		test("analyse lancée au clavier puis en échec : le focus passe à « Analyser » de la pilule d'erreur", async () => {
+		test("analyse lancée au clavier puis en échec : le focus passe à « Analyser le risque » de la pilule d'erreur", async () => {
 			const user = userEvent.setup();
 			const finish = pendingScan();
-			renderWithPage();
+			await renderWithPage();
 			launch().focus();
 			await user.keyboard("{Enter}");
 			await finish({ ok: false, error: { code: "analysis_failed" } });
-			expect(chrome.blurred()).toBe(1);
+			expect(chrome.blurred()).toBe(2);
 			expect(document.activeElement).toBe(launch());
 		});
 
 		test("« Relancer » au clavier : le focus passe à la pilule de l'analyse en cours, puis du résultat", async () => {
 			const user = userEvent.setup();
 			const first = pendingScan();
-			renderWithPage();
+			await renderWithPage();
 			launch().focus();
 			await user.keyboard("{Enter}");
 			await first({ ok: false, error: { code: "timeout" } });
@@ -2169,7 +2347,7 @@ describe("RiskBadge : focus clavier", () => {
 			retry().focus();
 			const second = pendingScan();
 			await user.keyboard("{Enter}");
-			expect(chrome.blurred()).toBe(2);
+			expect(chrome.blurred()).toBe(3);
 			expect(toggle().getAttribute("aria-busy")).toBe("true");
 			expect(document.activeElement).toBe(toggle());
 			await second({ ok: true, data: aiHigh });
@@ -2192,13 +2370,14 @@ describe("RiskBadge : focus clavier", () => {
 					locale="fr"
 					ai={ai}
 					accessCache={cached(active)}
+					aiResults={storeWith(identifiedEntry())}
 				/>,
 				{ container },
 			);
-			within(container).getByRole("button", { name: LAUNCH }).focus();
+			(await within(container).findByRole("button", { name: LAUNCH })).focus();
 			await user.keyboard("{Enter}");
 			await finish({ ok: false, error: { code: "stream_interrupted" } });
-			expect(chrome.blurred()).toBe(1);
+			expect(chrome.blurred()).toBe(2);
 			expect(shadow.activeElement).toBe(
 				within(container).getByRole("button", { name: RETRY }),
 			);
@@ -2209,7 +2388,7 @@ describe("RiskBadge : focus clavier", () => {
 		test("fenêtre quittée pendant l'analyse (focusout sans relatedTarget, pilule toujours là) : le focus n'est pas repris à l'échec", async () => {
 			const user = userEvent.setup();
 			const finish = pendingScan();
-			renderWithPage();
+			await renderWithPage();
 			launch().focus();
 			await user.keyboard("{Enter}");
 			const pill = toggle();
@@ -2229,7 +2408,7 @@ describe("RiskBadge : focus clavier", () => {
 
 		test("focus quitté vers `body` (pilule toujours là) puis rendu dans la même tâche : le focus n'est pas repris", async () => {
 			const user = userEvent.setup();
-			renderWithPage();
+			await renderWithPage();
 			await launchToResult(user);
 			const pill = toggle();
 			pill.focus();
@@ -2248,7 +2427,7 @@ describe("RiskBadge : focus clavier", () => {
 	test("pilule d'erreur avec une action : pas de tabindex sur la pilule", async () => {
 		const user = userEvent.setup();
 		const finish = pendingScan();
-		renderWithPage();
+		await renderWithPage();
 		await user.click(launch());
 		await finish({ ok: false, error: { code: "stream_interrupted" } });
 		expect(retry().parentElement?.hasAttribute("tabindex")).toBe(false);
@@ -2256,7 +2435,7 @@ describe("RiskBadge : focus clavier", () => {
 
 	test("le panneau est nommé par son titre (aria-labelledby), sans aria-label", async () => {
 		const user = userEvent.setup();
-		renderWithPage();
+		await renderWithPage();
 		await launchToResult(user);
 		await user.click(toggle());
 		const dialog = screen.getByRole("dialog", {
@@ -2269,19 +2448,9 @@ describe("RiskBadge : focus clavier", () => {
 	});
 });
 
-describe("RiskBadge : Identifier et deux panneaux", () => {
-	const IDENTIFY = contentText("fr", "identify.launch");
-	const ID_TITLE = contentText("fr", "identify.title");
-	const SURE = "Identification : Steam Deck OLED · Sûr 95 %";
-	/** « Identifier » au repos ou en cours (même nom accessible). */
-	const identifyButton = () => screen.getByRole("button", { name: IDENTIFY });
-	const identifyResult = () => screen.getByRole("button", { name: SURE });
-	const idDialog = () => screen.queryByRole("dialog", { name: ID_TITLE });
+describe("RiskBadge : une seule pilule, identification puis risque", () => {
 	const aiDialog = () =>
 		screen.queryByRole("dialog", { name: contentText("fr", "panel.title") });
-	/** Région annoncée de « Analyser » : après celle de « Identifier ». */
-	const analyzeAnnounced = () =>
-		screen.getAllByRole("status").at(-1)?.textContent;
 	const renderActive = (locale: "fr" | "nl" = "fr") =>
 		render(
 			<div>
@@ -2298,20 +2467,25 @@ describe("RiskBadge : Identifier et deux panneaux", () => {
 	/** Identification suivie à la main : `answer` la termine. */
 	const pendingIdentify = () => {
 		let answer!: (value: BgResponse<IdentificationResult>) => void;
-		ai.identify.mockImplementation(() => ({
-			done: new Promise((resolve) => {
+		identifyReply.mockReturnValueOnce(
+			new Promise((resolve) => {
 				answer = resolve;
 			}),
-			cancel: () => {},
-		}));
+		);
 		return (value: BgResponse<IdentificationResult>) =>
 			act(async () => answer(value));
 	};
-	const identified = () =>
-		ai.identify.mockImplementation(() => ({
-			done: Promise.resolve({ ok: true, data: sampleIdentification }),
-			cancel: () => {},
-		}));
+	/** Analyse suivie à la main : `answer` la termine. */
+	const pendingScan = () => {
+		let answer!: (value: BgResponse<AnalysisResult>) => void;
+		scanReply.mockReturnValueOnce(
+			new Promise((resolve) => {
+				answer = resolve;
+			}),
+		);
+		return (value: BgResponse<AnalysisResult>) =>
+			act(async () => answer(value));
+	};
 	/** Événement du flux de l'identification lancée en dernier. */
 	const emitIdentify = (e: ScanProgressEvent) => {
 		const onEvent = ai.identify.mock.calls.at(-1)?.[1];
@@ -2325,115 +2499,179 @@ describe("RiskBadge : Identifier et deux panneaux", () => {
 		act(() => onEvent(e));
 	};
 	const lineOf = (pill: HTMLElement) =>
-		pill.querySelector(".radarnaque-status")?.textContent;
+		pill.querySelector(".radarnaque-status .rq-shimmer")?.textContent;
+	/** Jamais « Identifier » dans la pilule (bouton ou lien). */
+	const noIdentify = () => expect(identifyControls()).toHaveLength(0);
+	const { debug: _debug, ...flatIdentification } = sampleIdentification;
+	const identificationEvent: ScanProgressEvent = {
+		...flatIdentification,
+		type: "identification",
+	};
 
-	test("« Identifier » est avant « Analyser », sur la même ligne", () => {
-		renderActive();
-		const identify = identifyButton();
-		expect(
-			identify.compareDocumentPosition(launch()) &
-				Node.DOCUMENT_POSITION_FOLLOWING,
-		).toBeTruthy();
-		expect(identify.textContent).toBe(
-			contentText("fr", "identify.launchShort"),
-		);
+	test.each([
+		[
+			"fr",
+			"Lecture des photos…",
+			"Identification : Steam Deck OLED · Sûr 95 %",
+			"Steam Deck OLED·Démarrage de l'analyse",
+			"Risque élevé82/100",
+		],
+		[
+			"nl",
+			"Foto's lezen…",
+			"Identificatie: Steam Deck OLED · Zeker 95%",
+			"Steam Deck OLED·Analyse wordt gestart",
+			"Hoog risico82/100",
+		],
+	] as const)(
+		"%s : parcours complet, repos → identification → produit → « Analyser le risque » → résultat",
+		async (locale, line, name, analyzing, result) => {
+			const user = userEvent.setup();
+			const answerIdentify = pendingIdentify();
+			const answerScan = pendingScan();
+			renderActive(locale);
+			// Repos : « Identifier ».
+			await user.click(
+				screen.getByRole("button", {
+					name: contentText(locale, "identify.launch"),
+				}),
+			);
+			expect(ai.identify).toHaveBeenCalledTimes(1);
+			expect(ai.scan).not.toHaveBeenCalled();
+			expect(screen.queryByRole("dialog")).toBeNull();
+			// Identification en cours : le logo animé et sa ligne d'état.
+			emitIdentify({ type: "stage", stage: "reading_photos" });
+			expect(toggle().getAttribute("aria-busy")).toBe("true");
+			expect(lineOf(toggle())).toBe(line);
+			// Produit identifié : le produit, puis « Analyser le risque ».
+			await answerIdentify({ ok: true, data: sampleIdentification });
+			const productPart = screen.getByRole("button", { name });
+			expect(productPart.getAttribute("aria-expanded")).toBe("false");
+			const action = screen.getByRole("button", {
+				name: contentText(locale, "ai.analyzeRisk"),
+			});
+			expect(ai.scan).not.toHaveBeenCalled();
+			// Analyse du risque en cours : « Steam Deck OLED · {ligne d'état} ».
+			await user.click(action);
+			expect(ai.scan).toHaveBeenCalledTimes(1);
+			expect(ai.identify).toHaveBeenCalledTimes(1);
+			expect(toggle().getAttribute("aria-busy")).toBe("true");
+			expect(toggle().textContent).toBe(analyzing);
+			// Résultat : la pilule d'aujourd'hui.
+			await answerScan({ ok: true, data: aiHigh });
+			expect(toggle().textContent).toBe(result);
+			expect(screen.queryByRole("button", { name })).toBeNull();
+			expect(screen.getAllByRole("status")).toHaveLength(1);
+		},
+	);
+
+	test("une seule région aria-live, à chaque étape", async () => {
+		const user = userEvent.setup();
+		const answerIdentify = pendingIdentify();
+		const answerScan = pendingScan();
+		const { container } = renderActive();
+		const regions = () => container.querySelectorAll("[aria-live]");
+		expect(regions()).toHaveLength(1);
+		await user.click(identifyButton());
+		expect(regions()).toHaveLength(1);
+		await answerIdentify({ ok: true, data: sampleIdentification });
+		expect(regions()).toHaveLength(1);
+		await user.click(launch());
+		expect(regions()).toHaveLength(1);
+		await answerScan({ ok: true, data: aiHigh });
+		expect(regions()).toHaveLength(1);
+		// Une seule pilule.
+		expect(container.querySelectorAll("[data-pill]")).toHaveLength(1);
 	});
 
-	test("clic : l'identification part et s'anime, sans panneau ni analyse, puis son résultat", async () => {
+	test("focus gardé sur la pilule à chaque changement : repos → en cours → produit → action → en cours → résultat", async () => {
 		const user = userEvent.setup();
-		const answer = pendingIdentify();
+		const answerIdentify = pendingIdentify();
+		const answerScan = pendingScan();
 		renderActive();
-		await user.click(identifyButton());
-		expect(ai.identify).toHaveBeenCalledTimes(1);
-		expect(ai.scan).not.toHaveBeenCalled();
-		expect(screen.queryByRole("dialog")).toBeNull();
-		emitIdentify({ type: "stage", stage: "reading_photos" });
-		expect(identifyButton().getAttribute("aria-busy")).toBe("true");
-		expect(lineOf(identifyButton())).toBe("Lecture des photos…");
-		// « Analyser » reste au repos : rien ne l'anime pendant une identification seule.
-		expect(launch().hasAttribute("aria-busy")).toBe(false);
-		await answer({ ok: true, data: sampleIdentification });
-		expect(identifyResult().getAttribute("aria-expanded")).toBe("false");
-		// Lancée au clavier ou à la souris, le focus reste sur la pilule.
-		expect(document.activeElement).toBe(identifyResult());
+		identifyButton().focus();
+		await user.keyboard("{Enter}");
+		expect(document.activeElement).toBe(toggle());
+		await answerIdentify({ ok: true, data: sampleIdentification });
+		expect(document.activeElement).toBe(product());
+		await user.tab();
+		expect(document.activeElement).toBe(launch());
+		await user.keyboard("{Enter}");
+		expect(toggle().getAttribute("aria-busy")).toBe("true");
+		expect(document.activeElement).toBe(toggle());
+		await answerScan({ ok: true, data: aiHigh });
+		expect(toggle().textContent).toContain("82/100");
+		expect(document.activeElement).toBe(toggle());
 	});
 
-	test("opens its own panel and closes the other", async () => {
+	test("la partie produit ouvre et ferme le panneau ; l'action ne l'ouvre pas", async () => {
 		const user = userEvent.setup();
-		identified();
-		renderActive();
-		await user.click(identifyButton());
-		await vi.waitFor(() => identifyResult());
-		await launchToResult(user);
-		await user.click(identifyResult());
-		expect(idDialog()).not.toBeNull();
-		expect(aiDialog()).toBeNull();
-		expect(identifyResult().getAttribute("aria-expanded")).toBe("true");
-		expect(toggle().getAttribute("aria-expanded")).toBe("false");
-		await user.click(toggle());
-		expect(idDialog()).toBeNull();
+		scanReply.mockImplementation(() => new Promise(() => {}));
+		await renderIdentified({ accessCache: cached(active) });
+		await user.click(product());
 		expect(aiDialog()).not.toBeNull();
-		expect(identifyResult().getAttribute("aria-expanded")).toBe("false");
-		expect(toggle().getAttribute("aria-expanded")).toBe("true");
-		await user.click(identifyResult());
-		expect(idDialog()).not.toBeNull();
-		expect(aiDialog()).toBeNull();
-		await user.click(identifyResult());
+		expect(product().getAttribute("aria-expanded")).toBe("true");
+		await user.click(product());
 		expect(screen.queryByRole("dialog")).toBeNull();
+		await user.click(launch());
+		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(toggle().getAttribute("aria-expanded")).toBe("false");
 	});
 
-	test("Escape rend le focus à la pilule ouvrante ; « Fermer » aussi ; clic extérieur ferme", async () => {
+	test("Escape et « Fermer » rendent le focus à la partie produit ; clic extérieur ferme", async () => {
 		const user = userEvent.setup();
-		identified();
-		renderActive();
-		await user.click(identifyButton());
-		await vi.waitFor(() => identifyResult());
-		await user.click(identifyResult());
-		const dialog = idDialog() as HTMLElement;
+		await renderIdentified({ accessCache: cached(active), page: true });
+		await user.click(product());
+		const dialog = aiDialog() as HTMLElement;
 		within(dialog).getByRole("button", { name: PANEL_CLOSE }).focus();
 		await user.keyboard("{Escape}");
-		expect(idDialog()).toBeNull();
-		expect(document.activeElement).toBe(identifyResult());
-		await user.click(identifyResult());
+		expect(aiDialog()).toBeNull();
+		expect(document.activeElement).toBe(product());
+		await user.click(product());
 		await user.click(
-			within(idDialog() as HTMLElement).getByRole("button", {
+			within(aiDialog() as HTMLElement).getByRole("button", {
 				name: PANEL_CLOSE,
 			}),
 		);
-		expect(idDialog()).toBeNull();
-		expect(document.activeElement).toBe(identifyResult());
-		await user.click(identifyResult());
+		expect(aiDialog()).toBeNull();
+		expect(document.activeElement).toBe(product());
+		await user.click(product());
 		await user.click(screen.getByRole("button", { name: "page" }));
-		expect(idDialog()).toBeNull();
+		expect(aiDialog()).toBeNull();
 	});
 
-	test("panneau Identification : carte du panneau d'analyse, en-tête « Identification », nommé par lui", async () => {
+	test("panneau après l'identification : « Analyse Radarnaque », la section Identification puis la section IA", async () => {
 		const user = userEvent.setup();
-		identified();
 		renderActive();
-		await user.click(identifyButton());
-		await vi.waitFor(() => identifyResult());
-		await user.click(identifyResult());
-		const dialog = idDialog() as HTMLElement;
+		await identifyFirst(user);
+		await user.click(product());
+		const dialog = aiDialog() as HTMLElement;
 		const heading = within(dialog).getByRole("heading", { level: 2 });
-		expect(heading.textContent).toBe("Identification");
-		expect(heading.classList.contains("uppercase")).toBe(true);
+		expect(heading.textContent).toBe("Analyse Radarnaque");
 		expect(dialog.getAttribute("aria-labelledby")).toBe(heading.id);
-		for (const name of ["w-[340px]", "max-w-[90vw]", "z-[2147483000]"])
-			expect(dialog.classList.contains(name), name).toBe(true);
 		// Le résultat : la référence, le niveau et le pourcentage.
 		expect(dialog.textContent).toContain("Steam Deck OLED");
 		expect(dialog.textContent).toContain("Sûr");
 		expect(dialog.textContent).toContain("95 %");
+		const [identification, analysis] = within(dialog).getAllByRole("region");
+		expect(identification?.getAttribute("aria-labelledby")).toBeTruthy();
+		expect(
+			within(identification as HTMLElement).getByRole("heading", { level: 3 })
+				.textContent,
+		).toBe(contentText("fr", "identify.title"));
+		expect(
+			within(analysis as HTMLElement).getByRole("heading", { level: 3 })
+				.textContent,
+		).toBe(contentText("fr", "ai.title"));
+		// Aucune couleur sémantique du risque avant l'analyse.
 		for (const element of Array.from(dialog.querySelectorAll("*")))
 			expect(element.getAttribute("class") ?? "").not.toMatch(
 				/(^|\s)(text|bg)-(danger|warning|success)(-soft)?(\s|$)/,
 			);
 	});
 
-	test("nl : en-tête « Identificatie », « Zeker 95% »", async () => {
+	test("nl : partie produit « Identificatie: … Zeker 95% », panneau en néerlandais", async () => {
 		const user = userEvent.setup();
-		identified();
 		renderActive("nl");
 		await user.click(
 			screen.getByRole("button", { name: "Product identificeren" }),
@@ -2442,25 +2680,27 @@ describe("RiskBadge : Identifier et deux panneaux", () => {
 			name: "Identificatie: Steam Deck OLED · Zeker 95%",
 		});
 		await user.click(pill);
-		const dialog = screen.getByRole("dialog", { name: "Identificatie" });
+		const dialog = screen.getByRole("dialog", {
+			name: contentText("nl", "panel.title"),
+		});
 		expect(dialog.textContent).toContain("Zeker");
 		expect(
 			within(dialog).getByRole("button", { name: "Sluiten" }),
 		).toBeTruthy();
 	});
 
-	test("panneau Identification ouvert pendant l'identification : la ligne d'état", async () => {
+	test("panneau ouvert pendant l'identification : la ligne d'état", async () => {
 		const user = userEvent.setup();
 		pendingIdentify();
 		renderActive();
 		await user.click(identifyButton());
 		emitIdentify({ type: "page_read", domain: "www.steamdeck.com", ok: true });
-		await user.click(identifyButton());
-		const dialog = idDialog() as HTMLElement;
+		await user.click(toggle());
+		const dialog = aiDialog() as HTMLElement;
 		expect(dialog.textContent).toContain("Lecture : www.steamdeck.com");
 	});
 
-	test("accès en erreur : « Identifier » ouvre le panneau Identification, qui le dit", async () => {
+	test("accès en erreur : « Identifier » ouvre le panneau, qui le dit une fois", async () => {
 		const user = userEvent.setup();
 		ai.access.mockResolvedValue({
 			ok: false,
@@ -2468,14 +2708,16 @@ describe("RiskBadge : Identifier et deux panneaux", () => {
 		});
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
 		await user.click(identifyButton());
-		const dialog = await screen.findByRole("dialog", { name: ID_TITLE });
-		expect(within(dialog).getByRole("alert").textContent).toBe(
-			aiErrorText("fr", "background_unavailable"),
-		);
+		const dialog = await screen.findByRole("dialog");
+		expect(
+			within(dialog)
+				.getAllByRole("alert")
+				.map((alert) => alert.textContent),
+		).toEqual([aiErrorText("fr", "background_unavailable")]);
 		expect(ai.identify).not.toHaveBeenCalled();
 	});
 
-	test("sans abonnement, accès inconnu : « Identifier » ouvre le panneau Identification, lien vers les formules", async () => {
+	test("sans abonnement, accès inconnu : « Identifier » ouvre le panneau, lien vers les formules", async () => {
 		const user = userEvent.setup();
 		ai.access.mockResolvedValue({
 			ok: true,
@@ -2483,7 +2725,7 @@ describe("RiskBadge : Identifier et deux panneaux", () => {
 		});
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
 		await user.click(identifyButton());
-		const dialog = await screen.findByRole("dialog", { name: ID_TITLE });
+		const dialog = await screen.findByRole("dialog");
 		const link = within(dialog).getByRole("link", {
 			name: contentText("fr", "ai.pricing"),
 		});
@@ -2493,17 +2735,7 @@ describe("RiskBadge : Identifier et deux panneaux", () => {
 		expect(ai.identify).not.toHaveBeenCalled();
 	});
 
-	test("useLaunch avec start = identify : déconnecté, le clic ouvre la connexion sans identifier", async () => {
-		const user = userEvent.setup();
-		ai.access.mockResolvedValue({ ok: true, data: { status: "signedOut" } });
-		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
-		await user.click(identifyButton());
-		await vi.waitFor(() => expect(ai.openLogin).toHaveBeenCalledTimes(1));
-		expect(ai.identify).not.toHaveBeenCalled();
-		expect(ai.scan).not.toHaveBeenCalled();
-	});
-
-	test("useLaunch avec start = identify : déconnecté sans popup, le panneau Identification montre le repli", async () => {
+	test("useLaunch avec start = identify : déconnecté sans popup, le panneau montre le repli", async () => {
 		const user = userEvent.setup();
 		ai.access.mockResolvedValue({ ok: true, data: { status: "signedOut" } });
 		ai.openLogin.mockResolvedValue({
@@ -2512,107 +2744,46 @@ describe("RiskBadge : Identifier et deux panneaux", () => {
 		});
 		render(<RiskBadge report={high} listing={listing} locale="fr" ai={ai} />);
 		await user.click(identifyButton());
-		const dialog = await screen.findByRole("dialog", { name: ID_TITLE });
+		const dialog = await screen.findByRole("dialog");
 		expect(dialog.textContent).toContain(contentText("fr", "ai.loginHint"));
 		expect(dialog.textContent).toContain(contentText("fr", "ai.loginFallback"));
-	});
-
-	test("useLaunch avec start = identify : quota épuisé, aria-disabled et aucun appel", async () => {
-		const user = userEvent.setup();
-		render(
-			<RiskBadge
-				report={high}
-				listing={listing}
-				locale="fr"
-				ai={ai}
-				accessCache={cached({ ...active, remaining: { scans: 0 } })}
-			/>,
-		);
-		expect(identifyButton().getAttribute("aria-disabled")).toBe("true");
-		await user.click(identifyButton());
-		expect(ai.identify).not.toHaveBeenCalled();
-		expect(ai.access).not.toHaveBeenCalled();
-		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(
+			within(dialog).getAllByRole("button", {
+				name: contentText("fr", "ai.login"),
+			}),
+		).toHaveLength(1);
 	});
 
 	test.each([
 		["fr", "Inclus avec l'identification"],
 		["nl", "Inbegrepen bij de identificatie"],
 	] as const)(
-		"%s : après l'identification, « Analyser » est décrit par « %s »",
+		"%s : après l'identification, « Analyser le risque » est décrit par « %s »",
 		async (locale, text) => {
 			const user = userEvent.setup();
-			identified();
-			renderActive(locale);
-			const analyze = () =>
-				screen.getByRole("button", { name: contentText(locale, "ai.launch") });
-			const description = () =>
-				(analyze().getAttribute("aria-describedby") ?? "")
-					.split(" ")
-					.map((id) => document.getElementById(id)?.textContent)
-					.join(" ");
-			expect(description()).not.toContain(text);
-			await user.click(
-				screen.getByRole("button", {
-					name: contentText(locale, "identify.launch"),
-				}),
-			);
-			await vi.waitFor(() => expect(description()).toContain(text));
-		},
-	);
-
-	test.each([
-		["fr", "En attente de l'identification…"],
-		["nl", "Wacht op de identificatie…"],
-	] as const)(
-		"%s : « Analyser » cliqué pendant l'identification dit « %s », puis l'analyse part",
-		async (locale, text) => {
-			const user = userEvent.setup();
-			const answer = pendingIdentify();
-			scanReply.mockImplementation(() => new Promise(() => {}));
 			renderActive(locale);
 			await user.click(
 				screen.getByRole("button", {
 					name: contentText(locale, "identify.launch"),
 				}),
 			);
-			await user.click(
-				screen.getByRole("button", { name: contentText(locale, "ai.launch") }),
-			);
-			expect(ai.scan).not.toHaveBeenCalled();
-			const pill = screen.getByRole("button", {
-				name: contentText(locale, "badge.aria"),
+			const action = await screen.findByRole("button", {
+				name: contentText(locale, "ai.analyzeRisk"),
 			});
-			expect(lineOf(pill)).toBe(text);
-			expect(analyzeAnnounced()).toBe(text);
-			await answer({ ok: true, data: sampleIdentification });
-			await vi.waitFor(() => expect(ai.scan).toHaveBeenCalledTimes(1));
-			expect(lineOf(pill)).not.toBe(text);
+			expect(
+				(action.getAttribute("aria-describedby") ?? "")
+					.split(" ")
+					.map((id) => document.getElementById(id)?.textContent),
+			).toEqual([text]);
 		},
 	);
 
-	test("analyse incluse à 0 analyse restante : « Analyser » n'est pas grisé et l'analyse part", async () => {
+	test("action incluse à 0 analyse restante : « Analyser le risque » n'est pas grisé et l'analyse part", async () => {
 		const user = userEvent.setup();
-		const aiResults = storeWith({
-			"2ememain.be|m123": {
-				result: null,
-				identification: sampleIdentification,
-				identifiedByUser: true,
-				fingerprint: listingFingerprint(listing),
-				storedAt: 1,
-			},
+		await renderIdentified({
+			accessCache: cached({ ...active, remaining: { scans: 0 } }),
 		});
-		render(
-			<RiskBadge
-				report={high}
-				listing={listing}
-				locale="fr"
-				ai={ai}
-				aiResults={aiResults}
-				accessCache={cached({ ...active, remaining: { scans: 0 } })}
-			/>,
-		);
-		await vi.waitFor(() => identifyResult());
+		expect(product()).toBeTruthy();
 		expect(launch().hasAttribute("aria-disabled")).toBe(false);
 		await user.click(launch());
 		expect(ai.scan).toHaveBeenCalledTimes(1);
@@ -2620,7 +2791,7 @@ describe("RiskBadge : Identifier et deux panneaux", () => {
 		expect(ai.identify).not.toHaveBeenCalled();
 	});
 
-	test("0 analyse restante, identification venue d'une analyse : « Analyser » reste grisé", async () => {
+	test("0 analyse restante, identification venue d'une analyse : « Analyser le risque » grisé", async () => {
 		const user = userEvent.setup();
 		const aiResults = storeWith({
 			"2ememain.be|m123": {
@@ -2641,60 +2812,173 @@ describe("RiskBadge : Identifier et deux panneaux", () => {
 				accessCache={cached({ ...active, remaining: { scans: 0 } })}
 			/>,
 		);
-		await vi.waitFor(() => identifyResult());
+		await findLaunch();
 		expect(launch().getAttribute("aria-disabled")).toBe("true");
-		expect(launch().textContent).not.toContain(
-			contentText("fr", "identify.included"),
-		);
+		expect(
+			(launch().getAttribute("aria-describedby") ?? "")
+				.split(" ")
+				.map((id) => document.getElementById(id)?.textContent),
+		).toEqual([contentText("fr", "ai.noScansLeft")]);
 		await user.click(launch());
 		expect(ai.scan).not.toHaveBeenCalled();
+		expect(ai.access).not.toHaveBeenCalled();
 	});
 
-	test("analyse sans identification préalable : les deux pilules s'animent, l'identification d'abord", async () => {
+	test("sans abonnement : « Analyser le risque » est un lien vers les formules", async () => {
+		render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				aiResults={storeWith(identifiedEntry())}
+				accessCache={cached({ status: "noSubscription" })}
+			/>,
+		);
+		const link = await screen.findByRole("link", { name: LAUNCH });
+		expect(link.getAttribute("href")).toMatch(/\/pricing\/\?lang=fr$/);
+		expect(queryLaunch()).toBeNull();
+		expect(product()).toBeTruthy();
+	});
+
+	test("the pill never shows Identifier while the risk analysis replays the identification", async () => {
 		const user = userEvent.setup();
-		scanReply.mockImplementation(() => new Promise(() => {}));
-		renderActive();
+		const finish = pendingScan();
+		await renderIdentified({ accessCache: cached(active) });
 		await user.click(launch());
-		expect(toggle().getAttribute("aria-busy")).toBe("true");
-		// Dès le clic, avant tout événement : « Identifier » est en cours, et un
-		// clic sur elle ouvre son panneau au lieu d'être perdu.
-		const pill = identifyButton();
-		expect(pill.getAttribute("aria-busy")).toBe("true");
-		expect(lineOf(pill)).toBe("Démarrage de l'identification…");
-		await user.click(pill);
-		expect(idDialog()?.textContent).toContain("Démarrage de l'identification…");
-		await user.click(pill);
-		expect(idDialog()).toBeNull();
-		expect(ai.identify).not.toHaveBeenCalled();
-		emitScan({ type: "stage", stage: "reading_photos" });
-		expect(identifyButton().getAttribute("aria-busy")).toBe("true");
-		expect(lineOf(identifyButton())).toBe("Lecture des photos…");
-		expect(toggle().getAttribute("aria-busy")).toBe("true");
-		const { debug: _, ...flat } = sampleIdentification;
-		emitScan({ type: "identification", ...flat });
-		expect(identifyResult()).toBeTruthy();
-		emitScan({ type: "stage", stage: "writing" });
+		noIdentify();
+		// Le serveur refait l'identification (servie par le cache) : ses
+		// événements n'animent jamais « Identifier ».
+		for (const event of [
+			{ type: "stage", stage: "reading_photos" },
+			{ type: "criteria_cached", count: 3 },
+			{ type: "page_read", domain: "www.steamdeck.com", ok: true },
+			{ type: "stage", stage: "identifying" },
+			identificationEvent,
+			{ type: "stage", stage: "writing" },
+		] as ScanProgressEvent[]) {
+			emitScan(event);
+			noIdentify();
+			expect(toggle().getAttribute("aria-busy")).toBe("true");
+			expect(toggle().textContent).toContain("Steam Deck OLED");
+		}
 		expect(lineOf(toggle())).toBe("Rédige le verdict");
+		await finish({ ok: true, data: sampleAnalysis });
+		noIdentify();
+		expect(toggle().textContent).toContain(`${sampleAnalysis.score}/100`);
 	});
 
-	test("identification en erreur pendant une analyse : l'erreur sur « Identifier », aucune sur « Analyser »", async () => {
+	test("Relancer after a risk error relaunches the risk analysis and keeps the identification", async () => {
 		const user = userEvent.setup();
-		let finish!: (value: BgResponse<AnalysisResult>) => void;
-		scanReply.mockReturnValueOnce(
-			new Promise((resolve) => {
-				finish = resolve;
+		const first = pendingScan();
+		await renderIdentified({ accessCache: cached(active) });
+		await user.click(launch());
+		await first({ ok: false, error: { code: "stream_interrupted" } });
+		expect(screen.queryByRole("button", { name: SURE })).toBeNull();
+		const second = pendingScan();
+		await user.click(
+			screen.getByRole("button", { name: contentText("fr", "ai.retry") }),
+		);
+		expect(ai.scan).toHaveBeenCalledTimes(2);
+		expect(ai.identify).not.toHaveBeenCalled();
+		noIdentify();
+		expect(toggle().textContent).toContain("Steam Deck OLED");
+		await second({ ok: true, data: aiHigh });
+		expect(toggle().textContent).toContain("82/100");
+		await user.click(toggle());
+		const dialog = aiDialog() as HTMLElement;
+		// L'identification est toujours là, au-dessus de l'analyse.
+		expect(dialog.textContent).toContain("Steam Deck OLED");
+		expect(dialog.textContent).toContain("95 %");
+		expect(dialog.textContent).toContain(aiHigh.summary.fr);
+	});
+
+	test("Relancer after an identification error relaunches the identification", async () => {
+		const user = userEvent.setup();
+		identifyReply.mockResolvedValueOnce({
+			ok: false,
+			error: { code: "stream_interrupted" },
+		});
+		renderActive();
+		await user.click(identifyButton());
+		await user.click(
+			await screen.findByRole("button", {
+				name: contentText("fr", "ai.retry"),
 			}),
 		);
-		renderActive();
+		expect(ai.identify).toHaveBeenCalledTimes(2);
+		expect(ai.scan).not.toHaveBeenCalled();
+		expect(await findLaunch()).toBeTruthy();
+	});
+
+	test("navigation to another listing returns to Identifier", async () => {
+		const user = userEvent.setup();
+		const other: Listing = {
+			...listing,
+			externalId: "m456",
+			url: "https://www.2ememain.be/v/velo/m456",
+		};
+		const accessCache = cached(active);
+		const view = render(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={accessCache}
+			/>,
+		);
+		await identifyFirst(user);
+		view.rerender(
+			<RiskBadge
+				report={high}
+				listing={other}
+				locale="fr"
+				ai={ai}
+				accessCache={accessCache}
+			/>,
+		);
+		expect(identifyControls()).toHaveLength(1);
+		expect(launchControls()).toHaveLength(0);
+		expect(screen.queryByRole("button", { name: SURE })).toBeNull();
+
+		// Et après un résultat du risque.
+		view.rerender(
+			<RiskBadge
+				report={high}
+				listing={listing}
+				locale="fr"
+				ai={ai}
+				accessCache={accessCache}
+			/>,
+		);
+		await launchToResult(user);
+		view.rerender(
+			<RiskBadge
+				report={high}
+				listing={other}
+				locale="fr"
+				ai={ai}
+				accessCache={accessCache}
+			/>,
+		);
+		expect(identifyControls()).toHaveLength(1);
+		expect(screen.queryByRole("button", { name: /Radarnaque/ })).toBeNull();
+		expect(view.container.textContent).not.toContain("/100");
+	});
+
+	test("identification_error du flux pendant l'analyse : la pilule reste sur l'analyse en cours, sans message", async () => {
+		const user = userEvent.setup();
+		const finish = pendingScan();
+		await renderIdentified({ accessCache: cached(active) });
 		await user.click(launch());
 		emitScan({ type: "stage", stage: "reading_photos" });
 		emitScan({ type: "identification_error", code: "analysis_failed" });
 		const message = aiErrorText("fr", "analysis_failed");
-		expect(screen.getAllByText(message)).toHaveLength(1);
-		expect(toggle().textContent).not.toContain(message);
+		expect(screen.queryByText(message)).toBeNull();
 		expect(toggle().getAttribute("aria-busy")).toBe("true");
-		expect(analyzeAnnounced()).not.toBe(message);
-		await act(async () => finish({ ok: true, data: sampleAnalysis }));
+		expect(screen.getByRole("status").textContent).not.toBe(message);
+		await finish({ ok: true, data: sampleAnalysis });
 		expect(toggle().textContent).toContain(`${sampleAnalysis.score}/100`);
 		expect(toggle().textContent).not.toContain(message);
 	});
