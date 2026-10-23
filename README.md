@@ -138,6 +138,29 @@ nécessaire, seul `apps/extension/.env` doit exister (voir « 1. Configuration �
    annonce et revenir à la grille : la pastille est remplacée à chaque annonce, jamais
    empilée, et disparaît sur la grille.
 
+#### Le parcours de la pastille, en deux temps
+
+Sur une fiche, il n'y a qu'une seule pilule, qui avance en deux temps (il faut l'API et
+un compte connecté, voir « Tester les analyses IA dans l'extension ») :
+
+1. **Identifier.** Au repos, la pilule affiche « Identifier ». Un clic lance l'identification du
+   produit : une ligne d'état en direct, puis la référence et le niveau (Sûr, Probable,
+   Incertain), sans pourcentage ni couleur de risque. Le pourcentage est dans le panneau.
+2. **Analyser le risque.** Dans la même pilule, une fois le produit identifié, « Analyser le
+   risque » lance l'analyse anti-arnaque, incluse avec l'identification (rien n'est décompté,
+   même à zéro analyse restante). Pendant l'analyse, la ligne d'état suit le déroulé ; à la fin,
+   la pilule montre le niveau de risque et le score.
+
+Le panneau suit les mêmes étapes, sous le titre « Analyse Radarnaque » :
+
+- avant l'identification : la section Identification seule ;
+- produit identifié : la section « Produit » (référence, niveau, critères, pages de référence),
+  puis le bouton « Analyser le risque » ;
+- risque analysé : le risque (score, conseil, raisons), puis « Détail du produit », replié, qui
+  garde la section Produit.
+
+Pour voir tous ces états sans réseau : `pnpm --filter extension gallery` (port 3101).
+
 Si une fiche n'est pas reconnue, rien ne s'affiche et la console de la page (niveau
 « Verbose ») contient une seule ligne `radarnaque: extraction impossible (<adaptateur>)`.
 

@@ -5,6 +5,12 @@ panneau Identification, file d'attente de l'analyse, infobulle des cartes, galer
 spécification est dans [`2026-10-23-identification-produit-design.md`](../specs/2026-10-23-identification-produit-design.md)
 (§13) et le plan dans [`2026-10-23-identification-partie-2-extension.md`](2026-10-23-identification-partie-2-extension.md).
 
+> **Refonte ensuite :** les deux pilules « Identifier » et « Analyser » décrites ici ont été
+> remplacées par une seule pilule (identification, puis « Analyser le risque »), avec un seul
+> panneau. Voir le [suivi de la pastille unique](2026-10-23-identification-pastille-unique-suivi.md) :
+> sa liste de vérifications remplace celle de cette page pour tout ce qui touche la pilule et le
+> panneau ; le reste (cartes, flux, magasin) reste valable.
+
 ## Ce qui est livré
 
 - **Messages et flux :** événements d'identification validés et bornés par le service worker, délai
