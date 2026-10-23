@@ -37,7 +37,12 @@ from radarnaque_api.services.admin_offer import PublicOfferCache
 from radarnaque_api.services.ai_probes import SearchHealth
 from radarnaque_api.services.purge import purge_forever
 from radarnaque_api.services.rate_window import SlidingWindowLimiter
-from radarnaque_api.services.scans import ANALYSIS_TIMEOUT_S, IDENTIFY_TIMEOUT_S
+from radarnaque_api.services.scans import (
+    ANALYSIS_TIMEOUT_S,
+    IDENTIFY_TIMEOUT_S,
+    SCAN_IDENTIFY_BUDGET_S,
+    SCAN_TOTAL_BUDGET_S,
+)
 
 # En DEBUG, ces bibliothèques journalisent les URL et les corps des requêtes : l'annonce, les
 # photos, et les réponses du fournisseur.
@@ -180,7 +185,10 @@ def create_app(
     app.state.billing = ManualBillingProvider()
     app.state.public_offer_cache = PublicOfferCache()  # `GET /api/offer` : 60 s en mémoire
     app.state.analysis_timeout_s = ANALYSIS_TIMEOUT_S  # délai total d'une analyse (réduit en test)
-    app.state.identify_timeout_s = IDENTIFY_TIMEOUT_S  # délai de l'identification (réduit en test)
+    app.state.identify_timeout_s = IDENTIFY_TIMEOUT_S  # délai de `POST /api/identify` (idem)
+    # Budgets du scan (services/scans.py) : son identification, puis le total des deux étapes.
+    app.state.scan_identify_budget_s = SCAN_IDENTIFY_BUDGET_S
+    app.state.scan_total_budget_s = SCAN_TOTAL_BUDGET_S
     app.state.jwt_verifier = JwtVerifier(
         jwks_fetcher or http_jwks_fetcher(settings.jwks_url),
         settings.jwt_issuer,

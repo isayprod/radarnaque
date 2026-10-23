@@ -102,6 +102,12 @@ ScanPurpose = Literal["identify", "analyze"]
 INTERNAL_FAILURE = "internal"
 ANALYSIS_TIMEOUT_S = 180  # toute l'analyse après l'admission : cache, photos, tours, recherches
 IDENTIFY_TIMEOUT_S = 120  # toute l'identification : cache, photos, étapes, recherches, pages
+# Le scan doit finir avant que l'extension installée n'abandonne le flux (`SCAN_TIMEOUT_MS`,
+# 200 s, apps/extension/lib/scan-port.ts) : 190 s pour tout le service, dont 80 s au plus pour
+# l'identification ; l'analyse a le reste, `ANALYSIS_TIMEOUT_S` au plus. `POST /api/identify`
+# garde `IDENTIFY_TIMEOUT_S`.
+SCAN_TOTAL_BUDGET_S = 190
+SCAN_IDENTIFY_BUDGET_S = 80
 TIMEOUT_FAILURE = "timeout"
 # Le modèle reçoit la date du jour en Belgique : entre minuit et 2 h, la date UTC serait la veille.
 LOCAL_TZ = ZoneInfo("Europe/Brussels")
@@ -867,13 +873,16 @@ async def serve_admitted(
     on_event: ScanEventSink | None = None,
     *,
     timeout_s: float = ANALYSIS_TIMEOUT_S,
-    identify_timeout_s: float = IDENTIFY_TIMEOUT_S,
+    identify_timeout_s: float = SCAN_IDENTIFY_BUDGET_S,
+    total_s: float = SCAN_TOTAL_BUDGET_S,
 ) -> AnalysisResultOut:
     """L'identification du produit en `identify_timeout_s` secondes au plus, puis les étapes 6
-    et 7 en `timeout_s` secondes au plus ; `on_event` reçoit les événements du scan. Un échec de
-    l'identification ne fait pas échouer le scan (`identification_error`, puis l'analyse comme
-    avant). Toute erreur de l'analyse rend le scan : un échec, ou le délai dépassé, donne
-    `502 analysis_failed` (`details.reason`) ; une annulation (client parti) est propagée."""
+    et 7 en `timeout_s` secondes au plus, le tout en `total_s` secondes : l'analyse a
+    `min(timeout_s, total_s - temps déjà passé)`. `on_event` reçoit les événements du scan. Un
+    échec de l'identification, délai compris, ne fait pas échouer le scan
+    (`identification_error`, puis l'analyse comme avant). Toute erreur de l'analyse rend le
+    scan : un échec, ou le délai dépassé, donne `502 analysis_failed` (`details.reason`) ; une
+    annulation (client parti) est propagée."""
     # Import différé : `identify_service` s'appuie sur ce module (admission, remboursement).
     from radarnaque_api.services.identify_service import identify_for_scan
 
@@ -881,11 +890,15 @@ async def serve_admitted(
     failure: Exception | None = None
     trace: _Trace | None = None
     identified: ScanIdentification | None = None
+    started = time.perf_counter()
     try:
-        identified = await identify_for_scan(admitted, on_event, timeout_s=identify_timeout_s)
+        identified = await identify_for_scan(
+            admitted, on_event, timeout_s=min(identify_timeout_s, total_s)
+        )
+        remaining_s = max(0.0, total_s - (time.perf_counter() - started))
         # Le délai annule l'étape en cours (verrou consultatif libéré par le rollback) et
         # devient une `TimeoutError` à la sortie du bloc : `_failure_code` la note `timeout`.
-        async with asyncio.timeout(timeout_s):
+        async with asyncio.timeout(min(timeout_s, remaining_s)):
             trace = await _serve(
                 maker,
                 admission,
@@ -947,7 +960,8 @@ async def run_scan(
     on_event: ScanEventSink | None = None,
     resolve: Resolver = default_resolve,
     timeout_s: float = ANALYSIS_TIMEOUT_S,
-    identify_timeout_s: float = IDENTIFY_TIMEOUT_S,
+    identify_timeout_s: float = SCAN_IDENTIFY_BUDGET_S,
+    total_s: float = SCAN_TOTAL_BUDGET_S,
 ) -> AnalysisResultOut:
     """Lance un scan pour `user` et renvoie le résultat : `admit_scan` puis `serve_admitted`
     (voir leurs paramètres). Lève `ScanError` pour un refus (402, 403, 422, 429) ou un échec de
@@ -965,5 +979,9 @@ async def run_scan(
         resolve=resolve,
     )
     return await serve_admitted(
-        admitted, on_event, timeout_s=timeout_s, identify_timeout_s=identify_timeout_s
+        admitted,
+        on_event,
+        timeout_s=timeout_s,
+        identify_timeout_s=identify_timeout_s,
+        total_s=total_s,
     )

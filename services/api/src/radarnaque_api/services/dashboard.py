@@ -6,11 +6,16 @@ Les jours sont des jours civils de Bruxelles : les bornes des périodes sont cal
 ou 25 h : les séries sont bâties sur des dates, jamais sur des multiples de 24 h.
 
 Les coûts, les appels et les recherches web viennent de `llm_calls` (une ligne par appel au
-modèle), jamais de `analyses`, dont un rafraîchissement écrase le coût et la date. « Servi depuis
-le cache » se déduit : scans réussis moins appels. Un échec est un `scan_events` avec
-`scan_failures` et sans `scan_results` (règle R13, comme l'historique). Un `identify` (spec §6)
-est un scan : réussi s'il a un `identification_results` et aucun `scan_failures`. Aucune donnée
-personnelle n'est lue ni renvoyée, seulement des nombres et des codes."""
+modèle), jamais de `analyses`, dont un rafraîchissement écrase le coût et la date. Les totaux
+(appels, coût, recherches) comptent toutes les étapes ; « servi depuis le cache » et les moyennes
+par analyse ne comptent que les appels de l'arnaque (`step = 'scam'`) : une identification fait
+plusieurs appels (`read_photos`, `criteria`, `identify`). « Servi depuis le cache » se déduit :
+analyses servies (scans avec `scan_results`) moins appels de l'arnaque. Un échec est un
+`scan_events` avec `scan_failures` et sans `scan_results` (règle R13, comme l'historique). Un
+`identify` (spec §6) est un scan : il compte dans les scans, et dans les échecs s'il a un
+`scan_failures` (jamais avec un `identification_results`) ; il ne produit pas d'analyse, donc ni
+cache ni appel de l'arnaque. Aucune donnée personnelle n'est lue ni renvoyée, seulement des
+nombres et des codes."""
 
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -34,7 +39,6 @@ from radarnaque_api.config import Settings
 from radarnaque_api.models import (
     AdminAction,
     AuthUser,
-    IdentificationResult,
     LlmCall,
     Model,
     ScanEvent,
@@ -73,12 +77,11 @@ def _ratio(numerator: float, denominator: int) -> float | None:
 _EVENT_DAY = cast(func.timezone("Europe/Brussels", ScanEvent.created_at), Date)
 _CALL_DAY = cast(func.timezone("Europe/Brussels", LlmCall.created_at), Date)
 
-# Scan réussi : il a un résultat (une analyse ; ou une identification, sans échec, pour un
-# `identify`). Échec : une ligne d'échec et aucune analyse.
-_SUCCEEDED = ScanResult.scan_event_id.is_not(None) | (
-    IdentificationResult.scan_event_id.is_not(None) & ScanFailure.scan_event_id.is_(None)
-)
+# Échec : une ligne d'échec et aucune analyse (un `identify` relié n'a jamais d'échec).
 _FAILED = ScanResult.scan_event_id.is_(None) & ScanFailure.scan_event_id.is_not(None)
+# Analyse servie (depuis le cache ou non) ; appel de l'arnaque, le seul qui produit une analyse.
+_ANALYZED = ScanResult.scan_event_id.is_not(None)
+_SCAM_CALL = LlmCall.step == "scam"
 
 
 def _events_query(*columns):
@@ -86,18 +89,17 @@ def _events_query(*columns):
         select(*columns)
         .select_from(ScanEvent)
         .outerjoin(ScanResult, ScanResult.scan_event_id == ScanEvent.id)
-        .outerjoin(IdentificationResult, IdentificationResult.scan_event_id == ScanEvent.id)
         .outerjoin(ScanFailure, ScanFailure.scan_event_id == ScanEvent.id)
     )
 
 
 async def _stats(session: AsyncSession, start: datetime, end: datetime) -> DashboardStatsOut:
     """Les cartes de la période `[start, end]`."""
-    scans, succeeded, failed = (
+    scans, analyzed, failed = (
         await session.execute(
             _events_query(
                 func.count(),
-                func.count().filter(_SUCCEEDED),
+                func.count().filter(_ANALYZED),
                 func.count().filter(_FAILED),
             ).where(ScanEvent.created_at >= start, ScanEvent.created_at <= end)
         )
@@ -111,28 +113,29 @@ async def _stats(session: AsyncSession, start: datetime, end: datetime) -> Dashb
             .limit(TOP_FAILURES)
         )
     ).all()
-    calls, micros, searches = (
+    calls, micros, searches, scam_calls, scam_micros, scam_searches = (
         await session.execute(
             select(
                 func.count(),
                 func.coalesce(func.sum(LlmCall.cost_usd_micros), 0),
                 func.coalesce(func.sum(LlmCall.web_searches), 0),
+                func.count().filter(_SCAM_CALL),
+                func.coalesce(func.sum(LlmCall.cost_usd_micros).filter(_SCAM_CALL), 0),
+                func.coalesce(func.sum(LlmCall.web_searches).filter(_SCAM_CALL), 0),
             ).where(LlmCall.created_at >= start, LlmCall.created_at <= end)
         )
     ).one()
-    cost = int(micros) / MICROS
-    searches = int(searches)
-    from_cache = _ratio(max(0, succeeded - calls), succeeded)
+    from_cache = _ratio(max(0, analyzed - scam_calls), analyzed)
     return DashboardStatsOut(
         scans=scans,
         llm_calls=calls,
         from_cache_pct=None if from_cache is None else from_cache * 100,
         failed_pct=None if scans == 0 else failed / scans * 100,
         top_failures=[TopFailureOut(code=code, count=count) for code, count in top],
-        cost_usd=cost,
-        avg_cost_usd=_ratio(cost, calls),
-        web_searches=searches,
-        avg_web_searches=_ratio(searches, calls),
+        cost_usd=int(micros) / MICROS,
+        avg_cost_usd=_ratio(int(scam_micros) / MICROS, scam_calls),
+        web_searches=int(searches),
+        avg_web_searches=_ratio(int(scam_searches), scam_calls),
     )
 
 
@@ -238,12 +241,12 @@ async def daily(session: AsyncSession, now: datetime, days: int) -> DailyOut:
     first = last - timedelta(days=days - 1)
     start = _day_start(first)
     events = {
-        day: (succeeded, failed)
-        for day, succeeded, failed in (
+        day: (analyzed, failed)
+        for day, analyzed, failed in (
             await session.execute(
                 _events_query(
                     _EVENT_DAY,
-                    func.count().filter(_SUCCEEDED),
+                    func.count().filter(_ANALYZED),
                     func.count().filter(_FAILED),
                 )
                 .where(ScanEvent.created_at >= start, ScanEvent.created_at <= now)
@@ -251,11 +254,16 @@ async def daily(session: AsyncSession, now: datetime, days: int) -> DailyOut:
             )
         ).all()
     }
+    # `llm` : appels de l'arnaque (analyses produites) ; le coût du jour, lui, compte tout.
     calls = {
         day: (count, int(micros))
         for day, count, micros in (
             await session.execute(
-                select(_CALL_DAY, func.count(), func.coalesce(func.sum(LlmCall.cost_usd_micros), 0))
+                select(
+                    _CALL_DAY,
+                    func.count().filter(_SCAM_CALL),
+                    func.coalesce(func.sum(LlmCall.cost_usd_micros), 0),
+                )
                 .where(LlmCall.created_at >= start, LlmCall.created_at <= now)
                 .group_by(_CALL_DAY)
             )
@@ -264,12 +272,12 @@ async def daily(session: AsyncSession, now: datetime, days: int) -> DailyOut:
     points = []
     for offset in range(days):
         day = first + timedelta(days=offset)
-        succeeded, failed = events.get(day, (0, 0))
+        analyzed, failed = events.get(day, (0, 0))
         count, micros = calls.get(day, (0, 0))
         points.append(
             DailyPointOut(
                 date=day,
-                from_cache=max(0, succeeded - count),
+                from_cache=max(0, analyzed - count),
                 llm=count,
                 failed=failed,
                 cost_usd=micros / MICROS,

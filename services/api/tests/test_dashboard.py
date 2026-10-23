@@ -481,9 +481,47 @@ async def test_identify_events_are_scans(app, db, user, analysis):
     assert t.scans == 2
     assert t.failed_pct == pytest.approx(50.0)
     assert [(f.code, f.count) for f in t.top_failures] == [("identify_read_photos", 1)]
-    assert t.from_cache_pct == pytest.approx(100.0)  # un réussi, aucun appel ce jour
+    assert t.from_cache_pct is None  # aucune analyse servie : pas de part « depuis le cache »
     [point] = [p for p in (await daily(db, NOW, 7)).points if p.date == date(2026, 10, 21)]
-    assert (point.from_cache, point.failed) == (1, 1)
+    assert (point.from_cache, point.llm, point.failed) == (0, 0, 1)
+
+
+async def test_identification_calls_count_in_totals_not_in_cache_or_averages(
+    app, db, user, analysis
+):
+    """Les appels de l'identification comptent dans les totaux (appels, coût, recherches),
+    jamais dans « depuis le cache » ni dans les moyennes par analyse (`step = 'scam'`)."""
+    today = datetime(2026, 10, 21, 7, 0, tzinfo=UTC)
+    await _event(db, user, today, analysis, call=1_000_000, web=2)  # analyse, appel de l'arnaque
+    await _event(db, user, today, analysis)  # analyse servie par le cache
+    snapshot_id = await _scalar(
+        db, "select snapshot_id from app.analyses where id = :a", a=analysis
+    )
+    ident = await _scalar(
+        db,
+        "insert into app.identifications(snapshot_id, config_hash, input_hash, status, confidence)"
+        " values (:s, 'c', 'i', 'identified', 90) returning id",
+        s=snapshot_id,
+    )
+    for step, cost, web in (("read_photos", 300_000, 0), ("identify", 200_000, 0)):
+        await db.execute(
+            text(
+                "insert into app.llm_calls(created_at, step, identification_id, model_id,"
+                " prompt_version_id, cost_usd_micros, web_searches)"
+                " select :at, :step, :i, k.active_model_id, k.active_prompt_version_id, :c, :w"
+                " from app.scan_kinds k where k.code = 'full'"
+            ),
+            {"at": today, "step": step, "i": ident, "c": cost, "w": web},
+        )
+    await db.commit()
+
+    t = (await _dashboard(db, app)).today
+    assert (t.llm_calls, t.cost_usd) == (3, pytest.approx(1.5))
+    assert t.from_cache_pct == pytest.approx(50.0)  # (2 analyses - 1 appel de l'arnaque) / 2
+    assert t.avg_cost_usd == pytest.approx(1.0)
+    assert (t.web_searches, t.avg_web_searches) == (2, 2.0)
+    [point] = [p for p in (await daily(db, NOW, 7)).points if p.date == date(2026, 10, 21)]
+    assert (point.from_cache, point.llm, point.cost_usd) == (1, 1, pytest.approx(1.5))
 
 
 # --- Routes ----------------------------------------------------------------------------------
