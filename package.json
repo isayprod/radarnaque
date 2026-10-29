@@ -12,7 +12,7 @@
 		"check:api": "bash scripts/gen-api.sh --check",
 		"test": "pnpm -r test",
 		"test:api": "cd services/api && uv run pytest",
-		"test:scripts": "node --test scripts/check-ports.test.mjs scripts/check-docker.test.mjs scripts/llm-stub.test.mjs",
+		"test:scripts": "node --test scripts/check-ports.test.mjs scripts/check-docker.test.mjs scripts/llm-stub.test.mjs scripts/deploy-landing.test.mjs",
 		"test:all": "pnpm test && pnpm test:scripts && pnpm test:api",
 		"db:up": "docker compose -f infra/docker-compose.dev.yml up -d --wait postgres",
 		"dev:keys": "node scripts/dev-keys.mjs",
@@ -31,6 +31,7 @@
 		"e2e:identify": "tsx scripts/e2e-identify.ts",
 		"eval:identify": "cd services/api && uv run --env-file ../../infra/.env radarnaque-eval-identify evals/identify.jsonl",
 		"llm:stub": "node scripts/llm-stub.mjs",
+		"deploy:landing": "node scripts/deploy-landing.mjs",
 		"typecheck:scripts": "tsc -p scripts"
 	},
 	"devDependencies": {
